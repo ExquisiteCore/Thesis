@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json.Nodes;
 using Thesis.Cli;
+using Thesis.OpenXml;
 using Thesis.Schema;
 using Thesis.Session;
 
@@ -30,7 +32,8 @@ var tests = new (string Name, Action Test)[]
     ("Snapshot refuses to overwrite existing target", SnapshotRefusesToOverwriteExistingTarget),
     ("Rollback ambiguous suffix returns JSON error", RollbackAmbiguousSuffixReturnsJsonError),
     ("Export to missing parent directory returns JSON error", ExportToMissingParentDirectoryReturnsJsonError),
-    ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists)
+    ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
+    ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap)
 };
 
 var failures = new List<string>();
@@ -560,6 +563,43 @@ static void InspectIsReadOnlyWhenLockExists()
     AssertEqual(sessionBefore, File.ReadAllText(context.Paths.SessionJson));
 }
 
+static void OpenXmlInspectorReadsDocumentMap()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "fixture.docx");
+    WriteFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+
+    AssertEqual("1.0", map.SchemaVersion);
+    AssertEqual(Path.GetFullPath(docx), map.Path);
+    AssertEqual(true, map.RequiresFinalization);
+    AssertEqual(true, map.FinalizationReasons.Contains("fields", StringComparer.Ordinal));
+
+    AssertEqual(3, map.Paragraphs.Count);
+    AssertEqual("中文摘要", map.Paragraphs[0].Text);
+    AssertEqual("Title", map.Paragraphs[0].StyleId);
+    AssertEqual("第一章 绪论", map.Paragraphs[1].Text);
+    AssertEqual("Heading1", map.Paragraphs[1].StyleId);
+    AssertEqual("列表项", map.Paragraphs[2].Text);
+    AssertEqual("1", map.Paragraphs[2].Numbering!.NumberingId);
+    AssertEqual("0", map.Paragraphs[2].Numbering!.Level);
+
+    AssertEqual(true, map.Styles.Any(style => style.StyleId == "Heading1" && style.Name == "heading 1" && style.Type == "paragraph"));
+    AssertEqual(true, map.Numbering.Any(numbering => numbering.NumberingId == "1" && numbering.AbstractNumberingId == "0"));
+    AssertEqual(1, map.Sections.Count);
+    AssertEqual(11906, map.Sections[0].PageSize!.WidthTwips);
+    AssertEqual(16838, map.Sections[0].PageSize!.HeightTwips);
+    AssertEqual(1440, map.Sections[0].PageMargin!.TopTwips);
+    AssertEqual(true, map.Sections[0].Headers.Any(header => header.Type == "default" && header.RelationshipId == "rIdHeader1"));
+
+    AssertEqual(1, map.Tables.Count);
+    AssertEqual(2, map.Tables[0].RowCount);
+    AssertEqual(2, map.Tables[0].CellCounts[0]);
+    AssertContains(map.Tables[0].TextPreview, "A1");
+    AssertContains(map.Tables[0].TextPreview, "B2");
+}
+
 static (int ExitCode, CliResult Result) RunCli(string[] args)
 {
     var output = new StringWriter();
@@ -587,6 +627,103 @@ static WorkspaceContext CreateInitializedWorkspace(string root)
         Path.GetFullPath(workspace),
         SessionPaths.FromWorkspace(workspace),
         File.ReadAllBytes(sourceDoc));
+}
+
+static void WriteFixtureDocx(string path)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    AddZipEntry(
+        archive,
+        "[Content_Types].xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+          <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+          <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+        </Types>
+        """);
+    AddZipEntry(
+        archive,
+        "_rels/.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/_rels/document.xml.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/styles.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+        </w:styles>
+        """);
+    AddZipEntry(
+        archive,
+        "word/numbering.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:abstractNum w:abstractNumId="0">
+            <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+          </w:abstractNum>
+          <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+        </w:numbering>
+        """);
+    AddZipEntry(
+        archive,
+        "word/header1.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>页眉</w:t></w:r></w:p></w:hdr>
+        """);
+    AddZipEntry(
+        archive,
+        "word/document.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+          <w:body>
+            <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>中文摘要</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>列表项</w:t></w:r></w:p>
+            <w:tbl>
+              <w:tr><w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc></w:tr>
+              <w:tr><w:tc><w:p><w:r><w:t>A2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o "1-3" \h \z \u</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            <w:sectPr>
+              <w:headerReference w:type="default" r:id="rIdHeader1"/>
+              <w:pgSz w:w="11906" w:h="16838"/>
+              <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
+            </w:sectPr>
+          </w:body>
+        </w:document>
+        """);
+}
+
+static void AddZipEntry(ZipArchive archive, string entryName, string text)
+{
+    var entry = archive.CreateEntry(entryName);
+    using var writer = new StreamWriter(entry.Open());
+    writer.Write(text);
 }
 
 static void AssertEqual<T>(T expected, T actual)

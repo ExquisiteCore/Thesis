@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <ProjectReference Include="..\Thesis.Schema\Thesis.Schema.csproj" />
   </ItemGroup>
 

@@ -1,5 +1,6 @@
 using Thesis.Schema;
 using Thesis.Session;
+using Thesis.OpenXml;
 
 namespace Thesis.Cli;
 
@@ -84,7 +85,14 @@ public static class ThesisCli
         if (args is ["inspect", .. var inspectArgs])
         {
             var workspace = RequiredOption(inspectArgs, "--workspace");
-            return SessionLifecycle.Inspect(workspace);
+            var result = SessionLifecycle.Inspect(workspace);
+            if (string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(result.Document))
+            {
+                result.DocumentMap = OpenXmlDocumentInspector.Inspect(result.Document);
+            }
+
+            return result;
         }
 
         throw new CliException("unknown_command", "Unknown command.");
