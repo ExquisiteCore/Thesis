@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Thesis.Cli/Thesis.Cli.csproj" />
+    <Project Path="src/Thesis.Core/Thesis.Core.csproj" />
+    <Project Path="src/Thesis.OpenXml/Thesis.OpenXml.csproj" />
+    <Project Path="src/Thesis.Profile/Thesis.Profile.csproj" />
+    <Project Path="src/Thesis.Schema/Thesis.Schema.csproj" />
+    <Project Path="src/Thesis.Session/Thesis.Session.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Thesis.Tests/Thesis.Tests.csproj" />
+  </Folder>
+</Solution>

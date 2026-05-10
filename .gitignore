@@ -1,0 +1,19 @@
+# Local analysis and source samples requested by the user
+.analysis/
+docs/
+论文正文格式.docx
+
+# .NET build outputs
+bin/
+obj/
+TestResults/
+
+# IDE/editor files
+.vs/
+.vscode/
+*.user
+*.suo
+
+# OS files
+Thumbs.db
+.DS_Store
