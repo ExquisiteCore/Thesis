@@ -1,0 +1,480 @@
+using System.Text;
+using Thesis.Schema;
+
+namespace Thesis.Session;
+
+public static class SessionLifecycle
+{
+    public static CliResult Snapshot(string workspace, string name)
+    {
+        var paths = SessionPaths.FromWorkspace(workspace);
+        return WithLock(paths, () => SnapshotLocked(paths, name));
+    }
+
+    public static CliResult Rollback(string workspace, string snapshotIdOrName)
+    {
+        var paths = SessionPaths.FromWorkspace(workspace);
+        return WithLock(paths, () => RollbackLocked(paths, snapshotIdOrName));
+    }
+
+    public static CliResult Export(string workspace, string outputPath)
+    {
+        var paths = SessionPaths.FromWorkspace(workspace);
+        return WithLock(paths, () => ExportLocked(paths, outputPath));
+    }
+
+    public static CliResult Inspect(string workspace)
+    {
+        var paths = SessionPaths.FromWorkspace(workspace);
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
+        }
+
+        return Success(paths, session, snapshots: ListSnapshots(paths));
+    }
+
+    private static CliResult SnapshotLocked(SessionPaths paths, string name)
+    {
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
+        }
+
+        if (!SnapshotIdentifiers.TrySanitizeName(name, out var safeName))
+        {
+            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot name is invalid.");
+        }
+
+        var nextCounter = checked(session.SnapshotCounter + 1);
+        var id = $"{nextCounter:0000}-{safeName}";
+        var snapshotPath = Path.Combine(paths.SnapshotsDirectory, id + ".docx");
+
+        if (!IsPathInsideDirectory(paths.SnapshotsDirectory, snapshotPath))
+        {
+            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot path is outside the snapshots directory.");
+        }
+
+        if (File.Exists(snapshotPath))
+        {
+            return SessionStore.Error(paths, "snapshot_exists", $"Snapshot already exists: {id}");
+        }
+
+        var tempPath = Path.Combine(paths.SnapshotsDirectory, id + "." + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            File.Copy(session.WorkingPath, tempPath);
+            File.Move(tempPath, snapshotPath);
+        }
+        catch (FileNotFoundException)
+        {
+            return SessionStore.Error(paths, "working_doc_missing", $"Working document not found: {session.WorkingPath}");
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+
+        session.SnapshotCounter = nextCounter;
+        if (!SessionStore.TrySave(paths, session, out error))
+        {
+            return error!;
+        }
+
+        return Success(paths, session, snapshot: new SnapshotInfo
+        {
+            Created = true,
+            Id = id,
+            Path = snapshotPath
+        });
+    }
+
+    private static CliResult RollbackLocked(SessionPaths paths, string snapshotIdOrName)
+    {
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
+        }
+
+        if (!SnapshotIdentifiers.IsSafeLookup(snapshotIdOrName))
+        {
+            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot identifier is invalid.");
+        }
+
+        var matches = ListSnapshots(paths)
+            .Where(snapshot => SnapshotMatches(snapshot.Id, snapshotIdOrName))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            return SessionStore.Error(paths, "snapshot_missing", $"Snapshot not found: {snapshotIdOrName}");
+        }
+
+        if (matches.Count > 1)
+        {
+            return SessionStore.Error(paths, "snapshot_ambiguous", $"Snapshot identifier is ambiguous: {snapshotIdOrName}");
+        }
+
+        var match = matches[0];
+        if (string.IsNullOrWhiteSpace(match.Path)
+            || !IsPathInsideDirectory(paths.SnapshotsDirectory, match.Path))
+        {
+            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot path is outside the snapshots directory.");
+        }
+
+        var tempPath = session.WorkingPath + ".rollback-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.Copy(match.Path, tempPath);
+            File.Move(tempPath, session.WorkingPath, overwrite: true);
+        }
+        catch (FileNotFoundException)
+        {
+            return SessionStore.Error(paths, "snapshot_missing", $"Snapshot not found: {snapshotIdOrName}");
+        }
+        catch (IOException ex)
+        {
+            return SessionStore.Error(paths, "rollback_failed", $"Rollback failed: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return SessionStore.Error(paths, "rollback_failed", $"Rollback failed: {ex.Message}");
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+
+        return Success(paths, session, snapshot: new SnapshotInfo
+        {
+            Created = false,
+            Id = match.Id,
+            Path = match.Path
+        });
+    }
+
+    private static CliResult ExportLocked(SessionPaths paths, string outputPath)
+    {
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        string fullOutputPath;
+        try
+        {
+            fullOutputPath = Path.GetFullPath(outputPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return SessionStore.Error(paths, "export_path_invalid", $"Export path is invalid: {ex.Message}");
+        }
+
+        if (SamePath(fullOutputPath, session.OriginalPath)
+            || SamePath(fullOutputPath, session.WorkingPath)
+            || IsPathInsideDirectory(paths.Workspace, fullOutputPath))
+        {
+            return SessionStore.Error(paths, "export_path_refused", "Export output path must not overwrite the original, working document, or workspace state.");
+        }
+
+        var parent = Path.GetDirectoryName(fullOutputPath);
+        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+        {
+            return SessionStore.Error(paths, "export_directory_missing", $"Export directory not found: {parent}");
+        }
+
+        try
+        {
+            File.Copy(session.WorkingPath, fullOutputPath, overwrite: true);
+        }
+        catch (FileNotFoundException)
+        {
+            return SessionStore.Error(paths, "working_doc_missing", $"Working document not found: {session.WorkingPath}");
+        }
+        catch (IOException ex)
+        {
+            return SessionStore.Error(paths, "export_failed", $"Export failed: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return SessionStore.Error(paths, "export_failed", $"Export failed: {ex.Message}");
+        }
+
+        return Success(paths, session, outputPath: fullOutputPath);
+    }
+
+    private static CliResult WithLock(SessionPaths paths, Func<CliResult> action)
+    {
+        if (!Directory.Exists(paths.Workspace))
+        {
+            return SessionStore.Error(paths, "workspace_missing", $"Workspace not found: {paths.Workspace}");
+        }
+
+        var lockFile = SessionLock.TryAcquire(paths);
+        if (lockFile is null)
+        {
+            return SessionStore.Error(paths, "workspace_locked", "The workspace is locked by session.lock.");
+        }
+
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            lockFile.Dispose();
+            SessionLock.Release(paths);
+        }
+    }
+
+    private static bool TryLoadReadySession(SessionPaths paths, out SessionState session, out CliResult? error)
+    {
+        if (!SessionStore.TryLoad(paths, out session, out error))
+        {
+            return false;
+        }
+
+        if (!File.Exists(session.WorkingPath))
+        {
+            error = SessionStore.Error(paths, "working_doc_missing", $"Working document not found: {session.WorkingPath}");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static CliResult Success(
+        SessionPaths paths,
+        SessionState session,
+        SnapshotInfo? snapshot = null,
+        List<SnapshotInfo>? snapshots = null,
+        string? outputPath = null)
+    {
+        return new CliResult
+        {
+            Status = "success",
+            Workspace = paths.Workspace,
+            Document = session.WorkingPath,
+            OutputPath = outputPath,
+            Session = session,
+            Snapshot = snapshot,
+            Snapshots = snapshots ?? []
+        };
+    }
+
+    private static List<SnapshotInfo> ListSnapshots(SessionPaths paths)
+    {
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(paths.SnapshotsDirectory, "*.docx")
+            .Select(path => new SnapshotInfo
+            {
+                Created = false,
+                Id = Path.GetFileNameWithoutExtension(path),
+                Path = Path.GetFullPath(path)
+            })
+            .Where(snapshot => SnapshotIdentifiers.IsSafeSnapshotId(snapshot.Id))
+            .OrderBy(snapshot => snapshot.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static bool SnapshotMatches(string? id, string lookup)
+    {
+        if (id is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(id, lookup, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var suffixStart = id.IndexOf('-', StringComparison.Ordinal);
+        return suffixStart >= 0
+            && string.Equals(id[(suffixStart + 1)..], lookup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool SamePath(string left, string right)
+    {
+        return string.Equals(
+            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathInsideDirectory(string directory, string path)
+    {
+        var fullDirectory = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path);
+        return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static class SnapshotIdentifiers
+    {
+        private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9"
+        };
+
+        public static bool TrySanitizeName(string value, out string sanitized)
+        {
+            sanitized = "";
+            if (!IsSafeInput(value))
+            {
+                return false;
+            }
+
+            var builder = new StringBuilder();
+            var lastWasDash = false;
+            foreach (var ch in value.Trim().ToLowerInvariant())
+            {
+                if (char.IsLetterOrDigit(ch))
+                {
+                    builder.Append(ch);
+                    lastWasDash = false;
+                    continue;
+                }
+
+                if (ch is '-' or '_' or ' ')
+                {
+                    if (!lastWasDash && builder.Length > 0)
+                    {
+                        builder.Append('-');
+                        lastWasDash = true;
+                    }
+                }
+            }
+
+            sanitized = builder.ToString().Trim('-');
+            return IsSafeSnapshotComponent(sanitized);
+        }
+
+        public static bool IsSafeLookup(string value)
+        {
+            return IsSafeInput(value) && IsSafeSnapshotComponent(value);
+        }
+
+        public static bool IsSafeSnapshotId(string? id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return false;
+            }
+
+            return IsSafeInput(id) && IsSafeSnapshotComponent(id);
+        }
+
+        private static bool IsSafeInput(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            if (value.Contains("..", StringComparison.Ordinal)
+                || value.Contains(Path.DirectorySeparatorChar)
+                || value.Contains(Path.AltDirectorySeparatorChar)
+                || value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsSafeSnapshotComponent(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value is "." or "..")
+            {
+                return false;
+            }
+
+            if (ReservedNames.Contains(value)
+                || value.Split('-', StringSplitOptions.RemoveEmptyEntries).Any(ReservedNames.Contains))
+            {
+                return false;
+            }
+
+            foreach (var ch in value)
+            {
+                if (!char.IsAsciiLetterOrDigit(ch) && ch is not '-' and not '_')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+}

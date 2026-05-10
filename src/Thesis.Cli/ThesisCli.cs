@@ -60,31 +60,31 @@ public static class ThesisCli
             };
         }
 
-        if (args is [("inspect" or "snapshot" or "rollback" or "export"), .. var stubArgs])
+        if (args is ["snapshot", .. var snapshotArgs])
         {
-            var workspace = OptionalOption(stubArgs, "--workspace");
-            var requestPath = OptionalOption(stubArgs, "--request");
-            var requestId = requestPath is null
-                ? null
-                : ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(requestPath)).RequestId;
-            var paths = workspace is null ? null : SessionPaths.FromWorkspace(workspace);
+            var workspace = RequiredOption(snapshotArgs, "--workspace");
+            var name = RequiredOption(snapshotArgs, "--name");
+            return SessionLifecycle.Snapshot(workspace, name);
+        }
 
-            return new CliResult
-            {
-                Status = "notImplemented",
-                RequestId = requestId,
-                Workspace = paths?.Workspace,
-                Document = paths?.WorkingDocument,
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "not_implemented",
-                        Message = $"Command '{args[0]}' is not implemented in P0."
-                    }
-                ]
-            };
+        if (args is ["rollback", .. var rollbackArgs])
+        {
+            var workspace = RequiredOption(rollbackArgs, "--workspace");
+            var snapshot = RequiredOption(rollbackArgs, "--snapshot");
+            return SessionLifecycle.Rollback(workspace, snapshot);
+        }
+
+        if (args is ["export", .. var exportArgs])
+        {
+            var workspace = RequiredOption(exportArgs, "--workspace");
+            var outputPath = RequiredOption(exportArgs, "--out");
+            return SessionLifecycle.Export(workspace, outputPath);
+        }
+
+        if (args is ["inspect", .. var inspectArgs])
+        {
+            var workspace = RequiredOption(inspectArgs, "--workspace");
+            return SessionLifecycle.Inspect(workspace);
         }
 
         throw new CliException("unknown_command", "Unknown command.");

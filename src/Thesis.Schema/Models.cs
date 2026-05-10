@@ -68,11 +68,32 @@ public sealed class CliResult
 
     public string? Document { get; set; }
 
+    public string? OutputPath { get; set; }
+
+    public SessionState? Session { get; set; }
+
     public SnapshotInfo? Snapshot { get; set; }
+
+    public List<SnapshotInfo> Snapshots { get; set; } = [];
 
     public List<OperationResult> Operations { get; set; } = [];
 
     public List<Diagnostic> Diagnostics { get; set; } = [];
+}
+
+public sealed class SessionState
+{
+    public string SchemaVersion { get; set; } = "1.0";
+
+    public string OriginalPath { get; set; } = "";
+
+    public string WorkingPath { get; set; } = "";
+
+    public string ProfilePath { get; set; } = "";
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public int SnapshotCounter { get; set; }
 }
 
 public sealed class Diagnostic

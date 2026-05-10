@@ -8,35 +8,42 @@ public static class SessionInitializer
     {
         var paths = SessionPaths.FromWorkspace(workspace);
 
-        if (File.Exists(paths.LockFile))
+        if (Directory.Exists(paths.Workspace))
         {
-            return Error(paths, "workspace_locked", "The workspace is locked by session.lock.");
-        }
+            if (File.Exists(paths.LockFile))
+            {
+                return Error(paths, "workspace_locked", "The workspace is locked by session.lock.");
+            }
 
-        if (Directory.Exists(paths.Workspace)
-            && Directory.EnumerateFileSystemEntries(paths.Workspace).Any())
-        {
-            return Error(
-                paths,
-                "workspace_exists",
-                "The workspace already contains files. Existing workspaces are not overwritten.");
-        }
-
-        if (!File.Exists(sourceDoc))
-        {
-            return Error(paths, "source_doc_missing", $"Source document not found: {sourceDoc}");
-        }
-
-        if (!File.Exists(profilePath))
-        {
-            return Error(paths, "profile_missing", $"Profile not found: {profilePath}");
+            if (Directory.EnumerateFileSystemEntries(paths.Workspace).Any())
+            {
+                return Error(
+                    paths,
+                    "workspace_exists",
+                    "The workspace already contains files. Existing workspaces are not overwritten.");
+            }
         }
 
         Directory.CreateDirectory(paths.Workspace);
 
-        File.WriteAllText(paths.LockFile, DateTimeOffset.UtcNow.ToString("O"));
+        var lockFile = SessionLock.TryAcquire(paths);
+        if (lockFile is null)
+        {
+            return Error(paths, "workspace_locked", "The workspace is locked by session.lock.");
+        }
+
         try
         {
+            if (!File.Exists(sourceDoc))
+            {
+                return Error(paths, "source_doc_missing", $"Source document not found: {sourceDoc}");
+            }
+
+            if (!File.Exists(profilePath))
+            {
+                return Error(paths, "profile_missing", $"Profile not found: {profilePath}");
+            }
+
             Directory.CreateDirectory(paths.SnapshotsDirectory);
             Directory.CreateDirectory(paths.LogsDirectory);
             Directory.CreateDirectory(paths.CacheDirectory);
@@ -47,14 +54,14 @@ public static class SessionInitializer
             var snapshotPath = Path.Combine(paths.SnapshotsDirectory, "0001-init.docx");
             File.Copy(paths.WorkingDocument, snapshotPath);
 
-            var session = new
+            var session = new SessionState
             {
-                schemaVersion = "1.0",
-                originalPath = Path.GetFullPath(sourceDoc),
-                workingPath = paths.WorkingDocument,
-                profilePath = paths.ProfileJson,
-                createdAt = DateTimeOffset.UtcNow,
-                snapshotCounter = 1
+                SchemaVersion = "1.0",
+                OriginalPath = Path.GetFullPath(sourceDoc),
+                WorkingPath = paths.WorkingDocument,
+                ProfilePath = paths.ProfileJson,
+                CreatedAt = DateTimeOffset.UtcNow,
+                SnapshotCounter = 1
             };
             File.WriteAllText(paths.SessionJson, ThesisJson.Serialize(session));
 
@@ -73,10 +80,8 @@ public static class SessionInitializer
         }
         finally
         {
-            if (File.Exists(paths.LockFile))
-            {
-                File.Delete(paths.LockFile);
-            }
+            lockFile.Dispose();
+            SessionLock.Release(paths);
         }
     }
 
