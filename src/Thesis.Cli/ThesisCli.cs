@@ -89,7 +89,14 @@ public static class ThesisCli
             if (string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(result.Document))
             {
-                result.DocumentMap = OpenXmlDocumentInspector.Inspect(result.Document);
+                if (OpenXmlDocumentInspector.TryInspect(result.Document, out var documentMap, out var diagnostic))
+                {
+                    result.DocumentMap = documentMap;
+                }
+                else if (diagnostic is not null)
+                {
+                    result.Diagnostics.Add(diagnostic);
+                }
             }
 
             return result;

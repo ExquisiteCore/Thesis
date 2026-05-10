@@ -201,6 +201,17 @@ public sealed class DocumentNumbering
     public string? NumberingId { get; set; }
 
     public string? AbstractNumberingId { get; set; }
+
+    public List<DocumentNumberingLevel> Levels { get; set; } = [];
+}
+
+public sealed class DocumentNumberingLevel
+{
+    public string? Level { get; set; }
+
+    public string? Format { get; set; }
+
+    public string? Text { get; set; }
 }
 
 public sealed class DocumentSection

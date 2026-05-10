@@ -33,7 +33,9 @@ var tests = new (string Name, Action Test)[]
     ("Rollback ambiguous suffix returns JSON error", RollbackAmbiguousSuffixReturnsJsonError),
     ("Export to missing parent directory returns JSON error", ExportToMissingParentDirectoryReturnsJsonError),
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
-    ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap)
+    ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
+    ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
+    ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable)
 };
 
 var failures = new List<string>();
@@ -586,7 +588,10 @@ static void OpenXmlInspectorReadsDocumentMap()
     AssertEqual("0", map.Paragraphs[2].Numbering!.Level);
 
     AssertEqual(true, map.Styles.Any(style => style.StyleId == "Heading1" && style.Name == "heading 1" && style.Type == "paragraph"));
-    AssertEqual(true, map.Numbering.Any(numbering => numbering.NumberingId == "1" && numbering.AbstractNumberingId == "0"));
+    AssertEqual(true, map.Numbering.Any(numbering =>
+        numbering.NumberingId == "1"
+        && numbering.AbstractNumberingId == "0"
+        && numbering.Levels.Any(level => level.Level == "0" && level.Format == "decimal" && level.Text == "%1.")));
     AssertEqual(1, map.Sections.Count);
     AssertEqual(11906, map.Sections[0].PageSize!.WidthTwips);
     AssertEqual(16838, map.Sections[0].PageSize!.HeightTwips);
@@ -600,11 +605,68 @@ static void OpenXmlInspectorReadsDocumentMap()
     AssertContains(map.Tables[0].TextPreview, "B2");
 }
 
+static void CliInspectIncludesDocumentMapForDocxWorkspaces()
+{
+    using var temp = new TempDirectory();
+    var sourceDoc = Path.Combine(temp.Path, "source.docx");
+    var profile = Path.Combine(temp.Path, "input-profile.json");
+    var workspace = Path.Combine(temp.Path, ".thesis");
+
+    WriteFixtureDocx(sourceDoc);
+    File.WriteAllText(profile, "{}");
+
+    var init = SessionInitializer.Initialize(sourceDoc, profile, workspace);
+    AssertEqual("success", init.Status);
+
+    var (exitCode, result) = RunCli(["inspect", "--workspace", workspace]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(Path.Combine(Path.GetFullPath(workspace), "working.docx"), result.DocumentMap!.Path);
+    AssertEqual(3, result.DocumentMap.Paragraphs.Count);
+    AssertEqual(1, result.DocumentMap.Tables.Count);
+
+    var rawJson = RunCliRaw(["inspect", "--workspace", workspace]).Output;
+    AssertContains(rawJson, "\"documentMap\"");
+    AssertContains(rawJson, "\"requiresFinalization\":true");
+    AssertContains(rawJson, "\"finalizationReasons\":[\"fields\"]");
+    AssertContains(rawJson, "\"numberingId\":\"1\"");
+    AssertContains(rawJson, "\"levels\":[");
+    AssertDoesNotContain(rawJson, "\"DocumentMap\"");
+}
+
+static void CliInspectReportsJsonWarningWhenDocumentMapUnavailable()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedWorkspace(temp.Path);
+
+    var (exitCode, output) = RunCliRaw(["inspect", "--workspace", context.Workspace]);
+    var result = ThesisJson.Deserialize<CliResult>(output);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(null, result.DocumentMap);
+    AssertEqual(1, result.Diagnostics.Count);
+    AssertEqual("warning", result.Diagnostics[0].Severity);
+    AssertEqual("document_map_unavailable", result.Diagnostics[0].Code);
+    AssertEqual(context.Paths.WorkingDocument, result.Diagnostics[0].Path);
+    AssertContains(output, "\"diagnostics\":[");
+    AssertContains(output, "\"code\":\"document_map_unavailable\"");
+    AssertContains(output, "\"path\":\"");
+}
+
 static (int ExitCode, CliResult Result) RunCli(string[] args)
 {
     var output = new StringWriter();
     var exitCode = ThesisCli.Run(args, output, TextWriter.Null);
     return (exitCode, ThesisJson.Deserialize<CliResult>(output.ToString()));
+}
+
+static (int ExitCode, string Output) RunCliRaw(string[] args)
+{
+    var output = new StringWriter();
+    var exitCode = ThesisCli.Run(args, output, TextWriter.Null);
+    return (exitCode, output.ToString());
 }
 
 static WorkspaceContext CreateInitializedWorkspace(string root)
@@ -662,6 +724,8 @@ static void WriteFixtureDocx(string path)
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
           <Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+          <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+          <Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
         </Relationships>
         """);
     AddZipEntry(
