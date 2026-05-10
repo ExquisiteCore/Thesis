@@ -1,6 +1,7 @@
 using Thesis.Schema;
 using Thesis.Session;
 using Thesis.OpenXml;
+using Thesis.Profile;
 
 namespace Thesis.Cli;
 
@@ -102,7 +103,93 @@ public static class ThesisCli
             return result;
         }
 
+        if (args is ["profile", "extract", .. var profileArgs])
+        {
+            return ExtractProfile(profileArgs);
+        }
+
         throw new CliException("unknown_command", "Unknown command.");
+    }
+
+    private static CliResult ExtractProfile(string[] args)
+    {
+        var outputPath = RequiredOption(args, "--out");
+        var sourceType = "doc";
+        var doc = OptionalOption(args, "--doc");
+        var workspaceOption = OptionalOption(args, "--workspace");
+        SessionPaths? workspacePaths = null;
+
+        if (doc is not null && workspaceOption is not null)
+        {
+            return Error("profile_source_ambiguous", "Specify either --doc or --workspace, not both.");
+        }
+
+        if (doc is null && workspaceOption is null)
+        {
+            return Error("profile_source_missing", "Specify either --doc or --workspace.");
+        }
+
+        if (doc is null)
+        {
+            workspacePaths = SessionPaths.FromWorkspace(workspaceOption!);
+            var inspect = SessionLifecycle.Inspect(workspaceOption!);
+            if (!string.Equals(inspect.Status, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                return inspect;
+            }
+
+            doc = inspect.Document
+                ?? throw new CliException("working_doc_missing", "Workspace inspect did not return a working document.");
+            sourceType = "workspace";
+        }
+
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        var parent = Path.GetDirectoryName(fullOutputPath);
+        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+        {
+            return Error("profile_output_directory_missing", $"Profile output directory not found: {parent}");
+        }
+
+        var fullDocPath = Path.GetFullPath(doc);
+        if (IsProfileOutputRefused(fullOutputPath, fullDocPath, workspacePaths))
+        {
+            return Error("profile_output_refused", "Profile output path must not overwrite the source document or workspace state.");
+        }
+
+        if (!OpenXmlDocumentInspector.TryInspect(fullDocPath, out var map, out var diagnostic) || map is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Diagnostics = diagnostic is null ? [] : [diagnostic]
+            };
+        }
+
+        var profile = TemplateProfileBuilder.Build(map, sourceType);
+        File.WriteAllText(fullOutputPath, ThesisJson.Serialize(profile));
+
+        return new CliResult
+        {
+            Status = "success",
+            Document = map.Path,
+            OutputPath = fullOutputPath
+        };
+    }
+
+    private static bool IsProfileOutputRefused(string outputPath, string docPath, SessionPaths? workspacePaths)
+    {
+        if (SamePath(outputPath, docPath))
+        {
+            return true;
+        }
+
+        return workspacePaths is not null
+            && (SamePath(outputPath, workspacePaths.WorkingDocument)
+                || SamePath(outputPath, workspacePaths.ProfileJson)
+                || SamePath(outputPath, workspacePaths.SessionJson)
+                || IsPathInsideDirectory(workspacePaths.Workspace, outputPath));
     }
 
     private static string RequiredOption(string[] args, string name)
@@ -139,6 +226,23 @@ public static class ThesisCli
                 }
             ]
         };
+    }
+
+    private static bool SamePath(string left, string right)
+    {
+        return string.Equals(
+            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathInsideDirectory(string directory, string path)
+    {
+        var fullDirectory = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path);
+        return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
     }
 }
 

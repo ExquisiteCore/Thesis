@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Thesis.OpenXml\Thesis.OpenXml.csproj" />
+    <ProjectReference Include="..\Thesis.Profile\Thesis.Profile.csproj" />
     <ProjectReference Include="..\Thesis.Session\Thesis.Session.csproj" />
     <ProjectReference Include="..\Thesis.Schema\Thesis.Schema.csproj" />
   </ItemGroup>
