@@ -288,7 +288,18 @@ internal sealed class OpenXmlTargetResolver
 
         if (policyAnchorIndices is null)
         {
-            return TargetResolutionResult.Error(fallbackError);
+            var clusterAnchorIndices = ResolveFormatClusterAnchorIndices(role, out var clusterError);
+            if (clusterError is not null)
+            {
+                return TargetResolutionResult.Error(clusterError);
+            }
+
+            if (clusterAnchorIndices is null)
+            {
+                return TargetResolutionResult.Error(fallbackError);
+            }
+
+            policyAnchorIndices = clusterAnchorIndices;
         }
 
         var matches = policyAnchorIndices
@@ -328,6 +339,37 @@ internal sealed class OpenXmlTargetResolver
             error = "target_value_invalid";
             return [];
         }
+    }
+
+    private List<int>? ResolveFormatClusterAnchorIndices(string role, out string? error)
+    {
+        error = null;
+        var clusters = _profile?.FormatClusters
+            .Where(cluster =>
+                string.Equals(cluster.RoleHint, role, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(cluster.RoleHint, "unknown", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase)
+                && cluster.Match.Format is not null)
+            .OrderByDescending(cluster => cluster.Confidence)
+            .ThenByDescending(cluster => cluster.Count)
+            .ToList();
+        if (clusters is null || clusters.Count == 0)
+        {
+            return null;
+        }
+
+        return Paragraphs
+            .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+            .Where(candidate => clusters.Any(cluster => FormatClusterMatches(candidate.Paragraph, cluster)))
+            .Select(candidate => candidate.Index)
+            .ToList();
+    }
+
+    private static bool FormatClusterMatches(Paragraph paragraph, ProfileFormatCluster cluster)
+    {
+        return StyleMatches(paragraph, cluster.Match.StyleIds)
+            && TextPatternMatches(paragraph, cluster.Match.TextPatterns)
+            && FormatMatches(paragraph, cluster.Match.Format);
     }
 
     private TargetResolutionResult ResolveSectionRange(JsonObject target, RunOptions options)

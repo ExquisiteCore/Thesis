@@ -93,6 +93,161 @@ internal static partial class Program
         AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
     }
 
+    static void CliRunApplyProfileTableUsesNamedArchetype()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            TableArchetypes =
+            [
+                new ProfileTableArchetype
+                {
+                    Name = "compactThreeLine",
+                    Confidence = 0.9,
+                    Match = new ProfileTableMatch { MinRows = 2, ColumnCounts = [2] },
+                    Format = new TableFormatSample
+                    {
+                        WidthTwips = 7200,
+                        WidthType = "dxa",
+                        Alignment = "center",
+                        GridColumnWidthsTwips = [3600, 3600],
+                        Borders = new TableBordersSample
+                        {
+                            Top = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+                            Bottom = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+                            Left = new TableBorderLineSample { Value = "nil" },
+                            Right = new TableBorderLineSample { Value = "nil" },
+                            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4", Color = "000000" },
+                            InsideVertical = new TableBorderLineSample { Value = "nil" }
+                        },
+                        HeaderRowCount = 1,
+                        FirstCellParagraphFormat = new ParagraphFormatSample
+                        {
+                            Alignment = "center",
+                            RunFormat = new RunFormatSample
+                            {
+                                Bold = true,
+                                FontSizeHalfPoints = "21",
+                                EastAsiaFont = "宋体"
+                            }
+                        }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "apply-table-archetype",
+                  "op": "applyProfileTable",
+                  "target": { "type": "tableIndex", "index": 0 },
+                  "format": {
+                    "archetype": "compactThreeLine",
+                    "widthTwips": 8400
+                  }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        var format = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0].Format;
+        AssertEqual(8400, format.WidthTwips);
+        AssertEqual("dxa", format.WidthType);
+        AssertEqual("center", format.Alignment);
+        AssertEqual(3600, format.GridColumnWidthsTwips[0]);
+        AssertEqual("single", format.Borders!.Top!.Value);
+        AssertEqual("12", format.Borders.Top.Size);
+        AssertEqual("nil", format.Borders.Left!.Value);
+        AssertEqual("single", format.Borders.InsideHorizontal!.Value);
+        AssertEqual("nil", format.Borders.InsideVertical!.Value);
+        AssertEqual(1, format.HeaderRowCount);
+        AssertEqual("center", format.FirstCellParagraphFormat!.Alignment);
+        AssertEqual(true, format.FirstCellParagraphFormat.RunFormat!.Bold);
+        AssertEqual("21", format.FirstCellParagraphFormat.RunFormat.FontSizeHalfPoints);
+        AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+    }
+
+    static void CliRunApplyProfileTableUsesMatchingArchetypeWhenDefaultIsMissing()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            TableArchetypes =
+            [
+                new ProfileTableArchetype
+                {
+                    Name = "matchedTwoColumn",
+                    Confidence = 0.75,
+                    Match = new ProfileTableMatch { MinRows = 2, MaxRows = 4, ColumnCounts = [2] },
+                    Format = new TableFormatSample
+                    {
+                        WidthTwips = 7000,
+                        WidthType = "dxa",
+                        Alignment = "center",
+                        GridColumnWidthsTwips = [3500, 3500],
+                        Borders = new TableBordersSample
+                        {
+                            Top = new TableBorderLineSample { Value = "single", Size = "10", Color = "000000" },
+                            Bottom = new TableBorderLineSample { Value = "single", Size = "10", Color = "000000" },
+                            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4", Color = "000000" }
+                        }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "apply-matching-archetype",
+                  "op": "applyProfileTable",
+                  "target": { "type": "tableIndex", "index": 0 }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        var format = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0].Format;
+        AssertEqual(7000, format.WidthTwips);
+        AssertEqual("center", format.Alignment);
+        AssertEqual(3500, format.GridColumnWidthsTwips[0]);
+        AssertEqual("single", format.Borders!.Top!.Value);
+        AssertEqual("10", format.Borders.Top.Size);
+        AssertEqual("single", format.Borders.Bottom!.Value);
+        AssertEqual("single", format.Borders.InsideHorizontal!.Value);
+    }
+
     static void CliRunApplyProfileTableReturnsFormatMissing()
     {
         using var temp = new TempDirectory();

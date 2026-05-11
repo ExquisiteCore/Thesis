@@ -361,7 +361,18 @@ public static class OpenXmlMicroEditor
         ThesisOperation operation,
         bool writeChanges)
     {
-        var profileFormat = context.Profile?.TablePolicy?.Default?.Format;
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var tableTargets = targets.Cast<ResolvedTableTarget>().ToList();
+        var profileFormat = ResolveProfileTableFormat(context.Profile, operation.Format, tableTargets, out var profileFormatError);
+        if (profileFormatError is not null)
+        {
+            return OperationError(operation, profileFormatError);
+        }
+
         if (profileFormat is null)
         {
             return OperationError(operation, "profile_table_format_missing");
@@ -372,13 +383,8 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, formatError);
         }
 
-        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
-        {
-            return OperationError(operation, reason);
-        }
-
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
-        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        foreach (var target in tableTargets)
         {
             var before = OpenXmlFormatReader.TableFormatPreview(target.Table);
             if (writeChanges)
@@ -393,6 +399,73 @@ public static class OpenXmlMicroEditor
         }
 
         return result;
+    }
+
+    private static TableFormatSample? ResolveProfileTableFormat(
+        TemplateProfile? profile,
+        JsonNode? operationFormat,
+        IReadOnlyList<ResolvedTableTarget> targets,
+        out string? error)
+    {
+        error = null;
+        var archetypeName = GetString(operationFormat, "archetype", out var archetypeError);
+        if (archetypeError is not null)
+        {
+            error = archetypeError;
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(archetypeName))
+        {
+            var archetypeFormat = profile?.TableArchetypes
+                .Where(archetype => string.Equals(archetype.Name, archetypeName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(archetype => archetype.Confidence)
+                .Select(archetype => archetype.Format)
+                .FirstOrDefault(candidate => candidate is not null);
+            if (archetypeFormat is null)
+            {
+                error = "profile_table_archetype_not_found";
+                return null;
+            }
+
+            return archetypeFormat;
+        }
+
+        return profile?.TablePolicy?.Default?.Format
+            ?? SelectMatchingTableArchetypeFormat(profile, targets);
+    }
+
+    private static TableFormatSample? SelectMatchingTableArchetypeFormat(
+        TemplateProfile? profile,
+        IReadOnlyList<ResolvedTableTarget> targets)
+    {
+        if (profile is null || targets.Count == 0)
+        {
+            return null;
+        }
+
+        return profile.TableArchetypes
+            .Where(archetype => archetype.Format is not null)
+            .Where(archetype => targets.All(target => TableArchetypeMatches(target, archetype.Match)))
+            .OrderByDescending(archetype => archetype.Confidence)
+            .Select(archetype => archetype.Format)
+            .FirstOrDefault();
+    }
+
+    private static bool TableArchetypeMatches(ResolvedTableTarget target, ProfileTableMatch match)
+    {
+        if (match.MinRows is not null && target.RowCount < match.MinRows.Value)
+        {
+            return false;
+        }
+
+        if (match.MaxRows is not null && target.RowCount > match.MaxRows.Value)
+        {
+            return false;
+        }
+
+        return match.ColumnCounts.Count == 0
+            || target.CellCounts.Any(count => match.ColumnCounts.Contains(count));
     }
 
     private static OperationResult SetTableBorders(

@@ -228,6 +228,174 @@ internal static partial class Program
         AssertEqual("本文围绕系统设计与实现展开研究。", result.Operations[0].Matches[0].Preview);
     }
 
+    static void CliRunRoleTargetUsesFormatClustersWhenPoliciesAreMissing()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            FormatClusters =
+            [
+                new ProfileFormatCluster
+                {
+                    Id = "body-format",
+                    RoleHint = "body",
+                    AppliesTo = "paragraph",
+                    Count = 2,
+                    Confidence = 0.8,
+                    Match = new ProfileRoleMatch
+                    {
+                        Format = new ProfileRoleFormatMatch
+                        {
+                            StyleId = "2",
+                            Alignment = "both",
+                            FontSizeHalfPoints = "21",
+                            Bold = false,
+                            Italic = false,
+                            LineSpacing = "360",
+                            LineSpacingRule = "atleast",
+                            FirstLineIndentTwips = new IntRangeMatch { Exact = 420 },
+                            LeftIndentTwips = new IntRangeMatch { Exact = 0 }
+                        }
+                    },
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "both",
+                        LineSpacing = "360",
+                        LineSpacingRule = "atleast",
+                        FirstLineIndentTwips = 420,
+                        LeftIndentTwips = 0,
+                        RunFormat = new RunFormatSample { Bold = false, Italic = false, FontSizeHalfPoints = "21" }
+                    }
+                },
+                new ProfileFormatCluster
+                {
+                    Id = "unknown-format",
+                    RoleHint = "unknown",
+                    AppliesTo = "paragraph",
+                    Count = 2,
+                    Confidence = 0.9,
+                    Match = new ProfileRoleMatch
+                    {
+                        Format = new ProfileRoleFormatMatch
+                        {
+                            StyleId = "2",
+                            Alignment = "both",
+                            FontSizeHalfPoints = "24",
+                            Bold = false,
+                            LineSpacing = "360",
+                            LineSpacingRule = "atleast",
+                            FirstLineIndentTwips = new IntRangeMatch { Exact = 420 }
+                        }
+                    },
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "both",
+                        LineSpacing = "360",
+                        LineSpacingRule = "atleast",
+                        FirstLineIndentTwips = 420,
+                        RunFormat = new RunFormatSample { Bold = false, FontSizeHalfPoints = "24" }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "dryRun",
+              "operations": [
+                {
+                  "id": "cluster-body",
+                  "op": "resolveTarget",
+                  "target": { "type": "role", "role": "body" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(1, result.Operations[0].Matches.Count);
+        AssertEqual("p0", result.Operations[0].Matches[0].Id);
+        AssertEqual("本文围绕系统设计与实现展开研究。", result.Operations[0].Matches[0].Preview);
+    }
+
+    static void CliRunRoleTargetUsesHeadingFormatCluster()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            FormatClusters =
+            [
+                new ProfileFormatCluster
+                {
+                    Id = "heading2-format",
+                    RoleHint = "heading2",
+                    AppliesTo = "paragraph",
+                    Count = 2,
+                    Confidence = 0.78,
+                    Match = new ProfileRoleMatch
+                    {
+                        Format = new ProfileRoleFormatMatch
+                        {
+                            StyleId = "2",
+                            Alignment = "center",
+                            FontSizeHalfPoints = "21",
+                            Bold = true,
+                            Italic = false,
+                            LineSpacing = "360",
+                            LineSpacingRule = "atleast",
+                            FirstLineIndentTwips = new IntRangeMatch { Exact = 0 }
+                        }
+                    },
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "center",
+                        LineSpacing = "360",
+                        LineSpacingRule = "atleast",
+                        FirstLineIndentTwips = 0,
+                        RunFormat = new RunFormatSample { Bold = true, Italic = false, FontSizeHalfPoints = "21" }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "dryRun",
+              "operations": [
+                {
+                  "id": "cluster-heading2",
+                  "op": "resolveTarget",
+                  "target": { "type": "role", "role": "heading2" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(1, result.Operations[0].Matches.Count);
+        AssertEqual("p1", result.Operations[0].Matches[0].Id);
+        AssertEqual("本文围绕标题样式展开说明。", result.Operations[0].Matches[0].Preview);
+    }
+
     static void CliRunProfileOverridesRoleAliasesResolveProfileRole()
     {
         using var temp = new TempDirectory();

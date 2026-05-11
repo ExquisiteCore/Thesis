@@ -109,7 +109,22 @@ internal static class ProfileRoleResolver
             .FirstOrDefault(candidate => candidate is not null);
         if (policyFormat is null)
         {
-            return null;
+            var clusterFormat = profile?.FormatClusters
+                .Where(cluster =>
+                    string.Equals(cluster.RoleHint, role, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(cluster.RoleHint, "unknown", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(cluster => cluster.Confidence)
+                .ThenByDescending(cluster => cluster.Count)
+                .Select(cluster => cluster.Format)
+                .FirstOrDefault(candidate => candidate is not null);
+            if (clusterFormat is null)
+            {
+                return null;
+            }
+
+            error = null;
+            return clusterFormat;
         }
 
         error = null;

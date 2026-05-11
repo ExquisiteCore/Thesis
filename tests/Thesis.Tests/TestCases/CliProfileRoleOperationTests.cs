@@ -327,6 +327,77 @@ internal static partial class Program
         AssertEqual("宋体", runFormat.EastAsiaFont);
     }
 
+    static void CliRunApplyProfileRoleUsesFormatClusterFormat()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            FormatClusters =
+            [
+                new ProfileFormatCluster
+                {
+                    Id = "heading2-format",
+                    RoleHint = "heading2",
+                    AppliesTo = "paragraph",
+                    Count = 2,
+                    Confidence = 0.78,
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "center",
+                        SpacingBeforeTwips = 240,
+                        LineSpacing = "360",
+                        LineSpacingRule = "atleast",
+                        FirstLineIndentTwips = 0,
+                        RunFormat = new RunFormatSample
+                        {
+                            Bold = true,
+                            Italic = false,
+                            FontSizeHalfPoints = "21",
+                            EastAsiaFont = "宋体"
+                        }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "apply-cluster-role",
+                  "op": "applyProfileRole",
+                  "role": "heading2",
+                  "target": { "type": "paragraphIndex", "index": 0 }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+        AssertEqual("center", map.Paragraphs[0].Format.Alignment);
+        AssertEqual(240, map.Paragraphs[0].Format.SpacingBeforeTwips);
+        AssertEqual(0, map.Paragraphs[0].Format.FirstLineIndentTwips);
+        var runFormat = map.Paragraphs[0].Format.RunFormat ?? throw new UnreachableException("Expected run format.");
+        AssertEqual(true, runFormat.Bold);
+        AssertEqual("21", runFormat.FontSizeHalfPoints);
+        AssertEqual("宋体", runFormat.EastAsiaFont);
+    }
+
     static void CliRunApplyProfileRoleFormatOverridesProfileValues()
     {
         using var temp = new TempDirectory();
