@@ -3212,6 +3212,10 @@ static void CliProfileExtractWritesTemplateProfileFromDocx()
     AssertContains(profileJson, "\"role\":\"toc\"");
     AssertContains(profileJson, "\"role\":\"references\"");
     AssertContains(profileJson, "\"styleId\":\"Heading1\"");
+    AssertContains(profileJson, "\"rolePolicies\"");
+    AssertContains(profileJson, "\"appliesTo\":\"paragraph\"");
+    AssertContains(profileJson, "\"tableArchetypes\"");
+    AssertContains(profileJson, "\"diagnostics\"");
     AssertContains(profileJson, "\"numberingPolicy\"");
     AssertContains(profileJson, "\"abstractNumberingId\":\"0\"");
     AssertContains(profileJson, "\"format\":\"decimal\"");
