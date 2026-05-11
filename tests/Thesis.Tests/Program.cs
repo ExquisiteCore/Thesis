@@ -16,6 +16,14 @@ var tests = new (string Name, Action Test)[]
     ("SessionInitializer refuses locked workspace", SessionInitializerRefusesLockedWorkspace),
     ("SessionInitializer releases lock after validation errors", SessionInitializerReleasesLockAfterValidationErrors),
     ("CLI run reads request JSON and returns success JSON", CliRunReadsRequestJsonAndReturnsSuccessJson),
+    ("CLI run dry-run previews micro edits without changing DOCX", CliRunDryRunPreviewsMicroEditsWithoutChangingDocx),
+    ("CLI run execute can replace multiple paragraph text matches", CliRunExecuteCanReplaceMultipleParagraphTextMatches),
+    ("CLI run execute applies micro edits and creates snapshot", CliRunExecuteAppliesMicroEditsAndCreatesSnapshot),
+    ("CLI run execute aborts transaction on operation error", CliRunExecuteAbortsTransactionOnOperationError),
+    ("CLI run wrong typed target returns operation diagnostic", CliRunWrongTypedTargetReturnsOperationDiagnostic),
+    ("CLI run rejects invalid run font size", CliRunRejectsInvalidRunFontSize),
+    ("CLI run refuses replacing complex paragraph structure", CliRunRefusesReplacingComplexParagraphStructure),
+    ("CLI run execute refuses locked workspace", CliRunExecuteRefusesLockedWorkspace),
     ("CLI unknown command returns JSON error", CliUnknownCommandReturnsJsonError),
     ("Snapshot creates next copy, increments counter, and returns info", SnapshotCreatesNextCopyIncrementsCounterAndReturnsInfo),
     ("Rollback restores working document bytes", RollbackRestoresWorkingDocumentBytes),
@@ -31,6 +39,7 @@ var tests = new (string Name, Action Test)[]
     ("Missing workspace files return JSON errors", MissingWorkspaceFilesReturnJsonErrors),
     ("Snapshot and rollback reject traversal identifiers", SnapshotAndRollbackRejectTraversalIdentifiers),
     ("Snapshot refuses to overwrite existing target", SnapshotRefusesToOverwriteExistingTarget),
+    ("Snapshot removes orphan when session save fails", SnapshotRemovesOrphanWhenSessionSaveFails),
     ("Rollback ambiguous suffix returns JSON error", RollbackAmbiguousSuffixReturnsJsonError),
     ("Export to missing parent directory returns JSON error", ExportToMissingParentDirectoryReturnsJsonError),
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
@@ -210,9 +219,8 @@ static void SessionInitializerReleasesLockAfterValidationErrors()
 static void CliRunReadsRequestJsonAndReturnsSuccessJson()
 {
     using var temp = new TempDirectory();
-    var workspace = Path.Combine(temp.Path, ".thesis");
+    var context = CreateInitializedWorkspace(temp.Path);
     var requestPath = Path.Combine(temp.Path, "request.json");
-    Directory.CreateDirectory(workspace);
     File.WriteAllText(
         requestPath,
         """
@@ -227,7 +235,7 @@ static void CliRunReadsRequestJsonAndReturnsSuccessJson()
     var output = new StringWriter();
     var error = new StringWriter();
     var exitCode = ThesisCli.Run(
-        ["run", "--workspace", workspace, "--request", requestPath],
+        ["run", "--workspace", context.Workspace, "--request", requestPath],
         output,
         error);
 
@@ -235,8 +243,359 @@ static void CliRunReadsRequestJsonAndReturnsSuccessJson()
     var result = ThesisJson.Deserialize<CliResult>(output.ToString());
     AssertEqual("success", result.Status);
     AssertEqual("req-123", result.RequestId);
-    AssertEqual(Path.GetFullPath(workspace), result.Workspace);
-    AssertEqual(Path.Combine(Path.GetFullPath(workspace), "working.docx"), result.Document);
+    AssertEqual(context.Workspace, result.Workspace);
+    AssertEqual(context.Paths.WorkingDocument, result.Document);
+}
+
+static void CliRunDryRunPreviewsMicroEditsWithoutChangingDocx()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-dry-run",
+          "mode": "dryRun",
+          "options": {
+            "requireSingleMatch": true
+          },
+          "operations": [
+            {
+              "id": "replace-title",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphText", "text": "中文摘要", "match": "exact" },
+              "text": "中文摘要（修改后）"
+            },
+            {
+              "id": "style-title",
+              "op": "setParagraphStyle",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "format": { "styleId": "Heading1" }
+            },
+            {
+              "id": "format-title-run",
+              "op": "setRunFormat",
+              "target": { "type": "runIndex", "paragraphIndex": 0, "runIndex": 0 },
+              "format": { "bold": true, "fontSizeHalfPoints": "32" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("req-dry-run", result.RequestId);
+    AssertEqual(RequestMode.DryRun, result.Mode);
+    AssertEqual(3, result.Operations.Count);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("中文摘要", result.Operations[0].Matches[0].PreviewBefore);
+    AssertEqual("中文摘要（修改后）", result.Operations[0].Matches[0].PreviewAfter);
+    AssertEqual("preview", result.Operations[1].Status);
+    AssertEqual("paragraph", result.Operations[1].Matches[0].Type);
+    AssertEqual("preview", result.Operations[2].Status);
+    AssertEqual("run", result.Operations[2].Matches[0].Type);
+    AssertEqual(null, result.Snapshot);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+    AssertBytesEqual(context.OriginalBytes, File.ReadAllBytes(context.SourceDoc));
+
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("中文摘要", map.Paragraphs[0].Text);
+    AssertEqual("Title", map.Paragraphs[0].StyleId);
+    AssertEqual(false, map.Paragraphs[0].Runs[0].Bold);
+    AssertEqual(null, map.Paragraphs[0].Runs[0].FontSizeHalfPoints);
+}
+
+static void CliRunExecuteCanReplaceMultipleParagraphTextMatches()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-multi",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false,
+            "requireSingleMatch": false
+          },
+          "operations": [
+            {
+              "id": "replace-headings",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphText", "text": "摘", "match": "contains" },
+              "text": "摘要标题"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(null, result.Snapshot);
+    AssertEqual(1, result.Operations.Count);
+    AssertEqual("applied", result.Operations[0].Status);
+    AssertEqual(2, result.Operations[0].Matches.Count);
+
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("摘要标题", map.Paragraphs[0].Text);
+    AssertEqual("摘要标题", map.Paragraphs[3].Text);
+    AssertBytesEqual(context.OriginalBytes, File.ReadAllBytes(context.SourceDoc));
+}
+
+static void CliRunExecuteAppliesMicroEditsAndCreatesSnapshot()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-execute",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": true,
+            "requireSingleMatch": true
+          },
+          "operations": [
+            {
+              "id": "replace-title",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "text": "中文摘要（修改后）"
+            },
+            {
+              "id": "style-title",
+              "op": "setParagraphStyle",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "format": { "styleId": "Heading1" }
+            },
+            {
+              "id": "format-title-run",
+              "op": "setRunFormat",
+              "target": { "type": "runIndex", "paragraphIndex": 0, "runIndex": 0 },
+              "format": { "bold": true, "fontSizeHalfPoints": "32" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(RequestMode.Execute, result.Mode);
+    AssertEqual(3, result.Operations.Count);
+    AssertEqual(true, result.Operations.All(operation => operation.Status == "applied"));
+    AssertEqual("0002-before-run-req-execute", result.Snapshot!.Id);
+    AssertEqual(true, result.Snapshot.Created);
+    AssertBytesEqual(before, File.ReadAllBytes(result.Snapshot.Path!));
+    AssertBytesEqual(context.OriginalBytes, File.ReadAllBytes(context.SourceDoc));
+
+    var session = ThesisJson.Deserialize<SessionState>(File.ReadAllText(context.Paths.SessionJson));
+    AssertEqual(2, session.SnapshotCounter);
+
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("中文摘要（修改后）", map.Paragraphs[0].Text);
+    AssertEqual("Heading1", map.Paragraphs[0].StyleId);
+    AssertEqual(true, map.Paragraphs[0].Runs[0].Bold);
+    AssertEqual("32", map.Paragraphs[0].Runs[0].FontSizeHalfPoints);
+}
+
+static void CliRunExecuteAbortsTransactionOnOperationError()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-abort",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "replace-title",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "text": "changed but not committed"
+            },
+            {
+              "id": "bad-style",
+              "op": "setParagraphStyle",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "format": { "styleId": "MissingStyle" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual(2, result.Operations.Count);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("error", result.Operations[1].Status);
+    AssertEqual("paragraph_style_missing", result.Diagnostics[0].Code);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunWrongTypedTargetReturnsOperationDiagnostic()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-target",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "bad-index",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphIndex", "index": "zero" },
+              "text": "unused"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual(1, result.Operations.Count);
+    AssertEqual("bad-index", result.Operations[0].Id);
+    AssertEqual("error", result.Operations[0].Status);
+    AssertEqual("target_value_invalid", result.Operations[0].Reason);
+    AssertEqual("target_value_invalid", result.Diagnostics[0].Code);
+}
+
+static void CliRunRejectsInvalidRunFontSize()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-size",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-size",
+              "op": "setRunFormat",
+              "target": { "type": "runIndex", "paragraphIndex": 0, "runIndex": 0 },
+              "format": { "fontSizeHalfPoints": "large" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("font_size_invalid", result.Operations[0].Reason);
+    AssertEqual("font_size_invalid", result.Diagnostics[0].Code);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunRefusesReplacingComplexParagraphStructure()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    InjectHyperlinkIntoFirstParagraph(context.Paths.WorkingDocument);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-complex",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "replace-complex",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "text": "should not replace"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("paragraph_structure_unsupported", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunExecuteRefusesLockedWorkspace()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-locked",
+          "mode": "execute",
+          "operations": [
+            {
+              "id": "replace-title",
+              "op": "replaceParagraphText",
+              "target": { "type": "paragraphIndex", "index": 0 },
+              "text": "locked"
+            }
+          ]
+        }
+        """);
+    File.WriteAllText(context.Paths.LockFile, "locked");
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("workspace_locked", result.Diagnostics[0].Code);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
 }
 
 static void CliUnknownCommandReturnsJsonError()
@@ -526,6 +885,27 @@ static void SnapshotRefusesToOverwriteExistingTarget()
 
     var session = ThesisJson.Deserialize<SessionState>(File.ReadAllText(context.Paths.SessionJson));
     AssertEqual(1, session.SnapshotCounter);
+}
+
+static void SnapshotRemovesOrphanWhenSessionSaveFails()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedWorkspace(temp.Path);
+    File.SetAttributes(context.Paths.SessionJson, FileAttributes.ReadOnly);
+
+    try
+    {
+        var (exitCode, result) = RunCli(["snapshot", "--workspace", context.Workspace, "--name", "orphan"]);
+
+        AssertEqual(1, exitCode);
+        AssertEqual("error", result.Status);
+        AssertEqual("session_write_failed", result.Diagnostics[0].Code);
+        AssertEqual(false, File.Exists(Path.Combine(context.Paths.SnapshotsDirectory, "0002-orphan.docx")));
+    }
+    finally
+    {
+        File.SetAttributes(context.Paths.SessionJson, FileAttributes.Normal);
+    }
 }
 
 static void RollbackAmbiguousSuffixReturnsJsonError()
@@ -874,6 +1254,28 @@ static WorkspaceContext CreateInitializedWorkspace(string root)
         File.ReadAllBytes(sourceDoc));
 }
 
+static WorkspaceContext CreateInitializedDocxWorkspace(string root)
+{
+    Directory.CreateDirectory(root);
+
+    var sourceDoc = Path.GetFullPath(Path.Combine(root, "source.docx"));
+    var profile = Path.Combine(root, "input-profile.json");
+    var workspace = Path.Combine(root, ".thesis");
+
+    WriteFixtureDocx(sourceDoc);
+    File.WriteAllText(profile, "{}");
+
+    var result = SessionInitializer.Initialize(sourceDoc, profile, workspace);
+    AssertEqual("success", result.Status);
+
+    return new WorkspaceContext(
+        sourceDoc,
+        profile,
+        Path.GetFullPath(workspace),
+        SessionPaths.FromWorkspace(workspace),
+        File.ReadAllBytes(sourceDoc));
+}
+
 static void WriteFixtureDocx(string path)
 {
     using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -975,6 +1377,24 @@ static void AddZipEntry(ZipArchive archive, string entryName, string text)
     var entry = archive.CreateEntry(entryName);
     using var writer = new StreamWriter(entry.Open());
     writer.Write(text);
+}
+
+static void InjectHyperlinkIntoFirstParagraph(string docxPath)
+{
+    using var archive = ZipFile.Open(docxPath, ZipArchiveMode.Update);
+    var entry = archive.GetEntry("word/document.xml") ?? throw new UnreachableException("Missing document.xml.");
+    string xml;
+    using (var reader = new StreamReader(entry.Open()))
+    {
+        xml = reader.ReadToEnd();
+    }
+
+    xml = xml.Replace(
+        "<w:p><w:pPr><w:pStyle w:val=\"Title\"/></w:pPr><w:r><w:t>中文摘要</w:t></w:r></w:p>",
+        "<w:p><w:pPr><w:pStyle w:val=\"Title\"/></w:pPr><w:hyperlink><w:r><w:t>中文摘要</w:t></w:r></w:hyperlink></w:p>",
+        StringComparison.Ordinal);
+    entry.Delete();
+    AddZipEntry(archive, "word/document.xml", xml);
 }
 
 static void AssertEqual<T>(T expected, T actual)

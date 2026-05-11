@@ -50,16 +50,9 @@ public static class ThesisCli
             var workspace = RequiredOption(runArgs, "--workspace");
             var requestPath = RequiredOption(runArgs, "--request");
             var request = ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(requestPath));
-            var paths = SessionPaths.FromWorkspace(workspace);
-
-            return new CliResult
-            {
-                Status = "success",
-                RequestId = request.RequestId,
-                Mode = request.Mode,
-                Workspace = paths.Workspace,
-                Document = paths.WorkingDocument
-            };
+            request.Options ??= new RunOptions();
+            request.Operations ??= [];
+            return SessionLifecycle.Run(workspace, request, OpenXmlMicroEditor.Apply);
         }
 
         if (args is ["snapshot", .. var snapshotArgs])

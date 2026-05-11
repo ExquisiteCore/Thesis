@@ -23,6 +23,18 @@ public static class SessionLifecycle
         return WithLock(paths, () => ExportLocked(paths, outputPath));
     }
 
+    public static CliResult Run(
+        string workspace,
+        OperationRequest request,
+        Func<string, OperationRequest, DocumentEditResult> editDocument)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(editDocument);
+
+        var paths = SessionPaths.FromWorkspace(workspace);
+        return WithLock(paths, () => RunLocked(paths, request, editDocument));
+    }
+
     public static CliResult Inspect(string workspace)
     {
         var paths = SessionPaths.FromWorkspace(workspace);
@@ -56,59 +68,12 @@ public static class SessionLifecycle
             return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot name is invalid.");
         }
 
-        var nextCounter = checked(session.SnapshotCounter + 1);
-        var id = $"{nextCounter:0000}-{safeName}";
-        var snapshotPath = Path.Combine(paths.SnapshotsDirectory, id + ".docx");
-
-        if (!IsPathInsideDirectory(paths.SnapshotsDirectory, snapshotPath))
-        {
-            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot path is outside the snapshots directory.");
-        }
-
-        if (File.Exists(snapshotPath))
-        {
-            return SessionStore.Error(paths, "snapshot_exists", $"Snapshot already exists: {id}");
-        }
-
-        var tempPath = Path.Combine(paths.SnapshotsDirectory, id + "." + Guid.NewGuid().ToString("N") + ".tmp");
-        try
-        {
-            File.Copy(session.WorkingPath, tempPath);
-            File.Move(tempPath, snapshotPath);
-        }
-        catch (FileNotFoundException)
-        {
-            return SessionStore.Error(paths, "working_doc_missing", $"Working document not found: {session.WorkingPath}");
-        }
-        catch (DirectoryNotFoundException ex)
-        {
-            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
-        }
-        catch (IOException ex)
-        {
-            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
-        }
-        finally
-        {
-            DeleteIfExists(tempPath);
-        }
-
-        session.SnapshotCounter = nextCounter;
-        if (!SessionStore.TrySave(paths, session, out error))
+        if (!TryCreateSnapshot(paths, session, safeName, out var snapshot, out error))
         {
             return error!;
         }
 
-        return Success(paths, session, snapshot: new SnapshotInfo
-        {
-            Created = true,
-            Id = id,
-            Path = snapshotPath
-        });
+        return Success(paths, session, snapshot: snapshot);
     }
 
     private static CliResult RollbackLocked(SessionPaths paths, string snapshotIdOrName)
@@ -228,6 +193,165 @@ public static class SessionLifecycle
         }
 
         return Success(paths, session, outputPath: fullOutputPath);
+    }
+
+    private static CliResult RunLocked(
+        SessionPaths paths,
+        OperationRequest request,
+        Func<string, OperationRequest, DocumentEditResult> editDocument)
+    {
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
+        }
+
+        SnapshotInfo? snapshot = null;
+        if (request.Mode == RequestMode.Execute
+            && request.Options.CreateSnapshot
+            && request.Operations.Count > 0)
+        {
+            var snapshotName = string.IsNullOrWhiteSpace(request.RequestId)
+                ? "before-run"
+                : $"before-run-{request.RequestId}";
+            if (!SnapshotIdentifiers.TrySanitizeName(snapshotName, out var safeName))
+            {
+                return SessionStore.Error(paths, "invalid_snapshot_identifier", "Run snapshot name is invalid.");
+            }
+
+            if (!TryCreateSnapshot(paths, session, safeName, out snapshot, out error))
+            {
+                return error!;
+            }
+        }
+
+        DocumentEditResult edit;
+        try
+        {
+            edit = editDocument(session.WorkingPath, request);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            edit = new DocumentEditResult
+            {
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "run_failed",
+                        Message = $"Run failed: {ex.Message}",
+                        Path = session.WorkingPath
+                    }
+                ]
+            };
+        }
+
+        if (edit.Diagnostics.Any(diagnostic => string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new CliResult
+            {
+                Status = "error",
+                RequestId = request.RequestId,
+                Mode = request.Mode,
+                Workspace = paths.Workspace,
+                Document = session.WorkingPath,
+                Session = session,
+                Snapshot = snapshot,
+                Operations = edit.Operations,
+                Diagnostics = edit.Diagnostics
+            };
+        }
+
+        return new CliResult
+        {
+            Status = "success",
+            RequestId = request.RequestId,
+            Mode = request.Mode,
+            Workspace = paths.Workspace,
+            Document = session.WorkingPath,
+            Session = session,
+            Snapshot = snapshot,
+            Operations = edit.Operations,
+            Diagnostics = edit.Diagnostics
+        };
+    }
+
+    private static bool TryCreateSnapshot(
+        SessionPaths paths,
+        SessionState session,
+        string safeName,
+        out SnapshotInfo? snapshot,
+        out CliResult? error)
+    {
+        snapshot = null;
+        error = null;
+
+        var nextCounter = checked(session.SnapshotCounter + 1);
+        var id = $"{nextCounter:0000}-{safeName}";
+        var snapshotPath = Path.Combine(paths.SnapshotsDirectory, id + ".docx");
+
+        if (!IsPathInsideDirectory(paths.SnapshotsDirectory, snapshotPath))
+        {
+            error = SessionStore.Error(paths, "invalid_snapshot_identifier", "Snapshot path is outside the snapshots directory.");
+            return false;
+        }
+
+        if (File.Exists(snapshotPath))
+        {
+            error = SessionStore.Error(paths, "snapshot_exists", $"Snapshot already exists: {id}");
+            return false;
+        }
+
+        var tempPath = Path.Combine(paths.SnapshotsDirectory, id + "." + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            File.Copy(session.WorkingPath, tempPath);
+            File.Move(tempPath, snapshotPath);
+        }
+        catch (FileNotFoundException)
+        {
+            error = SessionStore.Error(paths, "working_doc_missing", $"Working document not found: {session.WorkingPath}");
+            return false;
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            error = SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+            return false;
+        }
+        catch (IOException ex)
+        {
+            error = SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            error = SessionStore.Error(paths, "snapshot_failed", $"Snapshot could not be created: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+
+        session.SnapshotCounter = nextCounter;
+        if (!SessionStore.TrySave(paths, session, out error))
+        {
+            DeleteIfExists(snapshotPath);
+            return false;
+        }
+
+        snapshot = new SnapshotInfo
+        {
+            Created = true,
+            Id = id,
+            Path = snapshotPath
+        };
+        return true;
     }
 
     private static CliResult WithLock(SessionPaths paths, Func<CliResult> action)

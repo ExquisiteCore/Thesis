@@ -54,6 +54,13 @@ public sealed class OperationResult
     public List<MatchInfo> Matches { get; set; } = [];
 }
 
+public sealed class DocumentEditResult
+{
+    public List<OperationResult> Operations { get; set; } = [];
+
+    public List<Diagnostic> Diagnostics { get; set; } = [];
+}
+
 public sealed class CliResult
 {
     public string SchemaVersion { get; set; } = "1.0";
