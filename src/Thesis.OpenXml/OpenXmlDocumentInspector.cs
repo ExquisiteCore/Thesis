@@ -54,7 +54,7 @@ public static class OpenXmlDocumentInspector
             RequiresFinalization = finalizationReasons.Count > 0,
             FinalizationReasons = finalizationReasons,
             Paragraphs = ReadParagraphs(body),
-            Styles = ReadStyles(mainPart),
+            Styles = ReadStyles(mainPart, body),
             Numbering = ReadNumbering(mainPart),
             Sections = ReadSections(body),
             Tables = ReadTables(body)
@@ -72,6 +72,7 @@ public static class OpenXmlDocumentInspector
                 Index = index,
                 Text = paragraph.InnerText,
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
+                OutlineLevel = ToInt(paragraph.ParagraphProperties?.OutlineLevel?.Val),
                 Format = ReadParagraphFormat(paragraph),
                 Numbering = ReadParagraphNumbering(paragraph),
                 Runs = ReadRuns(paragraph)
@@ -193,16 +194,28 @@ public static class OpenXmlDocumentInspector
         return value.Val.Value;
     }
 
-    private static List<DocumentStyle> ReadStyles(MainDocumentPart mainPart)
+    private static List<DocumentStyle> ReadStyles(MainDocumentPart mainPart, Body body)
     {
+        var styleUsage = body.Descendants<Paragraph>()
+            .Select(paragraph => paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value)
+            .Where(styleId => !string.IsNullOrWhiteSpace(styleId))
+            .GroupBy(styleId => styleId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
         return mainPart.StyleDefinitionsPart?.Styles?
             .Elements<Style>()
-            .Select(style => new DocumentStyle
+            .Select(style =>
             {
-                StyleId = style.StyleId?.Value,
-                Name = style.StyleName?.Val?.Value,
-                Type = LowerInnerText(style.Type),
-                BasedOn = style.BasedOn?.Val?.Value
+                var styleId = style.StyleId?.Value;
+
+                return new DocumentStyle
+                {
+                    StyleId = styleId,
+                    Name = style.StyleName?.Val?.Value,
+                    Type = LowerInnerText(style.Type),
+                    BasedOn = style.BasedOn?.Val?.Value,
+                    UsageCount = styleId is not null && styleUsage.TryGetValue(styleId, out var count) ? count : 0
+                };
             })
             .ToList()
             ?? [];

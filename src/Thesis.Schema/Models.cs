@@ -169,6 +169,8 @@ public sealed class DocumentParagraph
 
     public string? StyleId { get; set; }
 
+    public int? OutlineLevel { get; set; }
+
     public ParagraphFormatSample Format { get; set; } = new();
 
     public NumberingReference? Numbering { get; set; }
@@ -253,6 +255,8 @@ public sealed class DocumentStyle
     public string? Type { get; set; }
 
     public string? BasedOn { get; set; }
+
+    public int UsageCount { get; set; }
 }
 
 public sealed class DocumentNumbering

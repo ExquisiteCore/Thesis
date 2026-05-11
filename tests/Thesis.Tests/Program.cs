@@ -85,6 +85,7 @@ var tests = new (string Name, Action Test)[]
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
     ("OpenXml inspector reads paragraph and run format samples", OpenXmlInspectorReadsParagraphAndRunFormatSamples),
+    ("OpenXml inspector reads style usage and outline facts", OpenXmlInspectorReadsStyleUsageAndOutlineFacts),
     ("OpenXml inspector reads table format samples", OpenXmlInspectorReadsTableFormatSamples),
     ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
@@ -2689,6 +2690,22 @@ static void OpenXmlInspectorReadsParagraphAndRunFormatSamples()
     AssertEqual((bool?)null, emptyRunFormat.Italic);
 }
 
+static void OpenXmlInspectorReadsStyleUsageAndOutlineFacts()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "formatted.docx");
+    WriteFormattedFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+
+    var heading = map.Paragraphs.Single(paragraph => paragraph.Text == "第一章 绪论");
+    AssertEqual("Heading1", heading.StyleId);
+    AssertEqual(0, heading.OutlineLevel);
+
+    var headingStyle = map.Styles.Single(style => style.StyleId == "Heading1");
+    AssertEqual(true, headingStyle.UsageCount > 0);
+}
+
 static void OpenXmlInspectorReadsTableFormatSamples()
 {
     using var temp = new TempDirectory();
@@ -3484,7 +3501,7 @@ static void WriteFormattedFixtureDocx(string path)
                 <w:t>摘要</w:t>
               </w:r>
             </w:p>
-            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/><w:outlineLvl w:val="0"/></w:pPr><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>第一章 绪论</w:t></w:r></w:p>
             <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>列表项</w:t></w:r></w:p>
             <w:tbl>
               <w:tblPr>
