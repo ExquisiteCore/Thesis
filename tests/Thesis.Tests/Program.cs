@@ -3011,6 +3011,11 @@ static void TemplateProfileBuilderInfersRolePolicies()
     var bodyPolicy = profile.RolePolicies.Single(policy => policy.Role == "body");
     AssertEqual("Normal", bodyPolicy.Match.StyleIds[0]);
     AssertEqual(480, bodyPolicy.Format!.FirstLineIndentTwips);
+
+    map.Paragraphs.Add(new DocumentParagraph { Index = 2, Text = "摘要", StyleId = "Heading1" });
+    var semanticProfile = TemplateProfileBuilder.Build(map, "doc");
+    var abstractPolicy = semanticProfile.RolePolicies.Single(policy => policy.Role == "abstract.zh");
+    AssertEqual("^摘要$", abstractPolicy.Match.TextPatterns[0]);
 }
 
 static void TemplateProfileBuilderCopiesTableFormatSamples()

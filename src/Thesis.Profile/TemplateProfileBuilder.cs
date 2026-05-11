@@ -313,7 +313,7 @@ public static class TemplateProfileBuilder
 
     private static string CreateExactTextPattern(string text)
     {
-        return Regex.Escape(text.Trim());
+        return "^" + Regex.Escape(text.Trim()) + "$";
     }
 
     private static PageSizeInfo Clone(PageSizeInfo value)
