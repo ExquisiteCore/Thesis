@@ -28,6 +28,47 @@ internal static class ProfileTextHeuristics
         return normalized is "参考文献" or "references" or "bibliography";
     }
 
+    public static bool IsChineseKeywords(string text)
+    {
+        var normalized = NormalizeHeading(text);
+        return normalized.StartsWith("关键词", StringComparison.Ordinal);
+    }
+
+    public static bool IsEnglishKeywords(string text)
+    {
+        var normalized = NormalizeHeading(text);
+        return normalized.StartsWith("keywords", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("key words", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("keyterms", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsAcknowledgementsHeading(string text)
+    {
+        var normalized = NormalizeHeading(text);
+        return normalized is "致谢" or "谢辞" or "acknowledgements" or "acknowledgments";
+    }
+
+    public static bool IsAppendixHeading(string text)
+    {
+        var normalized = NormalizeHeading(text);
+        return normalized.StartsWith("附录", StringComparison.Ordinal)
+            || normalized.StartsWith("appendix", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsFigureCaption(string text)
+    {
+        var trimmed = text.Trim();
+        return Regex.IsMatch(trimmed, @"^图\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*\s+", RegexOptions.CultureInvariant)
+            || Regex.IsMatch(trimmed, @"^Figure\s+\d+(?:[-.]\d+)?\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    public static bool IsTableCaption(string text)
+    {
+        var trimmed = text.Trim();
+        return Regex.IsMatch(trimmed, @"^表\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*\s+", RegexOptions.CultureInvariant)
+            || Regex.IsMatch(trimmed, @"^Table\s+\d+(?:[-.]\d+)?\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
     public static bool IsDirectHeading1(DocumentParagraph paragraph)
     {
         if (IsSpecialSemanticHeading(paragraph.Text) || IsLikelyTocLine(paragraph.Text))
@@ -87,7 +128,9 @@ internal static class ProfileTextHeuristics
         return IsChineseAbstractHeading(text)
             || IsEnglishAbstractHeading(text)
             || IsTocHeading(text)
-            || IsReferencesHeading(text);
+            || IsReferencesHeading(text)
+            || IsAcknowledgementsHeading(text)
+            || IsAppendixHeading(text);
     }
 
     public static bool IsLikelyTocLine(string text)

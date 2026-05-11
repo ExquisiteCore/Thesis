@@ -314,6 +314,83 @@ internal static partial class Program
             && diagnostic.Evidence.Any(evidence => evidence == "style:2")));
     }
 
+    static void TemplateProfileBuilderInfersExpandedSemanticRoles()
+    {
+        var map = new DocumentMap
+        {
+            Path = Path.GetFullPath("semantic-template.docx"),
+            Styles =
+            [
+                new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph", UsageCount = 4 },
+                new DocumentStyle { StyleId = "Caption", Name = "caption", Type = "paragraph", UsageCount = 2 },
+                new DocumentStyle { StyleId = "Normal", Name = "Normal", Type = "paragraph", UsageCount = 4 }
+            ],
+            Paragraphs =
+            [
+                new DocumentParagraph
+                {
+                    Index = 0,
+                    Text = "关键词：毕业论文；排版工具；Open XML",
+                    StyleId = "Normal",
+                    Format = new ParagraphFormatSample { StyleId = "Normal", RunFormat = new RunFormatSample { FontSizeHalfPoints = "21" } }
+                },
+                new DocumentParagraph
+                {
+                    Index = 1,
+                    Text = "Key words: thesis; formatting; automation",
+                    StyleId = "Normal",
+                    Format = new ParagraphFormatSample { StyleId = "Normal", RunFormat = new RunFormatSample { FontSizeHalfPoints = "21" } }
+                },
+                new DocumentParagraph
+                {
+                    Index = 2,
+                    Text = "致谢",
+                    StyleId = "Heading1",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center", RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "28" } }
+                },
+                new DocumentParagraph
+                {
+                    Index = 3,
+                    Text = "附录A 访谈提纲",
+                    StyleId = "Heading1",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center", RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "28" } }
+                },
+                new DocumentParagraph
+                {
+                    Index = 4,
+                    Text = "图 1-1 系统总体架构",
+                    StyleId = "Caption",
+                    Format = new ParagraphFormatSample { StyleId = "Caption", Alignment = "center", RunFormat = new RunFormatSample { FontSizeHalfPoints = "18" } }
+                },
+                new DocumentParagraph
+                {
+                    Index = 5,
+                    Text = "表 2-1 功能模块说明",
+                    StyleId = "Caption",
+                    Format = new ParagraphFormatSample { StyleId = "Caption", Alignment = "center", RunFormat = new RunFormatSample { FontSizeHalfPoints = "18" } }
+                }
+            ]
+        };
+
+        var profile = TemplateProfileBuilder.Build(map, "doc");
+
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "keywords.zh" && role.StyleId == "Normal"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "keywords.en" && role.StyleId == "Normal"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "acknowledgements" && role.StyleId == "Heading1"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "appendix" && role.StyleId == "Heading1"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "figureCaption" && role.StyleId == "Caption"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "tableCaption" && role.StyleId == "Caption"));
+
+        var zhKeywords = profile.RolePolicies.Single(policy => policy.Role == "keywords.zh");
+        AssertEqual("^关键词：毕业论文；排版工具；Open\\ XML$", zhKeywords.Match.TextPatterns[0]);
+        AssertEqual("21", zhKeywords.Format!.RunFormat!.FontSizeHalfPoints);
+
+        var figureCaption = profile.RolePolicies.Single(policy => policy.Role == "figureCaption");
+        AssertEqual(true, figureCaption.Match.TextPatterns.Any(pattern => Regex.IsMatch("图 1-2 数据流程", pattern)));
+        AssertEqual("center", figureCaption.Format!.Alignment);
+        AssertEqual("18", figureCaption.Format.RunFormat!.FontSizeHalfPoints);
+    }
+
     static void TemplateProfileBuilderClustersParagraphFormats()
     {
         var map = new DocumentMap
@@ -419,6 +496,101 @@ internal static partial class Program
         var json = ThesisJson.Serialize(profile);
         AssertContains(json, "\"formatClusters\"");
         AssertContains(json, "\"roleHint\":\"body\"");
+    }
+
+    static void TemplateProfileBuilderGroupsMultipleTableArchetypes()
+    {
+        var map = new DocumentMap
+        {
+            Path = Path.GetFullPath("tables-template.docx"),
+            Tables =
+            [
+                new DocumentTable
+                {
+                    Index = 0,
+                    RowCount = 3,
+                    CellCounts = [2, 2, 2],
+                    TextPreview = "three line 1",
+                    Format = new TableFormatSample
+                    {
+                        WidthTwips = 8000,
+                        WidthType = "dxa",
+                        Alignment = "center",
+                        Borders = new TableBordersSample
+                        {
+                            Top = new TableBorderLineSample { Value = "single", Size = "12" },
+                            Bottom = new TableBorderLineSample { Value = "single", Size = "12" },
+                            Left = new TableBorderLineSample { Value = "nil" },
+                            Right = new TableBorderLineSample { Value = "nil" },
+                            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4" },
+                            InsideVertical = new TableBorderLineSample { Value = "nil" }
+                        }
+                    }
+                },
+                new DocumentTable
+                {
+                    Index = 1,
+                    RowCount = 4,
+                    CellCounts = [2, 2, 2, 2],
+                    TextPreview = "three line 2",
+                    Format = new TableFormatSample
+                    {
+                        WidthTwips = 8000,
+                        WidthType = "dxa",
+                        Alignment = "center",
+                        Borders = new TableBordersSample
+                        {
+                            Top = new TableBorderLineSample { Value = "single", Size = "12" },
+                            Bottom = new TableBorderLineSample { Value = "single", Size = "12" },
+                            Left = new TableBorderLineSample { Value = "nil" },
+                            Right = new TableBorderLineSample { Value = "nil" },
+                            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4" },
+                            InsideVertical = new TableBorderLineSample { Value = "nil" }
+                        }
+                    }
+                },
+                new DocumentTable
+                {
+                    Index = 2,
+                    RowCount = 5,
+                    CellCounts = [3, 3, 3, 3, 3],
+                    TextPreview = "grid",
+                    Format = new TableFormatSample
+                    {
+                        WidthTwips = 9000,
+                        WidthType = "dxa",
+                        Alignment = "center",
+                        Borders = new TableBordersSample
+                        {
+                            Top = new TableBorderLineSample { Value = "single", Size = "4" },
+                            Bottom = new TableBorderLineSample { Value = "single", Size = "4" },
+                            Left = new TableBorderLineSample { Value = "single", Size = "4" },
+                            Right = new TableBorderLineSample { Value = "single", Size = "4" },
+                            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4" },
+                            InsideVertical = new TableBorderLineSample { Value = "single", Size = "4" }
+                        }
+                    }
+                }
+            ]
+        };
+
+        var profile = TemplateProfileBuilder.Build(map, "doc");
+
+        AssertEqual(2, profile.TableArchetypes.Count);
+        var threeLine = profile.TableArchetypes.Single(archetype => archetype.Name == "threeLine");
+        AssertEqual(3, threeLine.Match.MinRows);
+        AssertEqual(4, threeLine.Match.MaxRows);
+        AssertEqual(2, threeLine.Match.ColumnCounts[0]);
+        AssertEqual("single", threeLine.Format!.Borders!.Top!.Value);
+        AssertEqual("nil", threeLine.Format.Borders.Left!.Value);
+        AssertEqual(true, threeLine.Confidence >= 0.8);
+
+        var grid = profile.TableArchetypes.Single(archetype => archetype.Name == "grid");
+        AssertEqual(5, grid.Match.MinRows);
+        AssertEqual(5, grid.Match.MaxRows);
+        AssertEqual(3, grid.Match.ColumnCounts[0]);
+        AssertEqual("single", grid.Format!.Borders!.Left!.Value);
+        AssertEqual("single", grid.Format.Borders.InsideVertical!.Value);
     }
 
     static void TemplateProfileBuilderCopiesTableFormatSamples()

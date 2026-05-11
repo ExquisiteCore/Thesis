@@ -50,6 +50,12 @@ public static class TemplateProfileBuilder
         AddSemanticRole(roles, map, "abstract.en", ProfileTextHeuristics.IsEnglishAbstractHeading);
         AddSemanticRole(roles, map, "toc", ProfileTextHeuristics.IsTocHeading);
         AddSemanticRole(roles, map, "references", ProfileTextHeuristics.IsReferencesHeading);
+        AddSemanticRole(roles, map, "keywords.zh", ProfileTextHeuristics.IsChineseKeywords);
+        AddSemanticRole(roles, map, "keywords.en", ProfileTextHeuristics.IsEnglishKeywords);
+        AddSemanticRole(roles, map, "acknowledgements", ProfileTextHeuristics.IsAcknowledgementsHeading);
+        AddSemanticRole(roles, map, "appendix", ProfileTextHeuristics.IsAppendixHeading);
+        AddSemanticRole(roles, map, "figureCaption", ProfileTextHeuristics.IsFigureCaption);
+        AddSemanticRole(roles, map, "tableCaption", ProfileTextHeuristics.IsTableCaption);
         return roles;
     }
 
@@ -64,6 +70,24 @@ public static class TemplateProfileBuilder
         AddSemanticRolePolicy(policies, map, "abstract.en", 90, ProfileTextHeuristics.IsEnglishAbstractHeading);
         AddSemanticRolePolicy(policies, map, "toc", 80, ProfileTextHeuristics.IsTocHeading);
         AddSemanticRolePolicy(policies, map, "references", 80, ProfileTextHeuristics.IsReferencesHeading);
+        AddSemanticRolePolicy(policies, map, "keywords.zh", 70, ProfileTextHeuristics.IsChineseKeywords);
+        AddSemanticRolePolicy(policies, map, "keywords.en", 70, ProfileTextHeuristics.IsEnglishKeywords);
+        AddSemanticRolePolicy(policies, map, "acknowledgements", 75, ProfileTextHeuristics.IsAcknowledgementsHeading);
+        AddSemanticRolePolicy(policies, map, "appendix", 75, ProfileTextHeuristics.IsAppendixHeading);
+        AddPatternSemanticRolePolicy(
+            policies,
+            map,
+            "figureCaption",
+            65,
+            ProfileTextHeuristics.IsFigureCaption,
+            @"^(?:图\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*|Figure\s+\d+(?:[-.]\d+)?)\s+.*$");
+        AddPatternSemanticRolePolicy(
+            policies,
+            map,
+            "tableCaption",
+            65,
+            ProfileTextHeuristics.IsTableCaption,
+            @"^(?:表\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*|Table\s+\d+(?:[-.]\d+)?)\s+.*$");
         return policies;
     }
 
@@ -189,6 +213,36 @@ public static class TemplateProfileBuilder
         });
     }
 
+    private static void AddPatternSemanticRolePolicy(
+        List<ProfileRolePolicy> policies,
+        DocumentMap map,
+        string role,
+        int priority,
+        Func<string, bool> predicate,
+        string textPattern)
+    {
+        var paragraph = map.Paragraphs.FirstOrDefault(candidate => predicate(candidate.Text));
+        if (paragraph is null)
+        {
+            return;
+        }
+
+        policies.Add(new ProfileRolePolicy
+        {
+            Role = role,
+            AppliesTo = "paragraph",
+            Priority = priority,
+            Confidence = 0.78,
+            Match = new ProfileRoleMatch
+            {
+                StyleIds = string.IsNullOrWhiteSpace(paragraph.StyleId) ? [] : [paragraph.StyleId],
+                TextPatterns = [textPattern],
+                OutlineLevels = paragraph.OutlineLevel.HasValue ? [paragraph.OutlineLevel.Value] : []
+            },
+            Format = ProfileSampleCloner.Clone(paragraph.Format)
+        });
+    }
+
     private static ParagraphFormatSample? SelectRoleFormat(
         DocumentMap map,
         List<ProfileParagraphEvidence> evidence,
@@ -254,32 +308,39 @@ public static class TemplateProfileBuilder
 
     private static List<ProfileTableArchetype> BuildTableArchetypes(DocumentMap map)
     {
-        var firstTable = map.Tables.FirstOrDefault();
-        if (firstTable is null)
+        if (map.Tables.Count == 0)
         {
             return [];
         }
 
+        return [.. map.Tables
+            .GroupBy(table => TableArchetypeKey(table.Format), StringComparer.Ordinal)
+            .Select((group, index) => BuildTableArchetype(group.ToList(), index + 1))
+            .OrderByDescending(archetype => archetype.Confidence)
+            .ThenBy(archetype => archetype.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static ProfileTableArchetype BuildTableArchetype(IReadOnlyList<DocumentTable> tables, int ordinal)
+    {
+        var firstTable = tables[0];
         var isThreeLine = IsThreeLineTable(firstTable.Format);
-        return
-        [
-            new ProfileTableArchetype
+        var isGrid = IsGridTable(firstTable.Format);
+        return new ProfileTableArchetype
+        {
+            Name = isThreeLine ? "threeLine" : isGrid ? "grid" : $"tableFormat{ordinal}",
+            Confidence = CalculateTableArchetypeConfidence(isThreeLine, isGrid, tables.Count),
+            Match = new ProfileTableMatch
             {
-                Name = isThreeLine ? "threeLine" : "default",
-                Confidence = isThreeLine ? 0.9 : 0.65,
-                Match = new ProfileTableMatch
-                {
-                    MinRows = map.Tables.Min(table => table.RowCount),
-                    MaxRows = map.Tables.Max(table => table.RowCount),
-                    ColumnCounts = [.. map.Tables
-                        .SelectMany(table => table.CellCounts)
-                        .Where(count => count > 0)
-                        .Distinct()
-                        .OrderBy(count => count)]
-                },
-                Format = ProfileSampleCloner.Clone(firstTable.Format)
-            }
-        ];
+                MinRows = tables.Min(table => table.RowCount),
+                MaxRows = tables.Max(table => table.RowCount),
+                ColumnCounts = [.. tables
+                    .SelectMany(table => table.CellCounts)
+                    .Where(count => count > 0)
+                    .Distinct()
+                    .OrderBy(count => count)]
+            },
+            Format = ProfileSampleCloner.Clone(firstTable.Format)
+        };
     }
 
     private static bool IsThreeLineTable(TableFormatSample? format)
@@ -291,6 +352,82 @@ public static class TemplateProfileBuilder
             && BorderValueEquals(borders?.Left, "nil")
             && BorderValueEquals(borders?.Right, "nil")
             && BorderValueEquals(borders?.InsideVertical, "nil");
+    }
+
+    private static bool IsGridTable(TableFormatSample? format)
+    {
+        var borders = format?.Borders;
+        return BorderValueEquals(borders?.Top, "single")
+            && BorderValueEquals(borders?.Bottom, "single")
+            && BorderValueEquals(borders?.Left, "single")
+            && BorderValueEquals(borders?.Right, "single")
+            && BorderValueEquals(borders?.InsideHorizontal, "single")
+            && BorderValueEquals(borders?.InsideVertical, "single");
+    }
+
+    private static double CalculateTableArchetypeConfidence(bool isThreeLine, bool isGrid, int count)
+    {
+        var baseConfidence = isThreeLine ? 0.82 : isGrid ? 0.76 : 0.62;
+        return Math.Min(0.95, baseConfidence + Math.Min(count, 4) * 0.04);
+    }
+
+    private static string TableArchetypeKey(TableFormatSample format)
+    {
+        var borders = format.Borders;
+        var margins = format.CellMargins;
+        return string.Join("|",
+            format.WidthTwips,
+            Lower(format.WidthType),
+            Lower(format.Alignment),
+            string.Join(",", format.GridColumnWidthsTwips),
+            BorderKey(borders?.Top),
+            BorderKey(borders?.Bottom),
+            BorderKey(borders?.Left),
+            BorderKey(borders?.Right),
+            BorderKey(borders?.InsideHorizontal),
+            BorderKey(borders?.InsideVertical),
+            margins?.TopTwips,
+            margins?.RightTwips,
+            margins?.BottomTwips,
+            margins?.LeftTwips,
+            format.HeaderRowCount,
+            ParagraphFormatKey(format.FirstCellParagraphFormat));
+    }
+
+    private static string BorderKey(TableBorderLineSample? line)
+    {
+        return string.Join(":",
+            Lower(line?.Value),
+            Lower(line?.Size),
+            Lower(line?.Color),
+            Lower(line?.Space));
+    }
+
+    private static string ParagraphFormatKey(ParagraphFormatSample? format)
+    {
+        if (format is null)
+        {
+            return "";
+        }
+
+        var run = format.RunFormat;
+        return string.Join(":",
+            Lower(format.StyleId),
+            Lower(format.Alignment),
+            format.SpacingBeforeTwips,
+            format.SpacingAfterTwips,
+            Lower(format.LineSpacing),
+            Lower(format.LineSpacingRule),
+            format.FirstLineIndentTwips,
+            format.LeftIndentTwips,
+            format.RightIndentTwips,
+            run?.Bold,
+            run?.Italic,
+            Lower(run?.FontSizeHalfPoints),
+            Lower(run?.AsciiFont),
+            Lower(run?.HighAnsiFont),
+            Lower(run?.EastAsiaFont),
+            Lower(run?.ComplexScriptFont));
     }
 
     private static bool BorderValueEquals(TableBorderLineSample? border, string value)
@@ -324,5 +461,10 @@ public static class TemplateProfileBuilder
     private static string Preview(string text)
     {
         return text.Length <= 80 ? text : text[..80];
+    }
+
+    private static string Lower(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "" : value.ToLowerInvariant();
     }
 }
