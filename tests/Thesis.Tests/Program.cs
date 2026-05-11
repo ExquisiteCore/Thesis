@@ -95,6 +95,7 @@ var tests = new (string Name, Action Test)[]
     ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
     ("Template profile builder infers role policies", TemplateProfileBuilderInfersRolePolicies),
     ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
+    ("Template profile builder infers three-line table archetype", TemplateProfileBuilderInfersThreeLineTableArchetype),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
@@ -3122,6 +3123,44 @@ static void TemplateProfileBuilderCopiesTableFormatSamples()
     AssertEqual(1, format.HeaderRowCount);
     AssertEqual("center", format.FirstCellParagraphFormat.Alignment);
     AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+}
+
+static void TemplateProfileBuilderInfersThreeLineTableArchetype()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        Tables =
+        [
+            new DocumentTable
+            {
+                Index = 0,
+                RowCount = 2,
+                CellCounts = [2, 2],
+                TextPreview = "A1 B1",
+                Format = new TableFormatSample
+                {
+                    Borders = new TableBordersSample
+                    {
+                        Top = new TableBorderLineSample { Value = "single", Size = "12" },
+                        Bottom = new TableBorderLineSample { Value = "single", Size = "12" },
+                        Left = new TableBorderLineSample { Value = "nil" },
+                        Right = new TableBorderLineSample { Value = "nil" },
+                        InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4" },
+                        InsideVertical = new TableBorderLineSample { Value = "nil" }
+                    }
+                }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    var archetype = profile.TableArchetypes.Single();
+    AssertEqual("threeLine", archetype.Name);
+    AssertEqual(2, archetype.Match.MinRows);
+    AssertEqual(2, archetype.Match.ColumnCounts[0]);
+    AssertEqual("single", archetype.Format!.Borders!.Top!.Value);
 }
 
 static void CliProfileExtractWritesTemplateProfileFromDocx()

@@ -21,6 +21,7 @@ public static class TemplateProfileBuilder
             RolePolicies = BuildRolePolicies(map),
             NumberingPolicy = BuildNumberingPolicy(map),
             TablePolicy = BuildTablePolicy(map),
+            TableArchetypes = BuildTableArchetypes(map),
             SourceEvidence = BuildSourceEvidence(map)
         };
     }
@@ -247,6 +248,52 @@ public static class TemplateProfileBuilder
                     Format = Clone(firstTable.Format)
                 }
         };
+    }
+
+    private static List<ProfileTableArchetype> BuildTableArchetypes(DocumentMap map)
+    {
+        var firstTable = map.Tables.FirstOrDefault();
+        if (firstTable is null)
+        {
+            return [];
+        }
+
+        var isThreeLine = IsThreeLineTable(firstTable.Format);
+        return
+        [
+            new ProfileTableArchetype
+            {
+                Name = isThreeLine ? "threeLine" : "default",
+                Confidence = isThreeLine ? 0.9 : 0.65,
+                Match = new ProfileTableMatch
+                {
+                    MinRows = map.Tables.Min(table => table.RowCount),
+                    MaxRows = map.Tables.Max(table => table.RowCount),
+                    ColumnCounts = [.. map.Tables
+                        .SelectMany(table => table.CellCounts)
+                        .Where(count => count > 0)
+                        .Distinct()
+                        .OrderBy(count => count)]
+                },
+                Format = Clone(firstTable.Format)
+            }
+        ];
+    }
+
+    private static bool IsThreeLineTable(TableFormatSample? format)
+    {
+        var borders = format?.Borders;
+        return BorderValueEquals(borders?.Top, "single")
+            && BorderValueEquals(borders?.Bottom, "single")
+            && BorderValueEquals(borders?.InsideHorizontal, "single")
+            && BorderValueEquals(borders?.Left, "nil")
+            && BorderValueEquals(borders?.Right, "nil")
+            && BorderValueEquals(borders?.InsideVertical, "nil");
+    }
+
+    private static bool BorderValueEquals(TableBorderLineSample? border, string value)
+    {
+        return string.Equals(border?.Value, value, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ProfileSourceEvidence BuildSourceEvidence(DocumentMap map)
