@@ -143,6 +143,13 @@ public static class OpenXmlMicroEditor
             "setParagraphStyle" => SetParagraphStyle(context, options, operation, writeChanges),
             "setRunFormat" => SetRunFormat(context, operation, writeChanges),
             "applyProfileRole" => ApplyProfileRole(context, options, operation, writeChanges),
+            "applyProfileTable" => ApplyProfileTable(context, options, operation, writeChanges),
+            "setTableBorders" => SetTableBorders(context, options, operation, writeChanges),
+            "setTableCellText" => SetTableCellText(context, options, operation, writeChanges),
+            "setTableCellFormat" => SetTableCellFormat(context, options, operation, writeChanges),
+            "setTableColumnWidth" => SetTableColumnWidth(context, options, operation, writeChanges),
+            "setTableRowHeader" => SetTableRowHeader(context, options, operation, writeChanges),
+            "applyThreeLineTable" => ApplyThreeLineTable(context, options, operation, writeChanges),
             null or "" => OperationError(operation, "operation_missing"),
             _ => OperationError(operation, "operation_unknown")
         };
@@ -352,6 +359,277 @@ public static class OpenXmlMicroEditor
         return result;
     }
 
+    private static OperationResult ApplyProfileTable(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var profileFormat = context.Profile?.TablePolicy?.Default?.Format;
+        if (profileFormat is null)
+        {
+            return OperationError(operation, "profile_table_format_missing");
+        }
+
+        if (!TryCreateEffectiveTableFormat(context, profileFormat, operation.Format, out var format, out var formatError))
+        {
+            return OperationError(operation, formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        {
+            var before = TableFormatPreview(target.Table);
+            if (writeChanges)
+            {
+                ApplyTableFormat(target.Table, format);
+            }
+
+            var after = writeChanges
+                ? TableFormatPreview(target.Table)
+                : FormatPreview(MergeTableFormat(ReadTableFormat(target.Table), format));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult SetTableBorders(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (operation.Format is not JsonObject)
+        {
+            return OperationError(operation, "target_value_invalid");
+        }
+
+        var format = new TableFormatSample();
+        if (!ApplyTableBordersOverride(operation.Format, format, out var formatError)
+            || format.Borders is null
+            || !IsValidTableBorders(format.Borders))
+        {
+            return OperationError(operation, formatError.Length == 0 ? "format_value_invalid" : formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        {
+            var before = TableFormatPreview(target.Table);
+            if (writeChanges)
+            {
+                EnsureTableGrid(target.Table);
+                ApplyTableBorders(GetOrCreateTableProperties(target.Table), format.Borders);
+            }
+
+            var after = writeChanges
+                ? TableFormatPreview(target.Table)
+                : FormatPreview(MergeTableFormat(ReadTableFormat(target.Table), format));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult SetTableCellText(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (operation.Text is null)
+        {
+            return OperationError(operation, "text_missing");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.TableCell, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableCellTarget>())
+        {
+            var before = target.Cell.InnerText;
+            if (writeChanges)
+            {
+                ReplaceTableCellText(target.Cell, operation.Text);
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, operation.Text));
+        }
+
+        return result;
+    }
+
+    private static OperationResult SetTableCellFormat(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (!TryCreateEffectiveFormat(context, new ParagraphFormatSample(), operation.Format, out var format, out var formatError))
+        {
+            return OperationError(operation, formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.TableCell, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableCellTarget>())
+        {
+            var before = CellFormatPreview(target.Cell);
+            if (writeChanges)
+            {
+                ApplyTableCellFormat(target.Cell, format);
+            }
+
+            var after = writeChanges
+                ? CellFormatPreview(target.Cell)
+                : FormatPreview(MergeParagraphFormat(ReadFirstCellParagraphFormat(target.Cell), format));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult SetTableColumnWidth(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var columnIndex = GetInt(operation.Format, "columnIndex", out var columnIndexError);
+        var widthTwips = GetInt(operation.Format, "widthTwips", out var widthError);
+        if (columnIndexError is not null || widthError is not null || columnIndex is null || widthTwips is null
+            || columnIndex < 0 || !IsValidTwips(widthTwips))
+        {
+            return OperationError(operation, columnIndexError ?? widthError ?? "target_value_invalid");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        if (targets.Cast<ResolvedTableTarget>().Any(target => columnIndex.Value >= target.CellCounts.DefaultIfEmpty(0).Max()))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        {
+            var before = TableFormatPreview(target.Table);
+            if (writeChanges)
+            {
+                ApplyTableColumnWidth(target.Table, columnIndex.Value, widthTwips.Value);
+            }
+
+            var delta = new TableFormatSample
+            {
+                GridColumnWidthsTwips = GetMergedGridWidths(target.Table, columnIndex.Value, widthTwips.Value)
+            };
+            var after = writeChanges
+                ? TableFormatPreview(target.Table)
+                : FormatPreview(MergeTableFormat(ReadTableFormat(target.Table), delta));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult SetTableRowHeader(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        var header = GetBool(operation.Format, "header", out var headerError);
+        if (rowIndexError is not null || headerError is not null || rowIndex is null || rowIndex < 0)
+        {
+            return OperationError(operation, rowIndexError ?? headerError ?? "target_value_invalid");
+        }
+
+        header ??= true;
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        if (targets.Cast<ResolvedTableTarget>().Any(target => rowIndex >= target.RowCount))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        {
+            var before = TableFormatPreview(target.Table);
+            if (writeChanges)
+            {
+                SetTableRowHeader(target.Table, rowIndex.Value, header.Value);
+            }
+
+            var after = writeChanges
+                ? TableFormatPreview(target.Table)
+                : FormatPreview(ReadTableFormat(target.Table));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult ApplyThreeLineTable(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var format = new TableFormatSample
+        {
+            Borders = CreateThreeLineTableBorders()
+        };
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedTableTarget>())
+        {
+            var before = TableFormatPreview(target.Table);
+            if (writeChanges)
+            {
+                EnsureTableGrid(target.Table);
+                ApplyTableBorders(GetOrCreateTableProperties(target.Table), format.Borders);
+            }
+
+            var after = writeChanges
+                ? TableFormatPreview(target.Table)
+                : FormatPreview(MergeTableFormat(ReadTableFormat(target.Table), format));
+            result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
     private static bool TryCreateEffectiveFormat(
         EditContext context,
         ParagraphFormatSample profileFormat,
@@ -388,32 +666,56 @@ public static class OpenXmlMicroEditor
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(format.StyleId) && !context.ParagraphStyleIds.Contains(format.StyleId))
+        if (!TryValidateParagraphFormat(context, format, out error))
         {
-            error = "paragraph_style_missing";
-            return false;
-        }
-
-        if (format.RunFormat?.FontSizeHalfPoints is not null && !IsValidHalfPointSize(format.RunFormat.FontSizeHalfPoints))
-        {
-            error = "font_size_invalid";
-            return false;
-        }
-
-        if (!IsValidAlignment(format.Alignment)
-            || !IsValidLineSpacingRule(format.LineSpacingRule)
-            || !IsValidTwips(format.SpacingBeforeTwips)
-            || !IsValidTwips(format.SpacingAfterTwips)
-            || !IsValidTwips(format.FirstLineIndentTwips)
-            || !IsValidTwips(format.LeftIndentTwips)
-            || !IsValidTwips(format.RightIndentTwips))
-        {
-            error = "format_value_invalid";
             return false;
         }
 
         format.Alignment = NormalizeAlignment(format.Alignment);
         format.LineSpacingRule = NormalizeLineSpacingRule(format.LineSpacingRule);
+        return true;
+    }
+
+    private static bool TryCreateEffectiveTableFormat(
+        EditContext context,
+        TableFormatSample profileFormat,
+        JsonNode? overrideFormat,
+        out TableFormatSample format,
+        out string error)
+    {
+        format = Clone(profileFormat);
+        error = "";
+
+        if (overrideFormat is not null && overrideFormat is not JsonObject)
+        {
+            error = "target_value_invalid";
+            return false;
+        }
+
+        if (!ApplyTableStringOverride(overrideFormat, format, "widthType", (target, value) => target.WidthType = value, out error)
+            || !ApplyTableStringOverride(overrideFormat, format, "alignment", (target, value) => target.Alignment = value, out error)
+            || !ApplyTableIntOverride(overrideFormat, format, "widthTwips", (target, value) => target.WidthTwips = value, out error)
+            || !ApplyTableIntOverride(overrideFormat, format, "headerRowCount", (target, value) => target.HeaderRowCount = value, out error)
+            || !ApplyGridColumnWidthsOverride(overrideFormat, format, out error)
+            || !ApplyTableBordersOverride(overrideFormat, format, out error)
+            || !ApplyTableCellMarginsOverride(overrideFormat, format, out error))
+        {
+            return false;
+        }
+
+        if (!TryValidateTableFormat(context, format, out error))
+        {
+            return false;
+        }
+
+        format.WidthType = NormalizeTableWidthType(format.WidthType);
+        format.Alignment = NormalizeAlignment(format.Alignment);
+        if (format.FirstCellParagraphFormat is not null)
+        {
+            format.FirstCellParagraphFormat.Alignment = NormalizeAlignment(format.FirstCellParagraphFormat.Alignment);
+            format.FirstCellParagraphFormat.LineSpacingRule = NormalizeLineSpacingRule(format.FirstCellParagraphFormat.LineSpacingRule);
+        }
+
         return true;
     }
 
@@ -505,6 +807,202 @@ public static class OpenXmlMicroEditor
         {
             format.RunFormat ??= new RunFormatSample();
             apply(format.RunFormat, value.Value);
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool ApplyTableStringOverride(
+        JsonNode? overrideFormat,
+        TableFormatSample format,
+        string propertyName,
+        Action<TableFormatSample, string> apply,
+        out string error)
+    {
+        var value = GetString(overrideFormat, propertyName, out var valueError);
+        if (valueError is not null)
+        {
+            error = valueError;
+            return false;
+        }
+
+        if (value is not null)
+        {
+            apply(format, value);
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool ApplyTableIntOverride(
+        JsonNode? overrideFormat,
+        TableFormatSample format,
+        string propertyName,
+        Action<TableFormatSample, int> apply,
+        out string error)
+    {
+        var value = GetInt(overrideFormat, propertyName, out var valueError);
+        if (valueError is not null)
+        {
+            error = valueError;
+            return false;
+        }
+
+        if (value is not null)
+        {
+            apply(format, value.Value);
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool ApplyGridColumnWidthsOverride(JsonNode? overrideFormat, TableFormatSample format, out string error)
+    {
+        error = "";
+        var value = overrideFormat?["gridColumnWidthsTwips"];
+        if (value is null)
+        {
+            return true;
+        }
+
+        if (value is not JsonArray widths)
+        {
+            error = "target_value_invalid";
+            return false;
+        }
+
+        var parsed = new List<int>();
+        foreach (var item in widths)
+        {
+            if (!TryGetJsonValue(item, out int width))
+            {
+                error = "target_value_invalid";
+                return false;
+            }
+
+            parsed.Add(width);
+        }
+
+        format.GridColumnWidthsTwips = parsed;
+        return true;
+    }
+
+    private static bool ApplyTableBordersOverride(JsonNode? overrideFormat, TableFormatSample format, out string error)
+    {
+        error = "";
+        var bordersNode = overrideFormat?["borders"];
+        if (bordersNode is null)
+        {
+            return true;
+        }
+
+        if (bordersNode is not JsonObject borders)
+        {
+            error = "target_value_invalid";
+            return false;
+        }
+
+        format.Borders ??= new TableBordersSample();
+        return ApplyBorderOverride(borders, "top", format.Borders.Top, value => format.Borders.Top = value, out error)
+            && ApplyBorderOverride(borders, "bottom", format.Borders.Bottom, value => format.Borders.Bottom = value, out error)
+            && ApplyBorderOverride(borders, "left", format.Borders.Left, value => format.Borders.Left = value, out error)
+            && ApplyBorderOverride(borders, "right", format.Borders.Right, value => format.Borders.Right = value, out error)
+            && ApplyBorderOverride(borders, "insideHorizontal", format.Borders.InsideHorizontal, value => format.Borders.InsideHorizontal = value, out error)
+            && ApplyBorderOverride(borders, "insideVertical", format.Borders.InsideVertical, value => format.Borders.InsideVertical = value, out error);
+    }
+
+    private static bool ApplyBorderOverride(
+        JsonObject borders,
+        string propertyName,
+        TableBorderLineSample? target,
+        Action<TableBorderLineSample> assign,
+        out string error)
+    {
+        error = "";
+        if (!borders.TryGetPropertyValue(propertyName, out var borderNode) || borderNode is null)
+        {
+            return true;
+        }
+
+        if (borderNode is not JsonObject border)
+        {
+            error = "target_value_invalid";
+            return false;
+        }
+
+        target ??= new TableBorderLineSample();
+        assign(target);
+        return ApplyBorderStringOverride(border, target, "value", (line, value) => line.Value = value, out error)
+            && ApplyBorderStringOverride(border, target, "size", (line, value) => line.Size = value, out error)
+            && ApplyBorderStringOverride(border, target, "color", (line, value) => line.Color = value, out error)
+            && ApplyBorderStringOverride(border, target, "space", (line, value) => line.Space = value, out error);
+    }
+
+    private static bool ApplyBorderStringOverride(
+        JsonObject border,
+        TableBorderLineSample line,
+        string propertyName,
+        Action<TableBorderLineSample, string> apply,
+        out string error)
+    {
+        var value = GetString(border, propertyName, out var valueError);
+        if (valueError is not null)
+        {
+            error = valueError;
+            return false;
+        }
+
+        if (value is not null)
+        {
+            apply(line, value);
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool ApplyTableCellMarginsOverride(JsonNode? overrideFormat, TableFormatSample format, out string error)
+    {
+        error = "";
+        var marginsNode = overrideFormat?["cellMargins"];
+        if (marginsNode is null)
+        {
+            return true;
+        }
+
+        if (marginsNode is not JsonObject margins)
+        {
+            error = "target_value_invalid";
+            return false;
+        }
+
+        format.CellMargins ??= new TableCellMarginsSample();
+        return ApplyMarginOverride(margins, format.CellMargins, "topTwips", (target, value) => target.TopTwips = value, out error)
+            && ApplyMarginOverride(margins, format.CellMargins, "rightTwips", (target, value) => target.RightTwips = value, out error)
+            && ApplyMarginOverride(margins, format.CellMargins, "bottomTwips", (target, value) => target.BottomTwips = value, out error)
+            && ApplyMarginOverride(margins, format.CellMargins, "leftTwips", (target, value) => target.LeftTwips = value, out error);
+    }
+
+    private static bool ApplyMarginOverride(
+        JsonObject margins,
+        TableCellMarginsSample target,
+        string propertyName,
+        Action<TableCellMarginsSample, int> apply,
+        out string error)
+    {
+        var value = GetInt(margins, propertyName, out var valueError);
+        if (valueError is not null)
+        {
+            error = valueError;
+            return false;
+        }
+
+        if (value is not null)
+        {
+            apply(target, value.Value);
         }
 
         error = "";
@@ -640,6 +1138,334 @@ public static class OpenXmlMicroEditor
         }
     }
 
+    private static void ApplyTableFormat(Table table, TableFormatSample format)
+    {
+        var properties = GetOrCreateTableProperties(table);
+
+        if (format.WidthTwips is not null || format.WidthType is not null)
+        {
+            properties.TableWidth ??= new TableWidth();
+            if (format.WidthTwips is not null)
+            {
+                SetWordprocessingAttribute(properties.TableWidth, "w", format.WidthTwips.Value.ToString());
+            }
+
+            if (!string.IsNullOrWhiteSpace(format.WidthType))
+            {
+                SetWordprocessingAttribute(properties.TableWidth, "type", format.WidthType);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(format.Alignment))
+        {
+            properties.TableJustification ??= new TableJustification();
+            SetWordprocessingAttribute(properties.TableJustification, "val", format.Alignment);
+        }
+
+        if (format.Borders is not null)
+        {
+            ApplyTableBorders(properties, format.Borders);
+        }
+
+        if (format.CellMargins is not null)
+        {
+            ApplyTableCellMargins(properties, format.CellMargins);
+        }
+
+        if (format.GridColumnWidthsTwips.Count > 0)
+        {
+            ApplyTableGrid(table, format.GridColumnWidthsTwips);
+        }
+
+        ApplyTableHeaderRows(table, format.HeaderRowCount);
+
+        if (format.FirstCellParagraphFormat is not null)
+        {
+            var firstCellParagraph = table
+                .Elements<TableRow>()
+                .SelectMany(row => row.Elements<TableCell>())
+                .SelectMany(cell => cell.Elements<Paragraph>())
+                .FirstOrDefault();
+            if (firstCellParagraph is not null)
+            {
+                ApplyParagraphFormat(firstCellParagraph, format.FirstCellParagraphFormat);
+            }
+        }
+    }
+
+    private static void ApplyTableBorders(TableProperties properties, TableBordersSample borders)
+    {
+        var merged = MergeTableBorders(ReadTableBorders(properties.TableBorders), borders);
+        properties.TableBorders?.Remove();
+        if (merged is null)
+        {
+            return;
+        }
+
+        var tableBorders = new TableBorders();
+        ApplyBorderLine(tableBorders, merged.Top, () => new TopBorder());
+        ApplyBorderLine(tableBorders, merged.Left, () => new LeftBorder());
+        ApplyBorderLine(tableBorders, merged.Bottom, () => new BottomBorder());
+        ApplyBorderLine(tableBorders, merged.Right, () => new RightBorder());
+        ApplyBorderLine(tableBorders, merged.InsideHorizontal, () => new InsideHorizontalBorder());
+        ApplyBorderLine(tableBorders, merged.InsideVertical, () => new InsideVerticalBorder());
+        properties.TableBorders = tableBorders;
+    }
+
+    private static void ApplyBorderLine<T>(TableBorders borders, TableBorderLineSample? sample, Func<T> create)
+        where T : OpenXmlElement
+    {
+        if (sample is null)
+        {
+            return;
+        }
+
+        var existing = borders.Elements<T>().FirstOrDefault();
+        if (existing is null)
+        {
+            existing = create();
+            borders.AppendChild(existing);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sample.Value))
+        {
+            SetWordprocessingAttribute(existing, "val", sample.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sample.Size))
+        {
+            SetWordprocessingAttribute(existing, "sz", sample.Size);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sample.Color))
+        {
+            SetWordprocessingAttribute(existing, "color", sample.Color);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sample.Space))
+        {
+            SetWordprocessingAttribute(existing, "space", sample.Space);
+        }
+    }
+
+    private static void ApplyTableCellMargins(TableProperties properties, TableCellMarginsSample margins)
+    {
+        var existing = properties.TableCellMarginDefault;
+        existing?.Remove();
+        var marginDefault = new TableCellMarginDefault();
+        if (margins.TopTwips is not null)
+        {
+            var top = new TopMargin();
+            SetWordprocessingAttribute(top, "w", margins.TopTwips.Value.ToString());
+            SetWordprocessingAttribute(top, "type", "dxa");
+            marginDefault.AppendChild(top);
+        }
+
+        if (margins.LeftTwips is not null)
+        {
+            var left = new TableCellLeftMargin();
+            SetWordprocessingAttribute(left, "w", margins.LeftTwips.Value.ToString());
+            SetWordprocessingAttribute(left, "type", "dxa");
+            marginDefault.AppendChild(left);
+        }
+
+        if (margins.BottomTwips is not null)
+        {
+            var bottom = new BottomMargin();
+            SetWordprocessingAttribute(bottom, "w", margins.BottomTwips.Value.ToString());
+            SetWordprocessingAttribute(bottom, "type", "dxa");
+            marginDefault.AppendChild(bottom);
+        }
+
+        if (margins.RightTwips is not null)
+        {
+            var right = new TableCellRightMargin();
+            SetWordprocessingAttribute(right, "w", margins.RightTwips.Value.ToString());
+            SetWordprocessingAttribute(right, "type", "dxa");
+            marginDefault.AppendChild(right);
+        }
+
+        properties.TableCellMarginDefault = marginDefault;
+    }
+
+    private static void ApplyTableGrid(Table table, List<int> widths)
+    {
+        table.TableGrid?.Remove();
+        var grid = new TableGrid();
+        foreach (var width in widths)
+        {
+            var column = new GridColumn();
+            SetWordprocessingAttribute(column, "w", width.ToString());
+            grid.AppendChild(column);
+        }
+
+        var properties = table.TableProperties;
+        if (properties is not null)
+        {
+            table.InsertAfter(grid, properties);
+        }
+        else
+        {
+            table.PrependChild(grid);
+        }
+    }
+
+    private static void EnsureTableGrid(Table table)
+    {
+        if (table.TableGrid is not null)
+        {
+            return;
+        }
+
+        var columnCount = table.Elements<TableRow>()
+            .Select(row => row.Elements<TableCell>().Count())
+            .DefaultIfEmpty(0)
+            .Max();
+        if (columnCount == 0)
+        {
+            return;
+        }
+
+        ApplyTableGrid(table, Enumerable.Repeat(0, columnCount).ToList());
+    }
+
+    private static void ApplyTableHeaderRows(Table table, int headerRowCount)
+    {
+        var rows = table.Elements<TableRow>().ToList();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var properties = GetOrCreateTableRowProperties(rows[index]);
+            var existing = properties.GetFirstChild<TableHeader>();
+            if (index < headerRowCount)
+            {
+                if (existing is null)
+                {
+                    properties.AppendChild(new TableHeader());
+                }
+            }
+            else
+            {
+                existing?.Remove();
+            }
+        }
+    }
+
+    private static void ReplaceTableCellText(TableCell cell, string text)
+    {
+        var cellProperties = cell.TableCellProperties?.CloneNode(deep: true) as TableCellProperties;
+        cell.RemoveAllChildren();
+        if (cellProperties is not null)
+        {
+            cell.AppendChild(cellProperties);
+        }
+
+        var paragraph = new Paragraph();
+        paragraph.AppendChild(new Run(new Text(text)
+        {
+            Space = NeedsPreservedSpace(text) ? SpaceProcessingModeValues.Preserve : null
+        }));
+        cell.AppendChild(paragraph);
+    }
+
+    private static void ApplyTableCellFormat(TableCell cell, ParagraphFormatSample format)
+    {
+        var paragraphs = cell.Elements<Paragraph>().ToList();
+        if (paragraphs.Count == 0)
+        {
+            var paragraph = new Paragraph(new Run(new Text("")));
+            cell.AppendChild(paragraph);
+            paragraphs.Add(paragraph);
+        }
+
+        foreach (var paragraph in paragraphs)
+        {
+            ApplyParagraphFormat(paragraph, format);
+        }
+    }
+
+    private static void ApplyTableColumnWidth(Table table, int columnIndex, int widthTwips)
+    {
+        ApplyTableGrid(table, GetMergedGridWidths(table, columnIndex, widthTwips));
+
+        foreach (var row in table.Elements<TableRow>())
+        {
+            var cells = row.Elements<TableCell>().ToList();
+            if (columnIndex >= cells.Count)
+            {
+                continue;
+            }
+
+            var properties = GetOrCreateTableCellProperties(cells[columnIndex]);
+            properties.TableCellWidth ??= new TableCellWidth();
+            SetWordprocessingAttribute(properties.TableCellWidth, "w", widthTwips.ToString());
+            SetWordprocessingAttribute(properties.TableCellWidth, "type", "dxa");
+        }
+    }
+
+    private static List<int> GetMergedGridWidths(Table table, int columnIndex, int widthTwips)
+    {
+        var existing = table.TableGrid?
+            .Elements<GridColumn>()
+            .Select(column => ToInt(column.Width) ?? 0)
+            .ToList() ?? [];
+        var columnCount = Math.Max(
+            columnIndex + 1,
+            table.Elements<TableRow>()
+                .Select(row => row.Elements<TableCell>().Count())
+                .DefaultIfEmpty(0)
+                .Max());
+
+        while (existing.Count < columnCount)
+        {
+            existing.Add(0);
+        }
+
+        existing[columnIndex] = widthTwips;
+        return existing;
+    }
+
+    private static void SetTableRowHeader(Table table, int rowIndex, bool header)
+    {
+        var row = table.Elements<TableRow>().ElementAt(rowIndex);
+        var properties = GetOrCreateTableRowProperties(row);
+        var existing = properties.GetFirstChild<TableHeader>();
+        if (header)
+        {
+            if (existing is null)
+            {
+                properties.AppendChild(new TableHeader());
+            }
+        }
+        else
+        {
+            existing?.Remove();
+        }
+    }
+
+    private static TableBordersSample CreateThreeLineTableBorders()
+    {
+        return new TableBordersSample
+        {
+            Top = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+            Left = new TableBorderLineSample { Value = "nil" },
+            Bottom = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+            Right = new TableBorderLineSample { Value = "nil" },
+            InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4", Color = "000000" },
+            InsideVertical = new TableBorderLineSample { Value = "nil" }
+        };
+    }
+
+    private static string CellFormatPreview(TableCell cell)
+    {
+        return FormatPreview(ReadFirstCellParagraphFormat(cell));
+    }
+
+    private static ParagraphFormatSample ReadFirstCellParagraphFormat(TableCell cell)
+    {
+        var paragraph = cell.Elements<Paragraph>().FirstOrDefault();
+        return paragraph is null ? new ParagraphFormatSample() : ReadParagraphFormat(paragraph);
+    }
+
     private static bool TryResolveTargets(
         EditContext context,
         RunOptions options,
@@ -716,6 +1542,42 @@ public static class OpenXmlMicroEditor
 
         var properties = new RunProperties();
         run.PrependChild(properties);
+        return properties;
+    }
+
+    private static TableProperties GetOrCreateTableProperties(Table table)
+    {
+        if (table.TableProperties is not null)
+        {
+            return table.TableProperties;
+        }
+
+        var properties = new TableProperties();
+        table.PrependChild(properties);
+        return properties;
+    }
+
+    private static TableRowProperties GetOrCreateTableRowProperties(TableRow row)
+    {
+        if (row.TableRowProperties is not null)
+        {
+            return row.TableRowProperties;
+        }
+
+        var properties = new TableRowProperties();
+        row.PrependChild(properties);
+        return properties;
+    }
+
+    private static TableCellProperties GetOrCreateTableCellProperties(TableCell cell)
+    {
+        if (cell.TableCellProperties is not null)
+        {
+            return cell.TableCellProperties;
+        }
+
+        var properties = new TableCellProperties();
+        cell.PrependChild(properties);
         return properties;
     }
 
@@ -896,6 +1758,29 @@ public static class OpenXmlMicroEditor
         }
     }
 
+    private static bool TryGetJsonValue<T>(JsonNode? node, out T value)
+    {
+        value = default!;
+        if (node is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = node.GetValue<T>();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     private static ParagraphFormatSample Clone(ParagraphFormatSample value)
     {
         return new ParagraphFormatSample
@@ -929,6 +1814,64 @@ public static class OpenXmlMicroEditor
             };
     }
 
+    private static TableFormatSample Clone(TableFormatSample value)
+    {
+        return new TableFormatSample
+        {
+            WidthTwips = value.WidthTwips,
+            WidthType = value.WidthType,
+            Alignment = value.Alignment,
+            GridColumnWidthsTwips = [.. value.GridColumnWidthsTwips],
+            Borders = Clone(value.Borders),
+            CellMargins = Clone(value.CellMargins),
+            HeaderRowCount = value.HeaderRowCount,
+            FirstCellParagraphFormat = value.FirstCellParagraphFormat is null
+                ? null
+                : Clone(value.FirstCellParagraphFormat)
+        };
+    }
+
+    private static TableBordersSample? Clone(TableBordersSample? value)
+    {
+        return value is null
+            ? null
+            : new TableBordersSample
+            {
+                Top = Clone(value.Top),
+                Bottom = Clone(value.Bottom),
+                Left = Clone(value.Left),
+                Right = Clone(value.Right),
+                InsideHorizontal = Clone(value.InsideHorizontal),
+                InsideVertical = Clone(value.InsideVertical)
+            };
+    }
+
+    private static TableBorderLineSample? Clone(TableBorderLineSample? value)
+    {
+        return value is null
+            ? null
+            : new TableBorderLineSample
+            {
+                Value = value.Value,
+                Size = value.Size,
+                Color = value.Color,
+                Space = value.Space
+            };
+    }
+
+    private static TableCellMarginsSample? Clone(TableCellMarginsSample? value)
+    {
+        return value is null
+            ? null
+            : new TableCellMarginsSample
+            {
+                TopTwips = value.TopTwips,
+                RightTwips = value.RightTwips,
+                BottomTwips = value.BottomTwips,
+                LeftTwips = value.LeftTwips
+            };
+    }
+
     private static ParagraphFormatSample ReadParagraphFormat(Paragraph paragraph)
     {
         var properties = paragraph.ParagraphProperties;
@@ -956,6 +1899,84 @@ public static class OpenXmlMicroEditor
                     EastAsiaFont = runProperties.RunFonts?.EastAsia?.Value,
                     ComplexScriptFont = runProperties.RunFonts?.ComplexScript?.Value
                 }
+        };
+    }
+
+    private static TableFormatSample ReadTableFormat(Table table)
+    {
+        var properties = table.TableProperties;
+        var width = properties?.TableWidth;
+        var firstCellParagraph = table
+            .Elements<TableRow>()
+            .SelectMany(row => row.Elements<TableCell>())
+            .SelectMany(cell => cell.Elements<Paragraph>())
+            .FirstOrDefault();
+
+        return new TableFormatSample
+        {
+            WidthTwips = ToInt(GetWordprocessingAttribute(width, "w")),
+            WidthType = GetWordprocessingAttribute(width, "type"),
+            Alignment = properties?.TableJustification?.Val?.InnerText,
+            GridColumnWidthsTwips = [.. table.TableGrid?
+                .Elements<GridColumn>()
+                .Select(column => ToInt(column.Width))
+                .OfType<int>() ?? []],
+            Borders = ReadTableBorders(properties?.TableBorders),
+            CellMargins = ReadTableCellMargins(properties?.TableCellMarginDefault),
+            HeaderRowCount = table.Elements<TableRow>().Count(row => row.TableRowProperties?.GetFirstChild<TableHeader>() is not null),
+            FirstCellParagraphFormat = firstCellParagraph is null ? null : ReadParagraphFormat(firstCellParagraph)
+        };
+    }
+
+    private static TableBordersSample? ReadTableBorders(TableBorders? borders)
+    {
+        if (borders is null)
+        {
+            return null;
+        }
+
+        return new TableBordersSample
+        {
+            Top = ReadBorderLine(borders.TopBorder),
+            Bottom = ReadBorderLine(borders.BottomBorder),
+            Left = ReadBorderLine(borders.LeftBorder ?? (OpenXmlElement?)borders.StartBorder),
+            Right = ReadBorderLine(borders.RightBorder ?? (OpenXmlElement?)borders.EndBorder),
+            InsideHorizontal = ReadBorderLine(borders.InsideHorizontalBorder),
+            InsideVertical = ReadBorderLine(borders.InsideVerticalBorder)
+        };
+    }
+
+    private static TableBorderLineSample? ReadBorderLine(OpenXmlElement? border)
+    {
+        if (border is null)
+        {
+            return null;
+        }
+
+        return new TableBorderLineSample
+        {
+            Value = GetWordprocessingAttribute(border, "val"),
+            Size = GetWordprocessingAttribute(border, "sz"),
+            Color = GetWordprocessingAttribute(border, "color"),
+            Space = GetWordprocessingAttribute(border, "space")
+        };
+    }
+
+    private static TableCellMarginsSample? ReadTableCellMargins(TableCellMarginDefault? margins)
+    {
+        if (margins is null)
+        {
+            return null;
+        }
+
+        return new TableCellMarginsSample
+        {
+            TopTwips = ToInt(GetWordprocessingAttribute(margins.TopMargin, "w")),
+            RightTwips = ToInt(GetWordprocessingAttribute(margins.TableCellRightMargin, "w")
+                ?? GetWordprocessingAttribute(margins.EndMargin, "w")),
+            BottomTwips = ToInt(GetWordprocessingAttribute(margins.BottomMargin, "w")),
+            LeftTwips = ToInt(GetWordprocessingAttribute(margins.TableCellLeftMargin, "w")
+                ?? GetWordprocessingAttribute(margins.StartMargin, "w"))
         };
     }
 
@@ -993,6 +2014,73 @@ public static class OpenXmlMicroEditor
         return merged;
     }
 
+    private static TableFormatSample MergeTableFormat(TableFormatSample current, TableFormatSample delta)
+    {
+        var merged = Clone(current);
+        merged.WidthTwips = delta.WidthTwips ?? merged.WidthTwips;
+        merged.WidthType = delta.WidthType ?? merged.WidthType;
+        merged.Alignment = delta.Alignment ?? merged.Alignment;
+        if (delta.GridColumnWidthsTwips.Count > 0)
+        {
+            merged.GridColumnWidthsTwips = [.. delta.GridColumnWidthsTwips];
+        }
+
+        merged.Borders = MergeTableBorders(merged.Borders, delta.Borders);
+        merged.CellMargins = MergeTableCellMargins(merged.CellMargins, delta.CellMargins);
+        merged.HeaderRowCount = delta.HeaderRowCount;
+        merged.FirstCellParagraphFormat = delta.FirstCellParagraphFormat is null
+            ? merged.FirstCellParagraphFormat is null ? null : Clone(merged.FirstCellParagraphFormat)
+            : MergeParagraphFormat(merged.FirstCellParagraphFormat ?? new ParagraphFormatSample(), delta.FirstCellParagraphFormat);
+        return merged;
+    }
+
+    private static TableBordersSample? MergeTableBorders(TableBordersSample? current, TableBordersSample? delta)
+    {
+        if (delta is null)
+        {
+            return Clone(current);
+        }
+
+        var merged = Clone(current) ?? new TableBordersSample();
+        merged.Top = MergeBorderLine(merged.Top, delta.Top);
+        merged.Bottom = MergeBorderLine(merged.Bottom, delta.Bottom);
+        merged.Left = MergeBorderLine(merged.Left, delta.Left);
+        merged.Right = MergeBorderLine(merged.Right, delta.Right);
+        merged.InsideHorizontal = MergeBorderLine(merged.InsideHorizontal, delta.InsideHorizontal);
+        merged.InsideVertical = MergeBorderLine(merged.InsideVertical, delta.InsideVertical);
+        return merged;
+    }
+
+    private static TableBorderLineSample? MergeBorderLine(TableBorderLineSample? current, TableBorderLineSample? delta)
+    {
+        if (delta is null)
+        {
+            return Clone(current);
+        }
+
+        var merged = Clone(current) ?? new TableBorderLineSample();
+        merged.Value = delta.Value ?? merged.Value;
+        merged.Size = delta.Size ?? merged.Size;
+        merged.Color = delta.Color ?? merged.Color;
+        merged.Space = delta.Space ?? merged.Space;
+        return merged;
+    }
+
+    private static TableCellMarginsSample? MergeTableCellMargins(TableCellMarginsSample? current, TableCellMarginsSample? delta)
+    {
+        if (delta is null)
+        {
+            return Clone(current);
+        }
+
+        var merged = Clone(current) ?? new TableCellMarginsSample();
+        merged.TopTwips = delta.TopTwips ?? merged.TopTwips;
+        merged.RightTwips = delta.RightTwips ?? merged.RightTwips;
+        merged.BottomTwips = delta.BottomTwips ?? merged.BottomTwips;
+        merged.LeftTwips = delta.LeftTwips ?? merged.LeftTwips;
+        return merged;
+    }
+
     private static bool? ReadOnOffValue(OnOffType? value)
     {
         if (value is null)
@@ -1011,6 +2099,25 @@ public static class OpenXmlMicroEditor
     private static void SetWordprocessingAttribute(OpenXmlElement element, string localName, string value)
     {
         element.SetAttribute(new OpenXmlAttribute("w", localName, WordprocessingNamespace, value));
+    }
+
+    private static string? GetWordprocessingAttribute(OpenXmlElement? element, string localName)
+    {
+        if (element is null)
+        {
+            return null;
+        }
+
+        foreach (var attribute in element.GetAttributes())
+        {
+            if (string.Equals(attribute.LocalName, localName, StringComparison.Ordinal)
+                && string.Equals(attribute.NamespaceUri, WordprocessingNamespace, StringComparison.Ordinal))
+            {
+                return string.IsNullOrWhiteSpace(attribute.Value) ? null : attribute.Value;
+            }
+        }
+
+        return null;
     }
 
     private static bool NeedsPreservedSpace(string text)
@@ -1038,6 +2145,111 @@ public static class OpenXmlMicroEditor
         return value is null or >= 0;
     }
 
+    private static bool TryValidateTableFormat(EditContext context, TableFormatSample format, out string error)
+    {
+        error = "";
+        if (!IsValidTwips(format.WidthTwips)
+            || format.GridColumnWidthsTwips.Any(width => !IsValidTwips(width))
+            || format.HeaderRowCount < 0
+            || !IsValidTableWidthType(format.WidthType)
+            || !IsValidAlignment(format.Alignment)
+            || !IsValidTableCellMargins(format.CellMargins)
+            || !IsValidTableBorders(format.Borders))
+        {
+            error = "format_value_invalid";
+            return false;
+        }
+
+        if (format.FirstCellParagraphFormat is not null
+            && !TryValidateParagraphFormat(context, format.FirstCellParagraphFormat, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryValidateParagraphFormat(EditContext context, ParagraphFormatSample format, out string error)
+    {
+        error = "";
+        if (!string.IsNullOrWhiteSpace(format.StyleId) && !context.ParagraphStyleIds.Contains(format.StyleId))
+        {
+            error = "paragraph_style_missing";
+            return false;
+        }
+
+        if (format.RunFormat?.FontSizeHalfPoints is not null && !IsValidHalfPointSize(format.RunFormat.FontSizeHalfPoints))
+        {
+            error = "font_size_invalid";
+            return false;
+        }
+
+        if (!IsValidAlignment(format.Alignment)
+            || !IsValidLineSpacingRule(format.LineSpacingRule)
+            || !IsValidTwips(format.SpacingBeforeTwips)
+            || !IsValidTwips(format.SpacingAfterTwips)
+            || !IsValidTwips(format.FirstLineIndentTwips)
+            || !IsValidTwips(format.LeftIndentTwips)
+            || !IsValidTwips(format.RightIndentTwips))
+        {
+            error = "format_value_invalid";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsValidTableCellMargins(TableCellMarginsSample? margins)
+    {
+        return margins is null
+            || (IsValidTwips(margins.TopTwips)
+                && IsValidTwips(margins.RightTwips)
+                && IsValidTwips(margins.BottomTwips)
+                && IsValidTwips(margins.LeftTwips));
+    }
+
+    private static bool IsValidTableBorders(TableBordersSample? borders)
+    {
+        return borders is null
+            || (IsValidTableBorderLine(borders.Top)
+                && IsValidTableBorderLine(borders.Bottom)
+                && IsValidTableBorderLine(borders.Left)
+                && IsValidTableBorderLine(borders.Right)
+                && IsValidTableBorderLine(borders.InsideHorizontal)
+                && IsValidTableBorderLine(borders.InsideVertical));
+    }
+
+    private static bool IsValidTableBorderLine(TableBorderLineSample? line)
+    {
+        return line is null
+            || (IsValidBorderString(line.Value)
+                && IsValidBorderUInt(line.Size)
+                && IsValidBorderColor(line.Color)
+                && IsValidBorderUInt(line.Space));
+    }
+
+    private static bool IsValidBorderString(string? value)
+    {
+        return value is null || !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool IsValidBorderUInt(string? value)
+    {
+        return value is null || uint.TryParse(value, out _);
+    }
+
+    private static bool IsValidBorderColor(string? value)
+    {
+        return value is null
+            || string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase)
+            || (value.Length == 6 && value.All(Uri.IsHexDigit));
+    }
+
+    private static bool IsValidTableWidthType(string? value)
+    {
+        return NormalizeTableWidthType(value) is not "\0";
+    }
+
     private static string? NormalizeAlignment(string? value)
     {
         return value?.ToLowerInvariant() switch
@@ -1053,6 +2265,19 @@ public static class OpenXmlMicroEditor
             "highkashida" => "highKashida",
             "lowkashida" => "lowKashida",
             "thaidistribute" => "thaiDistribute",
+            _ => "\0"
+        };
+    }
+
+    private static string? NormalizeTableWidthType(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            null => null,
+            "nil" => "nil",
+            "pct" => "pct",
+            "dxa" => "dxa",
+            "auto" => "auto",
             _ => "\0"
         };
     }
@@ -1130,14 +2355,29 @@ public static class OpenXmlMicroEditor
         return ThesisJson.Serialize(format);
     }
 
+    private static string FormatPreview(TableFormatSample format)
+    {
+        return ThesisJson.Serialize(format);
+    }
+
     private static string ParagraphFormatPreview(Paragraph paragraph)
     {
         return FormatPreview(ReadParagraphFormat(paragraph));
     }
 
+    private static string TableFormatPreview(Table table)
+    {
+        return FormatPreview(ReadTableFormat(table));
+    }
+
     private static int? ToInt(StringValue? value)
     {
         return int.TryParse(value?.Value, out var result) ? result : null;
+    }
+
+    private static int? ToInt(string? value)
+    {
+        return int.TryParse(value, out var result) ? result : null;
     }
 
     private static string Preview(string text)

@@ -8,6 +8,7 @@ namespace Thesis.OpenXml;
 public static class OpenXmlDocumentInspector
 {
     private const int PreviewLimit = 200;
+    private const string WordprocessingNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     public static bool TryInspect(string docxPath, out DocumentMap? documentMap, out Diagnostic? diagnostic)
     {
@@ -344,10 +345,88 @@ public static class OpenXmlDocumentInspector
                         .Select(row => row.Elements<TableCell>().Count())
                         .ToList(),
                     TextPreview = Preview(string.Join(" ", rows.SelectMany(row =>
-                        row.Elements<TableCell>().Select(cell => cell.InnerText))))
+                        row.Elements<TableCell>().Select(cell => cell.InnerText)))),
+                    Format = ReadTableFormat(table, rows)
                 };
             })
             .ToList();
+    }
+
+    private static TableFormatSample ReadTableFormat(Table table, IReadOnlyList<TableRow> rows)
+    {
+        var properties = table.TableProperties;
+        var width = properties?.TableWidth;
+        var firstCellParagraph = rows
+            .SelectMany(row => row.Elements<TableCell>())
+            .SelectMany(cell => cell.Elements<Paragraph>())
+            .FirstOrDefault();
+
+        return new TableFormatSample
+        {
+            WidthTwips = ToInt(width?.Width),
+            WidthType = LowerInnerText(width?.Type),
+            Alignment = LowerInnerText(properties?.TableJustification?.Val),
+            GridColumnWidthsTwips = [.. table.TableGrid?
+                .Elements<GridColumn>()
+                .Select(column => ToInt(column.Width))
+                .OfType<int>() ?? []],
+            Borders = ReadTableBorders(properties?.TableBorders),
+            CellMargins = ReadTableCellMargins(properties?.TableCellMarginDefault),
+            HeaderRowCount = rows.Count(row => row.TableRowProperties?.GetFirstChild<TableHeader>() is not null),
+            FirstCellParagraphFormat = firstCellParagraph is null ? null : ReadParagraphFormat(firstCellParagraph)
+        };
+    }
+
+    private static TableBordersSample? ReadTableBorders(TableBorders? borders)
+    {
+        if (borders is null)
+        {
+            return null;
+        }
+
+        return new TableBordersSample
+        {
+            Top = ReadBorderLine(borders.TopBorder),
+            Bottom = ReadBorderLine(borders.BottomBorder),
+            Left = ReadBorderLine(borders.LeftBorder ?? (OpenXmlElement?)borders.StartBorder),
+            Right = ReadBorderLine(borders.RightBorder ?? (OpenXmlElement?)borders.EndBorder),
+            InsideHorizontal = ReadBorderLine(borders.InsideHorizontalBorder),
+            InsideVertical = ReadBorderLine(borders.InsideVerticalBorder)
+        };
+    }
+
+    private static TableBorderLineSample? ReadBorderLine(OpenXmlElement? border)
+    {
+        if (border is null)
+        {
+            return null;
+        }
+
+        return new TableBorderLineSample
+        {
+            Value = Lower(GetWordprocessingAttribute(border, "val")),
+            Size = GetWordprocessingAttribute(border, "sz"),
+            Color = GetWordprocessingAttribute(border, "color"),
+            Space = GetWordprocessingAttribute(border, "space")
+        };
+    }
+
+    private static TableCellMarginsSample? ReadTableCellMargins(TableCellMarginDefault? margins)
+    {
+        if (margins is null)
+        {
+            return null;
+        }
+
+        return new TableCellMarginsSample
+        {
+            TopTwips = ToInt(GetWordprocessingAttribute(margins.TopMargin, "w")),
+            RightTwips = ToInt(GetWordprocessingAttribute(margins.TableCellRightMargin, "w")
+                ?? GetWordprocessingAttribute(margins.EndMargin, "w")),
+            BottomTwips = ToInt(GetWordprocessingAttribute(margins.BottomMargin, "w")),
+            LeftTwips = ToInt(GetWordprocessingAttribute(margins.TableCellLeftMargin, "w")
+                ?? GetWordprocessingAttribute(margins.StartMargin, "w"))
+        };
     }
 
     private static List<string> GetFinalizationReasons(Body body)
@@ -374,9 +453,33 @@ public static class OpenXmlDocumentInspector
 
     private static string? LowerInnerText(OpenXmlSimpleType? value)
     {
-        return string.IsNullOrWhiteSpace(value?.InnerText)
+        return Lower(value?.InnerText);
+    }
+
+    private static string? Lower(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
             ? null
-            : value.InnerText.ToLowerInvariant();
+            : value.ToLowerInvariant();
+    }
+
+    private static string? GetWordprocessingAttribute(OpenXmlElement? element, string localName)
+    {
+        if (element is null)
+        {
+            return null;
+        }
+
+        foreach (var attribute in element.GetAttributes())
+        {
+            if (string.Equals(attribute.LocalName, localName, StringComparison.Ordinal)
+                && string.Equals(attribute.NamespaceUri, WordprocessingNamespace, StringComparison.Ordinal))
+            {
+                return string.IsNullOrWhiteSpace(attribute.Value) ? null : attribute.Value;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsExpectedInspectionFailure(Exception ex)
@@ -401,6 +504,11 @@ public static class OpenXmlDocumentInspector
     private static int? ToInt(StringValue? value)
     {
         return int.TryParse(value?.Value, out var result) ? result : null;
+    }
+
+    private static int? ToInt(string? value)
+    {
+        return int.TryParse(value, out var result) ? result : null;
     }
 
     private static string Preview(string text)

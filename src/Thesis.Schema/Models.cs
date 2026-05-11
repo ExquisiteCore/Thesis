@@ -328,6 +328,64 @@ public sealed class DocumentTable
     public List<int> CellCounts { get; set; } = [];
 
     public string TextPreview { get; set; } = "";
+
+    public TableFormatSample Format { get; set; } = new();
+}
+
+public sealed class TableFormatSample
+{
+    public int? WidthTwips { get; set; }
+
+    public string? WidthType { get; set; }
+
+    public string? Alignment { get; set; }
+
+    public List<int> GridColumnWidthsTwips { get; set; } = [];
+
+    public TableBordersSample? Borders { get; set; }
+
+    public TableCellMarginsSample? CellMargins { get; set; }
+
+    public int HeaderRowCount { get; set; }
+
+    public ParagraphFormatSample? FirstCellParagraphFormat { get; set; }
+}
+
+public sealed class TableBordersSample
+{
+    public TableBorderLineSample? Top { get; set; }
+
+    public TableBorderLineSample? Bottom { get; set; }
+
+    public TableBorderLineSample? Left { get; set; }
+
+    public TableBorderLineSample? Right { get; set; }
+
+    public TableBorderLineSample? InsideHorizontal { get; set; }
+
+    public TableBorderLineSample? InsideVertical { get; set; }
+}
+
+public sealed class TableBorderLineSample
+{
+    public string? Value { get; set; }
+
+    public string? Size { get; set; }
+
+    public string? Color { get; set; }
+
+    public string? Space { get; set; }
+}
+
+public sealed class TableCellMarginsSample
+{
+    public int? TopTwips { get; set; }
+
+    public int? RightTwips { get; set; }
+
+    public int? BottomTwips { get; set; }
+
+    public int? LeftTwips { get; set; }
 }
 
 public sealed class TemplateProfile
@@ -432,6 +490,8 @@ public sealed class ProfileTableSample
     public List<int> CellCounts { get; set; } = [];
 
     public string TextPreview { get; set; } = "";
+
+    public TableFormatSample? Format { get; set; }
 }
 
 public sealed class ProfileSourceEvidence

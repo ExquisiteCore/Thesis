@@ -163,7 +163,8 @@ public static class TemplateProfileBuilder
                 {
                     RowCount = firstTable.RowCount,
                     CellCounts = [.. firstTable.CellCounts],
-                    TextPreview = firstTable.TextPreview
+                    TextPreview = firstTable.TextPreview,
+                    Format = Clone(firstTable.Format)
                 }
         };
     }
@@ -270,6 +271,64 @@ public static class TemplateProfileBuilder
                 LeftIndentTwips = value.LeftIndentTwips,
                 RightIndentTwips = value.RightIndentTwips,
                 RunFormat = Clone(value.RunFormat)
+            };
+    }
+
+    private static TableFormatSample? Clone(TableFormatSample? value)
+    {
+        return value is null
+            ? null
+            : new TableFormatSample
+            {
+                WidthTwips = value.WidthTwips,
+                WidthType = value.WidthType,
+                Alignment = value.Alignment,
+                GridColumnWidthsTwips = [.. value.GridColumnWidthsTwips],
+                Borders = Clone(value.Borders),
+                CellMargins = Clone(value.CellMargins),
+                HeaderRowCount = value.HeaderRowCount,
+                FirstCellParagraphFormat = Clone(value.FirstCellParagraphFormat)
+            };
+    }
+
+    private static TableBordersSample? Clone(TableBordersSample? value)
+    {
+        return value is null
+            ? null
+            : new TableBordersSample
+            {
+                Top = Clone(value.Top),
+                Bottom = Clone(value.Bottom),
+                Left = Clone(value.Left),
+                Right = Clone(value.Right),
+                InsideHorizontal = Clone(value.InsideHorizontal),
+                InsideVertical = Clone(value.InsideVertical)
+            };
+    }
+
+    private static TableBorderLineSample? Clone(TableBorderLineSample? value)
+    {
+        return value is null
+            ? null
+            : new TableBorderLineSample
+            {
+                Value = value.Value,
+                Size = value.Size,
+                Color = value.Color,
+                Space = value.Space
+            };
+    }
+
+    private static TableCellMarginsSample? Clone(TableCellMarginsSample? value)
+    {
+        return value is null
+            ? null
+            : new TableCellMarginsSample
+            {
+                TopTwips = value.TopTwips,
+                RightTwips = value.RightTwips,
+                BottomTwips = value.BottomTwips,
+                LeftTwips = value.LeftTwips
             };
     }
 

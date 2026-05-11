@@ -39,6 +39,15 @@ var tests = new (string Name, Action Test)[]
     ("CLI run applyProfileRole rejects invalid override font size", CliRunApplyProfileRoleRejectsInvalidOverrideFontSize),
     ("CLI run applyProfileRole rejects invalid override values in dry-run", CliRunApplyProfileRoleRejectsInvalidOverrideValuesInDryRun),
     ("CLI run applyProfileRole accepts extracted lowercase enum values", CliRunApplyProfileRoleAcceptsExtractedLowercaseEnumValues),
+    ("CLI run dry-run previews applyProfileTable without changing DOCX", CliRunDryRunPreviewsApplyProfileTableWithoutChangingDocx),
+    ("CLI run execute applies profile table formatting", CliRunExecuteAppliesProfileTableFormatting),
+    ("CLI run applyProfileTable returns format missing", CliRunApplyProfileTableReturnsFormatMissing),
+    ("CLI run execute applies table micro operations", CliRunExecuteAppliesTableMicroOperations),
+    ("CLI run table border update preserves existing sides", CliRunTableBorderUpdatePreservesExistingSides),
+    ("CLI run table border update can set one side on bare table", CliRunTableBorderUpdateCanSetOneSideOnBareTable),
+    ("CLI run dry-run previews table cell text without changing DOCX", CliRunDryRunPreviewsTableCellTextWithoutChangingDocx),
+    ("CLI run applyThreeLineTable sets academic borders", CliRunApplyThreeLineTableSetsAcademicBorders),
+    ("CLI run table cell operation rejects table target", CliRunTableCellOperationRejectsTableTarget),
     ("CLI run returns profile_invalid for malformed workspace profile", CliRunReturnsProfileInvalidForMalformedWorkspaceProfile),
     ("CLI run returns profile_invalid for structurally invalid workspace profile", CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile),
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
@@ -75,10 +84,12 @@ var tests = new (string Name, Action Test)[]
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
     ("OpenXml inspector reads paragraph and run format samples", OpenXmlInspectorReadsParagraphAndRunFormatSamples),
+    ("OpenXml inspector reads table format samples", OpenXmlInspectorReadsTableFormatSamples),
     ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
     ("Template profile builder returns typed profile with semantic roles", TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles),
     ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
+    ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
@@ -1225,6 +1236,447 @@ static void CliRunApplyProfileRoleAcceptsExtractedLowercaseEnumValues()
     AssertEqual("atleast", map.Paragraphs[1].Format.LineSpacingRule);
 }
 
+static void CliRunDryRunPreviewsApplyProfileTableWithoutChangingDocx()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithTableFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "apply-table",
+              "op": "applyProfileTable",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": {
+                "widthTwips": 7200
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("t0", result.Operations[0].Matches[0].Id);
+    AssertEqual("table", result.Operations[0].Matches[0].Type);
+    AssertContains(result.Operations[0].Matches[0].PreviewAfter!, "\"widthTwips\":7200");
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunExecuteAppliesProfileTableFormatting()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithTableFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "apply-table",
+              "op": "applyProfileTable",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("applied", result.Operations[0].Status);
+
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    var format = map.Tables[0].Format;
+    AssertEqual(8640, format.WidthTwips);
+    AssertEqual("dxa", format.WidthType);
+    AssertEqual("center", format.Alignment);
+    AssertEqual(2, format.GridColumnWidthsTwips.Count);
+    AssertEqual(4320, format.GridColumnWidthsTwips[0]);
+    AssertEqual(4320, format.GridColumnWidthsTwips[1]);
+    AssertEqual("single", format.Borders!.Top!.Value);
+    AssertEqual("12", format.Borders.Top.Size);
+    AssertEqual("single", format.Borders.Bottom!.Value);
+    AssertEqual("single", format.Borders.InsideHorizontal!.Value);
+    AssertEqual("4", format.Borders.InsideHorizontal.Size);
+    AssertEqual("nil", format.Borders.InsideVertical!.Value);
+    AssertEqual(60, format.CellMargins!.TopTwips);
+    AssertEqual(120, format.CellMargins.LeftTwips);
+    AssertEqual(60, format.CellMargins.BottomTwips);
+    AssertEqual(120, format.CellMargins.RightTwips);
+    AssertEqual(1, format.HeaderRowCount);
+    AssertEqual("center", format.FirstCellParagraphFormat!.Alignment);
+    AssertEqual(true, format.FirstCellParagraphFormat.RunFormat!.Bold);
+    AssertEqual("21", format.FirstCellParagraphFormat.RunFormat.FontSizeHalfPoints);
+    AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+}
+
+static void CliRunApplyProfileTableReturnsFormatMissing()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        TablePolicy = new ProfileTablePolicy
+        {
+            Detected = true,
+            TableCount = 1,
+            ObservedColumnCounts = [2],
+            Default = new ProfileTableSample { RowCount = 2, CellCounts = [2, 2], TextPreview = "A1 B1" }
+        }
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "missing-table-format",
+              "op": "applyProfileTable",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_table_format_missing", result.Operations[0].Reason);
+    AssertEqual("profile_table_format_missing", result.Diagnostics[0].Code);
+}
+
+static void CliRunExecuteAppliesTableMicroOperations()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "cell-text",
+              "op": "setTableCellText",
+              "target": { "type": "tableCell", "tableIndex": 0, "rowIndex": 1, "cellIndex": 1 },
+              "text": "结果"
+            },
+            {
+              "id": "cell-format",
+              "op": "setTableCellFormat",
+              "target": { "type": "tableCell", "tableIndex": 0, "rowIndex": 0, "cellIndex": 0 },
+              "format": {
+                "alignment": "center",
+                "bold": true,
+                "fontSizeHalfPoints": "24",
+                "eastAsiaFont": "黑体"
+              }
+            },
+            {
+              "id": "column-width",
+              "op": "setTableColumnWidth",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": { "columnIndex": 0, "widthTwips": 4800 }
+            },
+            {
+              "id": "header-row",
+              "op": "setTableRowHeader",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": { "rowIndex": 0, "header": true }
+            },
+            {
+              "id": "table-borders",
+              "op": "setTableBorders",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": {
+                "borders": {
+                  "top": { "value": "single", "size": "8", "color": "000000" },
+                  "left": { "value": "nil" },
+                  "bottom": { "value": "single", "size": "8", "color": "000000" },
+                  "right": { "value": "nil" },
+                  "insideHorizontal": { "value": "single", "size": "4", "color": "000000" },
+                  "insideVertical": { "value": "nil" }
+                }
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(5, result.Operations.Count);
+    foreach (var operation in result.Operations)
+    {
+        AssertEqual("applied", operation.Status);
+    }
+
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    var table = map.Tables[0];
+    AssertContains(table.TextPreview, "结果");
+    AssertEqual(4800, table.Format.GridColumnWidthsTwips[0]);
+    AssertEqual(1, table.Format.HeaderRowCount);
+    AssertEqual("single", table.Format.Borders!.Top!.Value);
+    AssertEqual("8", table.Format.Borders.Top.Size);
+    AssertEqual("nil", table.Format.Borders.Left!.Value);
+    AssertEqual("single", table.Format.Borders.InsideHorizontal!.Value);
+    AssertEqual("nil", table.Format.Borders.InsideVertical!.Value);
+    AssertEqual("center", table.Format.FirstCellParagraphFormat!.Alignment);
+    AssertEqual(true, table.Format.FirstCellParagraphFormat.RunFormat!.Bold);
+    AssertEqual("24", table.Format.FirstCellParagraphFormat.RunFormat.FontSizeHalfPoints);
+    AssertEqual("黑体", table.Format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+}
+
+static void CliRunDryRunPreviewsTableCellTextWithoutChangingDocx()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "cell-text",
+              "op": "setTableCellText",
+              "target": { "type": "tableCell", "tableIndex": 0, "rowIndex": 1, "cellIndex": 1 },
+              "text": "结果"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("B2", result.Operations[0].Matches[0].PreviewBefore);
+    AssertEqual("结果", result.Operations[0].Matches[0].PreviewAfter);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunTableBorderUpdateCanSetOneSideOnBareTable()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bottom-only",
+              "op": "setTableBorders",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": {
+                "borders": {
+                  "bottom": { "value": "single", "size": "8", "color": "000000" }
+                }
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    var borders = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0].Format.Borders!;
+    AssertEqual(null, borders.Top);
+    AssertEqual(null, borders.Left);
+    AssertEqual("single", borders.Bottom!.Value);
+    AssertEqual("8", borders.Bottom.Size);
+    AssertEqual(null, borders.Right);
+    AssertEqual(null, borders.InsideHorizontal);
+    AssertEqual(null, borders.InsideVertical);
+}
+
+static void CliRunTableBorderUpdatePreservesExistingSides()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithTableFormat(context);
+    var applyProfileRequest = Path.Combine(temp.Path, "apply-profile.json");
+    File.WriteAllText(
+        applyProfileRequest,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "apply-table",
+              "op": "applyProfileTable",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+    AssertEqual(0, RunCli(["run", "--workspace", context.Workspace, "--request", applyProfileRequest]).ExitCode);
+
+    var updateRequest = Path.Combine(temp.Path, "update-border.json");
+    File.WriteAllText(
+        updateRequest,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bottom-only",
+              "op": "setTableBorders",
+              "target": { "type": "tableIndex", "index": 0 },
+              "format": {
+                "borders": {
+                  "bottom": { "value": "double", "size": "16", "color": "FF0000" }
+                }
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", updateRequest]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    var borders = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0].Format.Borders!;
+    AssertEqual("single", borders.Top!.Value);
+    AssertEqual("nil", borders.Left!.Value);
+    AssertEqual("double", borders.Bottom!.Value);
+    AssertEqual("16", borders.Bottom.Size);
+    AssertEqual("FF0000", borders.Bottom.Color);
+    AssertEqual("nil", borders.Right!.Value);
+    AssertEqual("single", borders.InsideHorizontal!.Value);
+    AssertEqual("nil", borders.InsideVertical!.Value);
+}
+
+static void CliRunApplyThreeLineTableSetsAcademicBorders()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "three-line",
+              "op": "applyThreeLineTable",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("applied", result.Operations[0].Status);
+    var format = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0].Format;
+    AssertEqual("single", format.Borders!.Top!.Value);
+    AssertEqual("12", format.Borders.Top.Size);
+    AssertEqual("nil", format.Borders.Left!.Value);
+    AssertEqual("single", format.Borders.Bottom!.Value);
+    AssertEqual("12", format.Borders.Bottom.Size);
+    AssertEqual("nil", format.Borders.Right!.Value);
+    AssertEqual("single", format.Borders.InsideHorizontal!.Value);
+    AssertEqual("4", format.Borders.InsideHorizontal.Size);
+    AssertEqual("nil", format.Borders.InsideVertical!.Value);
+}
+
+static void CliRunTableCellOperationRejectsTableTarget()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-cell-text",
+              "op": "setTableCellText",
+              "target": { "type": "tableIndex", "index": 0 },
+              "text": "not allowed"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("target_type_unsupported", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
 static void CliRunReturnsProfileInvalidForMalformedWorkspaceProfile()
 {
     using var temp = new TempDirectory();
@@ -2174,6 +2626,40 @@ static void OpenXmlInspectorReadsParagraphAndRunFormatSamples()
     AssertEqual((bool?)null, emptyRunFormat.Italic);
 }
 
+static void OpenXmlInspectorReadsTableFormatSamples()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "formatted-table-fixture.docx");
+    WriteFormattedFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+    var table = map.Tables[0];
+
+    AssertEqual(8640, table.Format.WidthTwips);
+    AssertEqual("dxa", table.Format.WidthType);
+    AssertEqual("center", table.Format.Alignment);
+    AssertEqual(2, table.Format.GridColumnWidthsTwips.Count);
+    AssertEqual(4320, table.Format.GridColumnWidthsTwips[0]);
+    AssertEqual(4320, table.Format.GridColumnWidthsTwips[1]);
+    AssertEqual("single", table.Format.Borders!.Top!.Value);
+    AssertEqual("12", table.Format.Borders.Top.Size);
+    AssertEqual("000000", table.Format.Borders.Top.Color);
+    AssertEqual("single", table.Format.Borders.Bottom!.Value);
+    AssertEqual("12", table.Format.Borders.Bottom.Size);
+    AssertEqual("single", table.Format.Borders.InsideHorizontal!.Value);
+    AssertEqual("4", table.Format.Borders.InsideHorizontal.Size);
+    AssertEqual("nil", table.Format.Borders.InsideVertical!.Value);
+    AssertEqual(60, table.Format.CellMargins!.TopTwips);
+    AssertEqual(120, table.Format.CellMargins.LeftTwips);
+    AssertEqual(60, table.Format.CellMargins.BottomTwips);
+    AssertEqual(120, table.Format.CellMargins.RightTwips);
+    AssertEqual(1, table.Format.HeaderRowCount);
+    AssertEqual("center", table.Format.FirstCellParagraphFormat!.Alignment);
+    AssertEqual(true, table.Format.FirstCellParagraphFormat.RunFormat!.Bold);
+    AssertEqual("21", table.Format.FirstCellParagraphFormat.RunFormat.FontSizeHalfPoints);
+    AssertEqual("宋体", table.Format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+}
+
 static void CliInspectIncludesDocumentMapForDocxWorkspaces()
 {
     using var temp = new TempDirectory();
@@ -2325,6 +2811,112 @@ static void TemplateProfileBuilderCopiesRoleFormatSamples()
     map.Paragraphs[0].Format.RunFormat!.EastAsiaFont = "宋体";
     AssertEqual("center", role.Format.Alignment);
     AssertEqual("黑体", role.Format.RunFormat.EastAsiaFont);
+}
+
+static void TemplateProfileBuilderCopiesTableFormatSamples()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        Tables =
+        [
+            new DocumentTable
+            {
+                Index = 0,
+                RowCount = 2,
+                CellCounts = [2, 2],
+                TextPreview = "A1 B1",
+                Format = new TableFormatSample
+                {
+                    WidthTwips = 8640,
+                    WidthType = "dxa",
+                    Alignment = "center",
+                    GridColumnWidthsTwips = [4320, 4320],
+                    Borders = new TableBordersSample
+                    {
+                        Top = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000", Space = "0" },
+                        Bottom = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+                        Left = new TableBorderLineSample { Value = "nil" },
+                        Right = new TableBorderLineSample { Value = "nil" },
+                        InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4", Color = "000000" },
+                        InsideVertical = new TableBorderLineSample { Value = "nil" }
+                    },
+                    CellMargins = new TableCellMarginsSample
+                    {
+                        TopTwips = 60,
+                        RightTwips = 120,
+                        BottomTwips = 60,
+                        LeftTwips = 120
+                    },
+                    HeaderRowCount = 1,
+                    FirstCellParagraphFormat = new ParagraphFormatSample
+                    {
+                        StyleId = "TableHeader",
+                        Alignment = "center",
+                        SpacingAfterTwips = 0,
+                        RunFormat = new RunFormatSample
+                        {
+                            Bold = true,
+                            FontSizeHalfPoints = "21",
+                            AsciiFont = "Times New Roman",
+                            EastAsiaFont = "宋体"
+                        }
+                    }
+                }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+    var format = profile.TablePolicy.Default!.Format!;
+
+    AssertEqual(8640, format.WidthTwips);
+    AssertEqual("dxa", format.WidthType);
+    AssertEqual("center", format.Alignment);
+    AssertEqual(2, format.GridColumnWidthsTwips.Count);
+    AssertEqual(4320, format.GridColumnWidthsTwips[0]);
+    AssertEqual(4320, format.GridColumnWidthsTwips[1]);
+    AssertEqual("single", format.Borders!.Top!.Value);
+    AssertEqual("12", format.Borders.Top.Size);
+    AssertEqual("000000", format.Borders.Top.Color);
+    AssertEqual("0", format.Borders.Top.Space);
+    AssertEqual("single", format.Borders.Bottom!.Value);
+    AssertEqual("nil", format.Borders.Left!.Value);
+    AssertEqual("nil", format.Borders.Right!.Value);
+    AssertEqual("single", format.Borders.InsideHorizontal!.Value);
+    AssertEqual("4", format.Borders.InsideHorizontal.Size);
+    AssertEqual("nil", format.Borders.InsideVertical!.Value);
+    AssertEqual(60, format.CellMargins!.TopTwips);
+    AssertEqual(120, format.CellMargins.RightTwips);
+    AssertEqual(60, format.CellMargins.BottomTwips);
+    AssertEqual(120, format.CellMargins.LeftTwips);
+    AssertEqual(1, format.HeaderRowCount);
+    AssertEqual("TableHeader", format.FirstCellParagraphFormat!.StyleId);
+    AssertEqual("center", format.FirstCellParagraphFormat.Alignment);
+    AssertEqual(0, format.FirstCellParagraphFormat.SpacingAfterTwips);
+    AssertEqual(true, format.FirstCellParagraphFormat.RunFormat!.Bold);
+    AssertEqual("21", format.FirstCellParagraphFormat.RunFormat.FontSizeHalfPoints);
+    AssertEqual("Times New Roman", format.FirstCellParagraphFormat.RunFormat.AsciiFont);
+    AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
+
+    var sourceFormat = map.Tables[0].Format;
+    sourceFormat.WidthTwips = 1;
+    sourceFormat.GridColumnWidthsTwips[0] = 1;
+    sourceFormat.Borders!.Top!.Value = "nil";
+    sourceFormat.Borders.InsideHorizontal!.Color = "FFFFFF";
+    sourceFormat.CellMargins!.LeftTwips = 1;
+    sourceFormat.HeaderRowCount = 9;
+    sourceFormat.FirstCellParagraphFormat!.Alignment = "left";
+    sourceFormat.FirstCellParagraphFormat.RunFormat!.EastAsiaFont = "黑体";
+
+    AssertEqual(8640, format.WidthTwips);
+    AssertEqual(4320, format.GridColumnWidthsTwips[0]);
+    AssertEqual("single", format.Borders.Top.Value);
+    AssertEqual("000000", format.Borders.InsideHorizontal.Color);
+    AssertEqual(120, format.CellMargins.LeftTwips);
+    AssertEqual(1, format.HeaderRowCount);
+    AssertEqual("center", format.FirstCellParagraphFormat.Alignment);
+    AssertEqual("宋体", format.FirstCellParagraphFormat.RunFormat.EastAsiaFont);
 }
 
 static void CliProfileExtractWritesTemplateProfileFromDocx()
@@ -2586,6 +3178,63 @@ static void WriteProfileWithAbstractFormat(WorkspaceContext context)
     File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
 }
 
+static void WriteProfileWithTableFormat(WorkspaceContext context)
+{
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        TablePolicy = new ProfileTablePolicy
+        {
+            Detected = true,
+            TableCount = 1,
+            ObservedColumnCounts = [2],
+            Default = new ProfileTableSample
+            {
+                RowCount = 2,
+                CellCounts = [2, 2],
+                TextPreview = "A1 B1",
+                Format = new TableFormatSample
+                {
+                    WidthTwips = 8640,
+                    WidthType = "dxa",
+                    Alignment = "center",
+                    GridColumnWidthsTwips = [4320, 4320],
+                    Borders = new TableBordersSample
+                    {
+                        Top = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+                        Bottom = new TableBorderLineSample { Value = "single", Size = "12", Color = "000000" },
+                        Left = new TableBorderLineSample { Value = "nil" },
+                        Right = new TableBorderLineSample { Value = "nil" },
+                        InsideHorizontal = new TableBorderLineSample { Value = "single", Size = "4", Color = "000000" },
+                        InsideVertical = new TableBorderLineSample { Value = "nil" }
+                    },
+                    CellMargins = new TableCellMarginsSample
+                    {
+                        TopTwips = 60,
+                        RightTwips = 120,
+                        BottomTwips = 60,
+                        LeftTwips = 120
+                    },
+                    HeaderRowCount = 1,
+                    FirstCellParagraphFormat = new ParagraphFormatSample
+                    {
+                        Alignment = "center",
+                        RunFormat = new RunFormatSample
+                        {
+                            Bold = true,
+                            FontSizeHalfPoints = "21",
+                            EastAsiaFont = "宋体"
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+}
+
 static void WriteFixtureDocx(string path)
 {
     using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -2775,7 +3424,45 @@ static void WriteFormattedFixtureDocx(string path)
             <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>第一章 绪论</w:t></w:r></w:p>
             <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>列表项</w:t></w:r></w:p>
             <w:tbl>
-              <w:tr><w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc></w:tr>
+              <w:tblPr>
+                <w:tblW w:w="8640" w:type="dxa"/>
+                <w:jc w:val="center"/>
+                <w:tblBorders>
+                  <w:top w:val="single" w:sz="12" w:color="000000"/>
+                  <w:bottom w:val="single" w:sz="12" w:color="000000"/>
+                  <w:left w:val="nil"/>
+                  <w:right w:val="nil"/>
+                  <w:insideH w:val="single" w:sz="4" w:color="000000"/>
+                  <w:insideV w:val="nil"/>
+                </w:tblBorders>
+                <w:tblCellMar>
+                  <w:top w:w="60" w:type="dxa"/>
+                  <w:left w:w="120" w:type="dxa"/>
+                  <w:bottom w:w="60" w:type="dxa"/>
+                  <w:right w:w="120" w:type="dxa"/>
+                </w:tblCellMar>
+              </w:tblPr>
+              <w:tblGrid>
+                <w:gridCol w:w="4320"/>
+                <w:gridCol w:w="4320"/>
+              </w:tblGrid>
+              <w:tr>
+                <w:trPr><w:tblHeader/></w:trPr>
+                <w:tc>
+                  <w:p>
+                    <w:pPr><w:jc w:val="center"/></w:pPr>
+                    <w:r>
+                      <w:rPr>
+                        <w:rFonts w:eastAsia="宋体"/>
+                        <w:b/>
+                        <w:sz w:val="21"/>
+                      </w:rPr>
+                      <w:t>A1</w:t>
+                    </w:r>
+                  </w:p>
+                </w:tc>
+                <w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc>
+              </w:tr>
               <w:tr><w:tc><w:p><w:r><w:t>A2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc></w:tr>
             </w:tbl>
             <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o "1-3" \h \z \u</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
