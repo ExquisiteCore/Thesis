@@ -52,6 +52,7 @@ var tests = new (string Name, Action Test)[]
     ("CLI run returns profile_invalid for malformed workspace profile", CliRunReturnsProfileInvalidForMalformedWorkspaceProfile),
     ("CLI run returns profile_invalid for structurally invalid workspace profile", CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile),
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
+    ("CLI run returns profile_invalid for null profile rule containers", CliRunReturnsProfileInvalidForNullProfileRuleContainers),
     ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
     ("CLI run profileOverrides roleAliases resolve profile role", CliRunProfileOverridesRoleAliasesResolveProfileRole),
     ("CLI run role target merges multiple matching profile entries", CliRunRoleTargetMergesMultipleMatchingProfileEntries),
@@ -86,6 +87,7 @@ var tests = new (string Name, Action Test)[]
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
     ("OpenXml inspector reads paragraph and run format samples", OpenXmlInspectorReadsParagraphAndRunFormatSamples),
     ("OpenXml inspector reads style usage and outline facts", OpenXmlInspectorReadsStyleUsageAndOutlineFacts),
+    ("OpenXml inspector reads outline facts from style definitions", OpenXmlInspectorReadsOutlineFactsFromStyleDefinitions),
     ("OpenXml inspector reads table format samples", OpenXmlInspectorReadsTableFormatSamples),
     ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
@@ -1853,6 +1855,66 @@ static void CliRunReturnsProfileInvalidForNullRoleEvidence()
     AssertEqual("profile_invalid", result.Diagnostics[0].Code);
 }
 
+static void CliRunReturnsProfileInvalidForNullProfileRuleContainers()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    File.WriteAllText(
+        context.Paths.ProfileJson,
+        """
+        {
+          "schemaVersion": "1.0",
+          "profileKind": "templateProfile",
+          "rolePolicies": [
+            {
+              "role": "heading1",
+              "appliesTo": "paragraph",
+              "match": null
+            }
+          ],
+          "tableArchetypes": [
+            {
+              "name": "threeLine",
+              "match": {
+                "columnCounts": null
+              }
+            }
+          ],
+          "diagnostics": [
+            {
+              "severity": "info",
+              "code": "profile_rule_inferred",
+              "message": "bad",
+              "evidence": null
+            }
+          ]
+        }
+        """);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-null-profile-rules",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
 static void CliRunResolveTargetFindsRoleEvidenceFromProfile()
 {
     using var temp = new TempDirectory();
@@ -2706,6 +2768,19 @@ static void OpenXmlInspectorReadsStyleUsageAndOutlineFacts()
     AssertEqual(true, headingStyle.UsageCount > 0);
 }
 
+static void OpenXmlInspectorReadsOutlineFactsFromStyleDefinitions()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "style-outline.docx");
+    WriteFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+
+    var heading = map.Paragraphs.Single(paragraph => paragraph.Text == "第一章 绪论");
+    AssertEqual("Heading1", heading.StyleId);
+    AssertEqual(0, heading.OutlineLevel);
+}
+
 static void OpenXmlInspectorReadsTableFormatSamples()
 {
     using var temp = new TempDirectory();
@@ -3360,7 +3435,7 @@ static void WriteFixtureDocx(string path)
         <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
           <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
           <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/></w:style>
-          <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
         </w:styles>
         """);
     AddZipEntry(

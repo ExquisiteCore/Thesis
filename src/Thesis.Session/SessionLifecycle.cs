@@ -398,15 +398,27 @@ public static class SessionLifecycle
     {
         return profile is not null
             && profile.StyleRoles is not null
+            && profile.RolePolicies is not null
             && profile.FinalizationReasons is not null
             && profile.PageSetup is not null
             && profile.NumberingPolicy is not null
             && profile.TablePolicy is not null
+            && profile.TableArchetypes is not null
+            && profile.Diagnostics is not null
             && profile.SourceEvidence is not null
             && profile.StyleRoles.All(role => role.Evidence is not null)
+            && profile.RolePolicies.All(policy =>
+                policy.Match is not null
+                && policy.Match.StyleIds is not null
+                && policy.Match.TextPatterns is not null
+                && policy.Match.OutlineLevels is not null)
             && profile.NumberingPolicy.Instances is not null
             && profile.NumberingPolicy.ParagraphUses is not null
             && profile.TablePolicy.ObservedColumnCounts is not null
+            && profile.TableArchetypes.All(archetype =>
+                archetype.Match is not null
+                && archetype.Match.ColumnCounts is not null)
+            && profile.Diagnostics.All(diagnostic => diagnostic.Evidence is not null)
             && profile.SourceEvidence.ParagraphSamples is not null;
     }
 

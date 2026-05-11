@@ -47,13 +47,14 @@ public static class OpenXmlDocumentInspector
             ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
         var finalizationReasons = GetFinalizationReasons(body);
+        var styleOutlineLevels = ReadStyleOutlineLevels(mainPart);
 
         return new DocumentMap
         {
             Path = fullPath,
             RequiresFinalization = finalizationReasons.Count > 0,
             FinalizationReasons = finalizationReasons,
-            Paragraphs = ReadParagraphs(body),
+            Paragraphs = ReadParagraphs(body, styleOutlineLevels),
             Styles = ReadStyles(mainPart, body),
             Numbering = ReadNumbering(mainPart),
             Sections = ReadSections(body),
@@ -61,7 +62,7 @@ public static class OpenXmlDocumentInspector
         };
     }
 
-    private static List<DocumentParagraph> ReadParagraphs(Body body)
+    private static List<DocumentParagraph> ReadParagraphs(Body body, IReadOnlyDictionary<string, int> styleOutlineLevels)
     {
         return body
             .Descendants<Paragraph>()
@@ -72,7 +73,7 @@ public static class OpenXmlDocumentInspector
                 Index = index,
                 Text = paragraph.InnerText,
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
-                OutlineLevel = ToInt(paragraph.ParagraphProperties?.OutlineLevel?.Val),
+                OutlineLevel = ReadParagraphOutlineLevel(paragraph, styleOutlineLevels),
                 Format = ReadParagraphFormat(paragraph),
                 Numbering = ReadParagraphNumbering(paragraph),
                 Runs = ReadRuns(paragraph)
@@ -219,6 +220,47 @@ public static class OpenXmlDocumentInspector
             })
             .ToList()
             ?? [];
+    }
+
+    private static Dictionary<string, int> ReadStyleOutlineLevels(MainDocumentPart mainPart)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var styles = mainPart.StyleDefinitionsPart?.Styles;
+        if (styles is null)
+        {
+            return result;
+        }
+
+        foreach (var style in styles.Elements<Style>())
+        {
+            var styleId = style.StyleId?.Value;
+            var outlineLevel = ToInt(style.GetFirstChild<StyleParagraphProperties>()?
+                .GetFirstChild<OutlineLevel>()?.Val);
+            if (string.IsNullOrWhiteSpace(styleId) || outlineLevel is null)
+            {
+                continue;
+            }
+
+            result[styleId] = outlineLevel.Value;
+        }
+
+        return result;
+    }
+
+    private static int? ReadParagraphOutlineLevel(
+        Paragraph paragraph,
+        IReadOnlyDictionary<string, int> styleOutlineLevels)
+    {
+        var directOutlineLevel = ToInt(paragraph.ParagraphProperties?.OutlineLevel?.Val);
+        if (directOutlineLevel is not null)
+        {
+            return directOutlineLevel;
+        }
+
+        var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        return styleId is not null && styleOutlineLevels.TryGetValue(styleId, out var styleOutlineLevel)
+            ? styleOutlineLevel
+            : null;
     }
 
     private static List<DocumentNumbering> ReadNumbering(MainDocumentPart mainPart)
