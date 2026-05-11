@@ -13,6 +13,11 @@ public static class OpenXmlMicroEditor
 
     public static DocumentEditResult Apply(string docxPath, OperationRequest request)
     {
+        return Apply(docxPath, request, profile: null);
+    }
+
+    public static DocumentEditResult Apply(string docxPath, OperationRequest request, TemplateProfile? profile)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(docxPath);
         ArgumentNullException.ThrowIfNull(request);
 
@@ -23,7 +28,7 @@ public static class OpenXmlMicroEditor
 
         if (request.Mode is RequestMode.DryRun or RequestMode.ValidateOnly)
         {
-            return Edit(docxPath, request, writeChanges: false);
+            return Edit(docxPath, request, profile, writeChanges: false);
         }
 
         var fullPath = Path.GetFullPath(docxPath);
@@ -35,8 +40,13 @@ public static class OpenXmlMicroEditor
         {
             var baselineValidationErrors = GetValidationErrors(fullPath);
             File.Copy(fullPath, tempPath);
-            var result = Edit(tempPath, request, writeChanges: true);
+            var result = Edit(tempPath, request, profile, writeChanges: true);
             if (HasError(result))
+            {
+                return result;
+            }
+
+            if (!HasAppliedOperation(result))
             {
                 return result;
             }
@@ -63,7 +73,7 @@ public static class OpenXmlMicroEditor
         }
     }
 
-    private static DocumentEditResult Edit(string docxPath, OperationRequest request, bool writeChanges)
+    private static DocumentEditResult Edit(string docxPath, OperationRequest request, TemplateProfile? profile, bool writeChanges)
     {
         try
         {
@@ -75,7 +85,9 @@ public static class OpenXmlMicroEditor
             var body = wordDocument.Body
                 ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
-            var context = new EditContext(body, ReadParagraphStyles(mainPart));
+            var context = new EditContext(
+                ReadParagraphStyles(mainPart),
+                new OpenXmlTargetResolver(body, profile, request.ProfileOverrides));
             var result = new DocumentEditResult();
 
             foreach (var operation in request.Operations)
@@ -102,7 +114,7 @@ public static class OpenXmlMicroEditor
             {
                 MarkAppliedOperationsAsPreview(result);
             }
-            else if (writeChanges)
+            else if (writeChanges && HasAppliedOperation(result))
             {
                 wordDocument.Save();
             }
@@ -123,12 +135,26 @@ public static class OpenXmlMicroEditor
     {
         return operation.Op switch
         {
+            "resolveTarget" => ResolveTarget(context, options, operation),
             "replaceParagraphText" => ReplaceParagraphText(context, options, operation, writeChanges),
             "setParagraphStyle" => SetParagraphStyle(context, options, operation, writeChanges),
             "setRunFormat" => SetRunFormat(context, operation, writeChanges),
             null or "" => OperationError(operation, "operation_missing"),
             _ => OperationError(operation, "operation_unknown")
         };
+    }
+
+    private static OperationResult ResolveTarget(EditContext context, RunOptions options, ThesisOperation operation)
+    {
+        var resolution = context.Resolver.Resolve(operation.Target, options);
+        if (!resolution.Success)
+        {
+            return OperationError(operation, resolution.ErrorCode!);
+        }
+
+        var result = OperationSuccess(operation, "preview");
+        result.Matches.AddRange(resolution.Matches.Select(match => match.ToMatchInfo()));
+        return result;
     }
 
     private static OperationResult ReplaceParagraphText(
@@ -142,14 +168,15 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, "text_missing");
         }
 
-        if (!TryResolveParagraphs(context, options, operation.Target, out var matches, out var reason))
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
         {
             return OperationError(operation, reason);
         }
 
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
-        foreach (var (paragraph, index) in matches)
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
         {
+            var paragraph = target.Paragraph;
             var before = paragraph.InnerText;
             if (writeChanges)
             {
@@ -161,7 +188,7 @@ public static class OpenXmlMicroEditor
                 ReplaceParagraphRuns(paragraph, operation.Text);
             }
 
-            result.Matches.Add(ParagraphMatch(index, before, operation.Text));
+            result.Matches.Add(target.ToMatchInfo(before, operation.Text));
         }
 
         return result;
@@ -189,14 +216,15 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, "paragraph_style_missing");
         }
 
-        if (!TryResolveParagraphs(context, options, operation.Target, out var matches, out var reason))
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
         {
             return OperationError(operation, reason);
         }
 
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
-        foreach (var (paragraph, index) in matches)
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
         {
+            var paragraph = target.Paragraph;
             var before = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             if (writeChanges)
             {
@@ -211,7 +239,7 @@ public static class OpenXmlMicroEditor
                 paragraphStyle.Val = styleId;
             }
 
-            result.Matches.Add(ParagraphMatch(index, before ?? "", styleId));
+            result.Matches.Add(target.ToMatchInfo(before ?? "", styleId));
         }
 
         return result;
@@ -219,11 +247,20 @@ public static class OpenXmlMicroEditor
 
     private static OperationResult SetRunFormat(EditContext context, ThesisOperation operation, bool writeChanges)
     {
-        if (!TryResolveRun(context, operation.Target, out var run, out var paragraphIndex, out var runIndex, out var reason))
+        var singleRun = new RunOptions
+        {
+            CreateSnapshot = false,
+            StopOnError = true,
+            RequireSingleMatch = true,
+            TrackChanges = false
+        };
+        if (!TryResolveTargets(context, singleRun, operation, ResolvedTargetKind.Run, out var targets, out var reason))
         {
             return OperationError(operation, reason);
         }
 
+        var target = (ResolvedRunTarget)targets.Single();
+        var run = target.Run;
         var size = GetString(operation.Format, "fontSizeHalfPoints", out var formatError);
         if (formatError is not null)
         {
@@ -257,169 +294,35 @@ public static class OpenXmlMicroEditor
         }
 
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
-        result.Matches.Add(new MatchInfo
-        {
-            Id = $"{paragraphIndex}:{runIndex}",
-            Type = "run",
-            Preview = Preview(run.InnerText),
-            PreviewBefore = before,
-            PreviewAfter = FormatPreview(operation.Format)
-        });
+        result.Matches.Add(target.ToMatchInfo(before, FormatPreview(operation.Format)));
         return result;
     }
 
-    private static bool TryResolveParagraphs(
+    private static bool TryResolveTargets(
         EditContext context,
         RunOptions options,
-        JsonNode? target,
-        out List<(Paragraph Paragraph, int Index)> matches,
+        ThesisOperation operation,
+        ResolvedTargetKind acceptedKind,
+        out List<ResolvedTarget> matches,
         out string reason)
     {
         matches = [];
         reason = "";
 
-        var type = GetString(target, "type", out var typeError);
-        if (typeError is not null)
+        var resolution = context.Resolver.Resolve(operation.Target, options);
+        if (!resolution.Success)
         {
-            reason = typeError;
+            reason = resolution.ErrorCode!;
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(type))
-        {
-            reason = "target_type_missing";
-            return false;
-        }
-
-        if (type == "paragraphIndex")
-        {
-            var index = GetInt(target, "index", out var indexError);
-            if (indexError is not null)
-            {
-                reason = indexError;
-                return false;
-            }
-
-            if (index is null)
-            {
-                reason = "paragraph_index_missing";
-                return false;
-            }
-
-            if (index < 0 || index >= context.Paragraphs.Count)
-            {
-                reason = "paragraph_not_found";
-                return false;
-            }
-
-            matches.Add((context.Paragraphs[index.Value], index.Value));
-            return true;
-        }
-
-        if (type == "paragraphText")
-        {
-            var text = GetString(target, "text", out var textError);
-            if (textError is not null)
-            {
-                reason = textError;
-                return false;
-            }
-
-            if (text is null)
-            {
-                reason = "paragraph_text_missing";
-                return false;
-            }
-
-            var match = GetString(target, "match", out var matchError) ?? "exact";
-            if (matchError is not null)
-            {
-                reason = matchError;
-                return false;
-            }
-
-            matches = context.Paragraphs
-                .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
-                .Where(candidate => ParagraphTextMatches(candidate.Paragraph.InnerText, text, match))
-                .ToList();
-
-            if (matches.Count == 0)
-            {
-                reason = "paragraph_not_found";
-                return false;
-            }
-
-            if (matches.Count > 1 && options.RequireSingleMatch)
-            {
-                reason = "paragraph_ambiguous";
-                return false;
-            }
-
-            return true;
-        }
-
-        reason = "target_type_unsupported";
-        return false;
-    }
-
-    private static bool TryResolveRun(
-        EditContext context,
-        JsonNode? target,
-        out Run run,
-        out int paragraphIndex,
-        out int runIndex,
-        out string reason)
-    {
-        run = null!;
-        paragraphIndex = -1;
-        runIndex = -1;
-        reason = "";
-
-        var type = GetString(target, "type", out var typeError);
-        if (typeError is not null)
-        {
-            reason = typeError;
-            return false;
-        }
-
-        if (type != "runIndex")
+        if (resolution.Matches.Any(match => match.Kind != acceptedKind))
         {
             reason = "target_type_unsupported";
             return false;
         }
 
-        var requestedParagraphIndex = GetInt(target, "paragraphIndex", out var paragraphIndexError);
-        var requestedRunIndex = GetInt(target, "runIndex", out var runIndexError);
-        if (paragraphIndexError is not null || runIndexError is not null)
-        {
-            reason = paragraphIndexError ?? runIndexError!;
-            return false;
-        }
-
-        if (requestedParagraphIndex is null || requestedRunIndex is null)
-        {
-            reason = "run_index_missing";
-            return false;
-        }
-
-        if (requestedParagraphIndex < 0 || requestedParagraphIndex >= context.Paragraphs.Count)
-        {
-            reason = "paragraph_not_found";
-            return false;
-        }
-
-        var runs = context.Paragraphs[requestedParagraphIndex.Value]
-            .Descendants<Run>()
-            .ToList();
-        if (requestedRunIndex < 0 || requestedRunIndex >= runs.Count)
-        {
-            reason = "run_not_found";
-            return false;
-        }
-
-        paragraphIndex = requestedParagraphIndex.Value;
-        runIndex = requestedRunIndex.Value;
-        run = runs[runIndex];
+        matches = resolution.Matches;
         return true;
     }
 
@@ -519,18 +422,6 @@ public static class OpenXmlMicroEditor
         }
     }
 
-    private static MatchInfo ParagraphMatch(int index, string before, string after)
-    {
-        return new MatchInfo
-        {
-            Id = index.ToString(),
-            Type = "paragraph",
-            Preview = Preview(before),
-            PreviewBefore = Preview(before),
-            PreviewAfter = Preview(after)
-        };
-    }
-
     private static OperationResult OperationSuccess(ThesisOperation operation, string status)
     {
         return new OperationResult
@@ -578,36 +469,9 @@ public static class OpenXmlMicroEditor
             ?? [];
     }
 
-    private static List<Paragraph> SelectIndexedParagraphs(Body body)
-    {
-        return body
-            .Descendants<Paragraph>()
-            .Where(paragraph => !paragraph.Ancestors<Table>().Any())
-            .Where(paragraph => !IsFieldOnlyParagraph(paragraph))
-            .ToList();
-    }
-
-    private static bool IsFieldOnlyParagraph(Paragraph paragraph)
-    {
-        var hasFields = paragraph.Descendants<FieldChar>().Any()
-            || paragraph.Descendants<FieldCode>().Any()
-            || paragraph.Descendants<SimpleField>().Any();
-        return hasFields && !paragraph.Descendants<Text>().Any(text => !string.IsNullOrWhiteSpace(text.Text));
-    }
-
     private static bool HasUnsupportedParagraphContent(Paragraph paragraph)
     {
         return paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run);
-    }
-
-    private static bool ParagraphTextMatches(string candidate, string text, string match)
-    {
-        return match switch
-        {
-            "contains" => candidate.Contains(text, StringComparison.Ordinal),
-            "exact" => string.Equals(candidate, text, StringComparison.Ordinal),
-            _ => string.Equals(candidate, text, StringComparison.Ordinal)
-        };
     }
 
     private static string? GetString(JsonNode? node, string propertyName)
@@ -627,36 +491,6 @@ public static class OpenXmlMicroEditor
         try
         {
             return value.GetValue<string>();
-        }
-        catch (InvalidOperationException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-        catch (FormatException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-    }
-
-    private static int? GetInt(JsonNode? node, string propertyName)
-    {
-        return GetInt(node, propertyName, out _);
-    }
-
-    private static int? GetInt(JsonNode? node, string propertyName, out string? error)
-    {
-        error = null;
-        var value = node?[propertyName];
-        if (value is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return value.GetValue<int>();
         }
         catch (InvalidOperationException)
         {
@@ -745,6 +579,11 @@ public static class OpenXmlMicroEditor
             || result.Operations.Any(operation => operation.Status == "error");
     }
 
+    private static bool HasAppliedOperation(DocumentEditResult result)
+    {
+        return result.Operations.Any(operation => string.Equals(operation.Status, "applied", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string RunPreview(Run run)
     {
         var properties = run.RunProperties;
@@ -787,10 +626,10 @@ public static class OpenXmlMicroEditor
         }
     }
 
-    private sealed class EditContext(Body body, HashSet<string> paragraphStyleIds)
+    private sealed class EditContext(HashSet<string> paragraphStyleIds, OpenXmlTargetResolver resolver)
     {
-        public List<Paragraph> Paragraphs { get; } = SelectIndexedParagraphs(body);
-
         public HashSet<string> ParagraphStyleIds { get; } = paragraphStyleIds;
+
+        public OpenXmlTargetResolver Resolver { get; } = resolver;
     }
 }

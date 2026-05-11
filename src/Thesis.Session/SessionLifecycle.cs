@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Thesis.Schema;
 
 namespace Thesis.Session;
@@ -26,7 +27,7 @@ public static class SessionLifecycle
     public static CliResult Run(
         string workspace,
         OperationRequest request,
-        Func<string, OperationRequest, DocumentEditResult> editDocument)
+        Func<string, OperationRequest, TemplateProfile?, DocumentEditResult> editDocument)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(editDocument);
@@ -198,7 +199,7 @@ public static class SessionLifecycle
     private static CliResult RunLocked(
         SessionPaths paths,
         OperationRequest request,
-        Func<string, OperationRequest, DocumentEditResult> editDocument)
+        Func<string, OperationRequest, TemplateProfile?, DocumentEditResult> editDocument)
     {
         if (!TryLoadReadySession(paths, out var session, out var error))
         {
@@ -210,10 +211,15 @@ public static class SessionLifecycle
             return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
         }
 
+        if (!TryLoadProfile(session.ProfilePath, out var profile, out error))
+        {
+            return error!;
+        }
+
         SnapshotInfo? snapshot = null;
         if (request.Mode == RequestMode.Execute
             && request.Options.CreateSnapshot
-            && request.Operations.Count > 0)
+            && RequestHasEditOperations(request))
         {
             var snapshotName = string.IsNullOrWhiteSpace(request.RequestId)
                 ? "before-run"
@@ -232,7 +238,7 @@ public static class SessionLifecycle
         DocumentEditResult edit;
         try
         {
-            edit = editDocument(session.WorkingPath, request);
+            edit = editDocument(session.WorkingPath, request, profile);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -352,6 +358,74 @@ public static class SessionLifecycle
             Path = snapshotPath
         };
         return true;
+    }
+
+    private static bool TryLoadProfile(string path, out TemplateProfile? profile, out CliResult? error)
+    {
+        profile = null;
+        error = null;
+
+        try
+        {
+            var text = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(text) || text.Trim() == "{}")
+            {
+                return true;
+            }
+
+            profile = ThesisJson.Deserialize<TemplateProfile>(text);
+            if (!IsValidProfile(profile))
+            {
+                error = ProfileInvalid(path, "Workspace profile has an invalid structure.");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            error = ProfileInvalid(path, $"Workspace profile is invalid: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool RequestHasEditOperations(OperationRequest request)
+    {
+        return request.Operations.Any(operation => !string.Equals(operation.Op, "resolveTarget", StringComparison.Ordinal));
+    }
+
+    private static bool IsValidProfile(TemplateProfile? profile)
+    {
+        return profile is not null
+            && profile.StyleRoles is not null
+            && profile.FinalizationReasons is not null
+            && profile.PageSetup is not null
+            && profile.NumberingPolicy is not null
+            && profile.TablePolicy is not null
+            && profile.SourceEvidence is not null
+            && profile.StyleRoles.All(role => role.Evidence is not null)
+            && profile.NumberingPolicy.Instances is not null
+            && profile.NumberingPolicy.ParagraphUses is not null
+            && profile.TablePolicy.ObservedColumnCounts is not null
+            && profile.SourceEvidence.ParagraphSamples is not null;
+    }
+
+    private static CliResult ProfileInvalid(string path, string message)
+    {
+        return new CliResult
+        {
+            Status = "error",
+            Diagnostics =
+            [
+                new Diagnostic
+                {
+                    Severity = "error",
+                    Code = "profile_invalid",
+                    Message = message,
+                    Path = path
+                }
+            ]
+        };
     }
 
     private static CliResult WithLock(SessionPaths paths, Func<CliResult> action)

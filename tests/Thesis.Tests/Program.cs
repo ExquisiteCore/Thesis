@@ -22,6 +22,23 @@ var tests = new (string Name, Action Test)[]
     ("CLI run execute aborts transaction on operation error", CliRunExecuteAbortsTransactionOnOperationError),
     ("CLI run wrong typed target returns operation diagnostic", CliRunWrongTypedTargetReturnsOperationDiagnostic),
     ("CLI run rejects invalid run font size", CliRunRejectsInvalidRunFontSize),
+    ("CLI run resolveTarget finds paragraphs by styleId", CliRunResolveTargetFindsParagraphsByStyleId),
+    ("CLI run resolveTarget is read-only in execute mode", CliRunResolveTargetIsReadOnlyInExecuteMode),
+    ("CLI run execute resolveTarget does not create default snapshot", CliRunExecuteResolveTargetDoesNotCreateDefaultSnapshot),
+    ("CLI run paragraph operation rejects table target", CliRunParagraphOperationRejectsTableTarget),
+    ("CLI run returns profile_invalid for malformed workspace profile", CliRunReturnsProfileInvalidForMalformedWorkspaceProfile),
+    ("CLI run returns profile_invalid for structurally invalid workspace profile", CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile),
+    ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
+    ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
+    ("CLI run profileOverrides roleAliases resolve profile role", CliRunProfileOverridesRoleAliasesResolveProfileRole),
+    ("CLI run role target merges multiple matching profile entries", CliRunRoleTargetMergesMultipleMatchingProfileEntries),
+    ("CLI run role afterHeading resolves shifted paragraph", CliRunRoleAfterHeadingResolvesShiftedParagraph),
+    ("CLI run sectionRange resolves paragraphs between role anchors", CliRunSectionRangeResolvesParagraphsBetweenRoleAnchors),
+    ("CLI run sectionRange rejects ambiguous role anchor", CliRunSectionRangeRejectsAmbiguousRoleAnchor),
+    ("CLI run paragraphText regex resolves chapter headings", CliRunParagraphTextRegexResolvesChapterHeadings),
+    ("CLI run resolveTarget finds table cells", CliRunResolveTargetFindsTableCells),
+    ("CLI run requireSingleMatch blocks ambiguous style target", CliRunRequireSingleMatchBlocksAmbiguousStyleTarget),
+    ("CLI run wrong typed section range anchor returns operation diagnostic", CliRunWrongTypedSectionRangeAnchorReturnsOperationDiagnostic),
     ("CLI run refuses replacing complex paragraph structure", CliRunRefusesReplacingComplexParagraphStructure),
     ("CLI run execute refuses locked workspace", CliRunExecuteRefusesLockedWorkspace),
     ("CLI unknown command returns JSON error", CliUnknownCommandReturnsJsonError),
@@ -527,6 +544,601 @@ static void CliRunRejectsInvalidRunFontSize()
     AssertEqual("font_size_invalid", result.Operations[0].Reason);
     AssertEqual("font_size_invalid", result.Diagnostics[0].Code);
     AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunResolveTargetFindsParagraphsByStyleId()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-resolve-style",
+          "mode": "dryRun",
+          "options": {
+            "requireSingleMatch": false
+          },
+          "operations": [
+            {
+              "id": "find-heading1",
+              "op": "resolveTarget",
+              "target": { "type": "styleId", "styleId": "Heading1" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual(5, result.Operations[0].Matches.Count);
+    AssertEqual("p1", result.Operations[0].Matches[0].Id);
+    AssertEqual("paragraph", result.Operations[0].Matches[0].Type);
+    AssertEqual("第一章 绪论", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunResolveTargetIsReadOnlyInExecuteMode()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-resolve-execute",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "find-table",
+              "op": "resolveTarget",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("t0", result.Operations[0].Matches[0].Id);
+    AssertEqual("table", result.Operations[0].Matches[0].Type);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunExecuteResolveTargetDoesNotCreateDefaultSnapshot()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var sessionBefore = ThesisJson.Deserialize<SessionState>(File.ReadAllText(context.Paths.SessionJson));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-resolve-default-snapshot",
+          "mode": "execute",
+          "operations": [
+            {
+              "id": "find-table",
+              "op": "resolveTarget",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(null, result.Snapshot);
+    var sessionAfter = ThesisJson.Deserialize<SessionState>(File.ReadAllText(context.Paths.SessionJson));
+    AssertEqual(sessionBefore.SnapshotCounter, sessionAfter.SnapshotCounter);
+    AssertEqual(1, Directory.EnumerateFiles(context.Paths.SnapshotsDirectory, "*.docx").Count());
+}
+
+static void CliRunParagraphOperationRejectsTableTarget()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-table-reject",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-replace-table",
+              "op": "replaceParagraphText",
+              "target": { "type": "tableIndex", "index": 0 },
+              "text": "not allowed"
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("error", result.Operations[0].Status);
+    AssertEqual("target_type_unsupported", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunReturnsProfileInvalidForMalformedWorkspaceProfile()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    File.WriteAllText(context.Paths.ProfileJson, "{not-json");
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-profile",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
+static void CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    File.WriteAllText(
+        context.Paths.ProfileJson,
+        """
+        {
+          "schemaVersion": "1.0",
+          "profileKind": "templateProfile",
+          "styleRoles": null
+        }
+        """);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-profile-shape",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
+static void CliRunReturnsProfileInvalidForNullRoleEvidence()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    File.WriteAllText(
+        context.Paths.ProfileJson,
+        """
+        {
+          "schemaVersion": "1.0",
+          "profileKind": "templateProfile",
+          "styleRoles": [
+            {
+              "role": "abstract.zh",
+              "styleId": "Heading1",
+              "evidence": null
+            }
+          ]
+        }
+        """);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-null-evidence",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
+static void CliRunResolveTargetFindsRoleEvidenceFromProfile()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteResolverProfile(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(2, result.Operations[0].Matches.Count);
+    AssertEqual("p3", result.Operations[0].Matches[0].Id);
+    AssertEqual("摘要", result.Operations[0].Matches[0].Preview);
+    AssertEqual("p6", result.Operations[0].Matches[1].Id);
+    AssertEqual("参考文献", result.Operations[0].Matches[1].Preview);
+}
+
+static void CliRunProfileOverridesRoleAliasesResolveProfileRole()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteResolverProfile(context, includeAmbiguousZhEvidence: false);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "profileOverrides": {
+            "roleAliases": {
+              "zhAbstract": "abstract.zh"
+            }
+          },
+          "operations": [
+            {
+              "id": "find-role-alias",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "zhAbstract" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("p3", result.Operations[0].Matches[0].Id);
+    AssertEqual("摘要", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunRoleTargetMergesMultipleMatchingProfileEntries()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "abstract.zh",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 3, StyleId = "Heading1", TextPreview = "摘要" }
+                ]
+            },
+            new ProfileStyleRole
+            {
+                Role = "abstract.zh",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 4, StyleId = "Heading1", TextPreview = "Abstract" }
+                ]
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual(2, result.Operations[0].Matches.Count);
+    AssertEqual("p3", result.Operations[0].Matches[0].Id);
+    AssertEqual("p4", result.Operations[0].Matches[1].Id);
+}
+
+static void CliRunRoleAfterHeadingResolvesShiftedParagraph()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteResolverProfile(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "options": {
+            "requireSingleMatch": false
+          },
+          "operations": [
+            {
+              "id": "after-role",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "abstract.zh", "position": "afterHeading", "offset": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("p4", result.Operations[0].Matches[0].Id);
+    AssertEqual("Abstract", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunSectionRangeResolvesParagraphsBetweenRoleAnchors()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteResolverProfile(context, includeAmbiguousZhEvidence: false);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "range",
+              "op": "resolveTarget",
+              "target": {
+                "type": "sectionRange",
+                "start": { "type": "role", "role": "abstract.zh" },
+                "end": { "type": "role", "role": "toc" },
+                "includeStart": false,
+                "includeEnd": false
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual(1, result.Operations[0].Matches.Count);
+    AssertEqual("p4", result.Operations[0].Matches[0].Id);
+    AssertEqual("Abstract", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunSectionRangeRejectsAmbiguousRoleAnchor()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteResolverProfile(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "range",
+              "op": "resolveTarget",
+              "target": {
+                "type": "sectionRange",
+                "start": { "type": "role", "role": "abstract.zh" },
+                "end": { "type": "role", "role": "toc" }
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("range_anchor_ambiguous", result.Operations[0].Reason);
+}
+
+static void CliRunParagraphTextRegexResolvesChapterHeadings()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "chapter",
+              "op": "resolveTarget",
+              "target": { "type": "paragraphText", "text": "^第[一二三四五六七八九十]+章", "match": "regex" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("p1", result.Operations[0].Matches[0].Id);
+    AssertEqual("第一章 绪论", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunResolveTargetFindsTableCells()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "cell",
+              "op": "resolveTarget",
+              "target": { "type": "tableCell", "tableIndex": 0, "rowIndex": 1, "cellIndex": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("t0:r1:c1", result.Operations[0].Matches[0].Id);
+    AssertEqual("tableCell", result.Operations[0].Matches[0].Type);
+    AssertEqual("B2", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunRequireSingleMatchBlocksAmbiguousStyleTarget()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "options": { "requireSingleMatch": true },
+          "operations": [
+            {
+              "id": "ambiguous",
+              "op": "resolveTarget",
+              "target": { "type": "styleId", "styleId": "Heading1" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("target_ambiguous", result.Operations[0].Reason);
+}
+
+static void CliRunWrongTypedSectionRangeAnchorReturnsOperationDiagnostic()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "bad-range",
+              "op": "resolveTarget",
+              "target": {
+                "type": "sectionRange",
+                "start": { "type": "paragraphIndex", "index": "bad" },
+                "end": { "type": "paragraphIndex", "index": 2 }
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("target_value_invalid", result.Operations[0].Reason);
 }
 
 static void CliRunRefusesReplacingComplexParagraphStructure()
@@ -1274,6 +1886,52 @@ static WorkspaceContext CreateInitializedDocxWorkspace(string root)
         Path.GetFullPath(workspace),
         SessionPaths.FromWorkspace(workspace),
         File.ReadAllBytes(sourceDoc));
+}
+
+static void WriteResolverProfile(WorkspaceContext context, bool includeAmbiguousZhEvidence = true)
+{
+    var zhEvidence = new List<ProfileParagraphEvidence>
+    {
+        new() { ParagraphIndex = 3, StyleId = "Heading1", TextPreview = "摘要" }
+    };
+    if (includeAmbiguousZhEvidence)
+    {
+        zhEvidence.Add(new ProfileParagraphEvidence { ParagraphIndex = 6, StyleId = "Heading1", TextPreview = "参考文献" });
+    }
+
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "abstract.zh",
+                StyleId = "Heading1",
+                Evidence = zhEvidence
+            },
+            new ProfileStyleRole
+            {
+                Role = "abstract.en",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 4, StyleId = "Heading1", TextPreview = "Abstract" }
+                ]
+            },
+            new ProfileStyleRole
+            {
+                Role = "toc",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 5, StyleId = "Heading1", TextPreview = "目录" }
+                ]
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
 }
 
 static void WriteFixtureDocx(string path)
