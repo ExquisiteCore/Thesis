@@ -22,6 +22,7 @@ public static class TemplateProfileBuilder
             NumberingPolicy = BuildNumberingPolicy(map),
             TablePolicy = BuildTablePolicy(map),
             TableArchetypes = BuildTableArchetypes(map),
+            Diagnostics = BuildDiagnostics(map),
             SourceEvidence = BuildSourceEvidence(map)
         };
     }
@@ -294,6 +295,46 @@ public static class TemplateProfileBuilder
     private static bool BorderValueEquals(TableBorderLineSample? border, string value)
     {
         return string.Equals(border?.Value, value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<ProfileDiagnostic> BuildDiagnostics(DocumentMap map)
+    {
+        var diagnostics = new List<ProfileDiagnostic>();
+
+        if (!map.Paragraphs.Any(paragraph => IsChineseAbstractHeading(paragraph.Text)))
+        {
+            diagnostics.Add(new ProfileDiagnostic
+            {
+                Severity = "warning",
+                Code = "profile_role_missing",
+                Message = "Chinese abstract heading was not found.",
+                Evidence = ["role:abstract.zh"]
+            });
+        }
+
+        if (!map.Paragraphs.Any(paragraph => IsReferencesHeading(paragraph.Text)))
+        {
+            diagnostics.Add(new ProfileDiagnostic
+            {
+                Severity = "warning",
+                Code = "profile_role_missing",
+                Message = "References heading was not found.",
+                Evidence = ["role:references"]
+            });
+        }
+
+        if (map.Tables.Count == 0)
+        {
+            diagnostics.Add(new ProfileDiagnostic
+            {
+                Severity = "info",
+                Code = "profile_table_missing",
+                Message = "No table samples were found in the source document.",
+                Evidence = ["tables:0"]
+            });
+        }
+
+        return diagnostics;
     }
 
     private static ProfileSourceEvidence BuildSourceEvidence(DocumentMap map)

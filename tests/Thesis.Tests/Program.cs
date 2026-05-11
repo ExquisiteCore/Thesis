@@ -96,6 +96,7 @@ var tests = new (string Name, Action Test)[]
     ("Template profile builder infers role policies", TemplateProfileBuilderInfersRolePolicies),
     ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
     ("Template profile builder infers three-line table archetype", TemplateProfileBuilderInfersThreeLineTableArchetype),
+    ("Template profile builder reports weak profile diagnostics", TemplateProfileBuilderReportsWeakProfileDiagnostics),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
@@ -3161,6 +3162,27 @@ static void TemplateProfileBuilderInfersThreeLineTableArchetype()
     AssertEqual(2, archetype.Match.MinRows);
     AssertEqual(2, archetype.Match.ColumnCounts[0]);
     AssertEqual("single", archetype.Format!.Borders!.Top!.Value);
+}
+
+static void TemplateProfileBuilderReportsWeakProfileDiagnostics()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        Paragraphs =
+        [
+            new DocumentParagraph { Index = 0, Text = "正文", StyleId = "Normal", Format = new ParagraphFormatSample() }
+        ],
+        Styles =
+        [
+            new DocumentStyle { StyleId = "Normal", Name = "Normal", Type = "paragraph", UsageCount = 1 }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    AssertEqual(true, profile.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_role_missing"));
+    AssertEqual(true, profile.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_table_missing"));
 }
 
 static void CliProfileExtractWritesTemplateProfileFromDocx()
