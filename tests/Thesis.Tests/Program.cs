@@ -10,6 +10,7 @@ using Thesis.Session;
 var tests = new (string Name, Action Test)[]
 {
     ("JSON roundtrip uses camelCase and enum strings", JsonRoundtripUsesCamelCaseAndEnumStrings),
+    ("Template profile rules serialize as camelCase JSON", TemplateProfileRulesSerializeAsCamelCaseJson),
     ("SessionPaths resolves expected filenames", SessionPathsResolvesExpectedFilenames),
     ("SessionInitializer creates workspace files and refuses existing workspace", SessionInitializerCreatesFilesAndRefusesExistingWorkspace),
     ("SessionInitializer refuses non-empty stale workspace", SessionInitializerRefusesNonEmptyStaleWorkspace),
@@ -153,6 +154,68 @@ static void JsonRoundtripUsesCamelCaseAndEnumStrings()
     AssertEqual(true, roundtrip.Options.StopOnError);
     AssertEqual(false, roundtrip.Options.RequireSingleMatch);
     AssertEqual(false, roundtrip.Options.TrackChanges);
+}
+
+static void TemplateProfileRulesSerializeAsCamelCaseJson()
+{
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "heading1",
+                AppliesTo = "paragraph",
+                Priority = 100,
+                Match = new ProfileRoleMatch
+                {
+                    StyleIds = ["Heading1"],
+                    TextPatterns = ["^第.+章"],
+                    OutlineLevels = [0]
+                },
+                Format = new ParagraphFormatSample
+                {
+                    Alignment = "center",
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "28" }
+                }
+            }
+        ],
+        TableArchetypes =
+        [
+            new ProfileTableArchetype
+            {
+                Name = "threeLine",
+                Confidence = 0.91,
+                Match = new ProfileTableMatch { MinRows = 2, ColumnCounts = [2, 3] },
+                Format = new TableFormatSample
+                {
+                    Borders = new TableBordersSample
+                    {
+                        Top = new TableBorderLineSample { Value = "single", Size = "12" },
+                        InsideVertical = new TableBorderLineSample { Value = "nil" }
+                    }
+                }
+            }
+        ],
+        Diagnostics =
+        [
+            new ProfileDiagnostic
+            {
+                Severity = "info",
+                Code = "profile_rule_inferred",
+                Message = "heading1 policy inferred from style usage",
+                Evidence = ["style:Heading1", "paragraph:p1"]
+            }
+        ]
+    };
+
+    var json = ThesisJson.Serialize(profile);
+
+    AssertContains(json, "\"rolePolicies\"");
+    AssertContains(json, "\"appliesTo\":\"paragraph\"");
+    AssertContains(json, "\"outlineLevels\":[0]");
+    AssertContains(json, "\"tableArchetypes\"");
+    AssertContains(json, "\"diagnostics\"");
 }
 
 static void SessionPathsResolvesExpectedFilenames()

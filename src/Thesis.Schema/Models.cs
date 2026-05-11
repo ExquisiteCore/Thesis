@@ -406,9 +406,15 @@ public sealed class TemplateProfile
 
     public List<ProfileStyleRole> StyleRoles { get; set; } = [];
 
+    public List<ProfileRolePolicy> RolePolicies { get; set; } = [];
+
     public ProfileNumberingPolicy NumberingPolicy { get; set; } = new();
 
     public ProfileTablePolicy TablePolicy { get; set; } = new();
+
+    public List<ProfileTableArchetype> TableArchetypes { get; set; } = [];
+
+    public List<ProfileDiagnostic> Diagnostics { get; set; } = [];
 
     public ProfileSourceEvidence SourceEvidence { get; set; } = new();
 }
@@ -441,6 +447,30 @@ public sealed class ProfileStyleRole
     public ParagraphFormatSample? Format { get; set; }
 
     public List<ProfileParagraphEvidence> Evidence { get; set; } = [];
+}
+
+public sealed class ProfileRolePolicy
+{
+    public string Role { get; set; } = "";
+
+    public string AppliesTo { get; set; } = "paragraph";
+
+    public int Priority { get; set; }
+
+    public double Confidence { get; set; }
+
+    public ProfileRoleMatch Match { get; set; } = new();
+
+    public ParagraphFormatSample? Format { get; set; }
+}
+
+public sealed class ProfileRoleMatch
+{
+    public List<string> StyleIds { get; set; } = [];
+
+    public List<string> TextPatterns { get; set; } = [];
+
+    public List<int> OutlineLevels { get; set; } = [];
 }
 
 public sealed class ProfileParagraphEvidence
@@ -492,6 +522,37 @@ public sealed class ProfileTableSample
     public string TextPreview { get; set; } = "";
 
     public TableFormatSample? Format { get; set; }
+}
+
+public sealed class ProfileTableArchetype
+{
+    public string Name { get; set; } = "";
+
+    public double Confidence { get; set; }
+
+    public ProfileTableMatch Match { get; set; } = new();
+
+    public TableFormatSample? Format { get; set; }
+}
+
+public sealed class ProfileTableMatch
+{
+    public int? MinRows { get; set; }
+
+    public int? MaxRows { get; set; }
+
+    public List<int> ColumnCounts { get; set; } = [];
+}
+
+public sealed class ProfileDiagnostic
+{
+    public string Severity { get; set; } = "info";
+
+    public string Code { get; set; } = "info";
+
+    public string Message { get; set; } = "";
+
+    public List<string> Evidence { get; set; } = [];
 }
 
 public sealed class ProfileSourceEvidence
