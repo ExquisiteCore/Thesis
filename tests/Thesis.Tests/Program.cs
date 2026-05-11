@@ -93,6 +93,7 @@ var tests = new (string Name, Action Test)[]
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
     ("Template profile builder returns typed profile with semantic roles", TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles),
     ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
+    ("Template profile builder infers role policies", TemplateProfileBuilderInfersRolePolicies),
     ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
@@ -2966,6 +2967,50 @@ static void TemplateProfileBuilderCopiesRoleFormatSamples()
     map.Paragraphs[0].Format.RunFormat!.EastAsiaFont = "宋体";
     AssertEqual("center", role.Format.Alignment);
     AssertEqual("黑体", role.Format.RunFormat.EastAsiaFont);
+}
+
+static void TemplateProfileBuilderInfersRolePolicies()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        Styles =
+        [
+            new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph", UsageCount = 3 },
+            new DocumentStyle { StyleId = "Normal", Name = "Normal", Type = "paragraph", UsageCount = 5 }
+        ],
+        Paragraphs =
+        [
+            new DocumentParagraph
+            {
+                Index = 0,
+                Text = "第一章 绪论",
+                StyleId = "Heading1",
+                OutlineLevel = 0,
+                Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center" }
+            },
+            new DocumentParagraph
+            {
+                Index = 1,
+                Text = "正文内容",
+                StyleId = "Normal",
+                Format = new ParagraphFormatSample { StyleId = "Normal", FirstLineIndentTwips = 480 }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    var headingPolicy = profile.RolePolicies.Single(policy => policy.Role == "heading1");
+    AssertEqual("paragraph", headingPolicy.AppliesTo);
+    AssertEqual(true, headingPolicy.Priority > 0);
+    AssertEqual("Heading1", headingPolicy.Match.StyleIds[0]);
+    AssertEqual(0, headingPolicy.Match.OutlineLevels[0]);
+    AssertEqual("center", headingPolicy.Format!.Alignment);
+
+    var bodyPolicy = profile.RolePolicies.Single(policy => policy.Role == "body");
+    AssertEqual("Normal", bodyPolicy.Match.StyleIds[0]);
+    AssertEqual(480, bodyPolicy.Format!.FirstLineIndentTwips);
 }
 
 static void TemplateProfileBuilderCopiesTableFormatSamples()

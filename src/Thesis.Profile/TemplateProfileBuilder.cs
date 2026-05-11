@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
@@ -17,6 +18,7 @@ public static class TemplateProfileBuilder
             FinalizationReasons = [.. map.FinalizationReasons],
             PageSetup = BuildPageSetup(map),
             StyleRoles = BuildStyleRoles(map),
+            RolePolicies = BuildRolePolicies(map),
             NumberingPolicy = BuildNumberingPolicy(map),
             TablePolicy = BuildTablePolicy(map),
             SourceEvidence = BuildSourceEvidence(map)
@@ -49,6 +51,19 @@ public static class TemplateProfileBuilder
         return roles;
     }
 
+    private static List<ProfileRolePolicy> BuildRolePolicies(DocumentMap map)
+    {
+        var policies = new List<ProfileRolePolicy>();
+        AddRolePolicy(policies, map, "title", 120, "Title", []);
+        AddRolePolicy(policies, map, "heading1", 100, "Heading1", [0]);
+        AddRolePolicy(policies, map, "body", 10, "Normal", []);
+        AddSemanticRolePolicy(policies, map, "abstract.zh", 90, IsChineseAbstractHeading);
+        AddSemanticRolePolicy(policies, map, "abstract.en", 90, IsEnglishAbstractHeading);
+        AddSemanticRolePolicy(policies, map, "toc", 80, IsTocHeading);
+        AddSemanticRolePolicy(policies, map, "references", 80, IsReferencesHeading);
+        return policies;
+    }
+
     private static void AddStyleRole(List<ProfileStyleRole> roles, DocumentMap map, string role, string styleId)
     {
         var style = map.Styles.FirstOrDefault(candidate =>
@@ -74,6 +89,42 @@ public static class TemplateProfileBuilder
             Confidence = evidence.Count > 0 ? 0.9 : 0.55,
             Format = Clone(SelectRoleFormat(map, evidence, style.StyleId)),
             Evidence = evidence
+        });
+    }
+
+    private static void AddRolePolicy(
+        List<ProfileRolePolicy> policies,
+        DocumentMap map,
+        string role,
+        int priority,
+        string styleId,
+        int[] outlineLevels)
+    {
+        var style = map.Styles.FirstOrDefault(candidate =>
+            string.Equals(candidate.StyleId, styleId, StringComparison.OrdinalIgnoreCase));
+        if (style is null)
+        {
+            return;
+        }
+
+        var evidence = map.Paragraphs
+            .Where(paragraph => string.Equals(paragraph.StyleId, style.StyleId, StringComparison.OrdinalIgnoreCase))
+            .Take(3)
+            .Select(ToParagraphEvidence)
+            .ToList();
+
+        policies.Add(new ProfileRolePolicy
+        {
+            Role = role,
+            AppliesTo = "paragraph",
+            Priority = priority,
+            Confidence = style.UsageCount > 0 ? 0.88 : 0.55,
+            Match = new ProfileRoleMatch
+            {
+                StyleIds = [style.StyleId ?? styleId],
+                OutlineLevels = [.. outlineLevels]
+            },
+            Format = Clone(SelectRoleFormat(map, evidence, style.StyleId))
         });
     }
 
@@ -103,6 +154,35 @@ public static class TemplateProfileBuilder
             Confidence = 0.82,
             Format = Clone(SelectRoleFormat(map, evidence, paragraph.StyleId)),
             Evidence = evidence
+        });
+    }
+
+    private static void AddSemanticRolePolicy(
+        List<ProfileRolePolicy> policies,
+        DocumentMap map,
+        string role,
+        int priority,
+        Func<string, bool> predicate)
+    {
+        var paragraph = map.Paragraphs.FirstOrDefault(candidate => predicate(candidate.Text));
+        if (paragraph is null)
+        {
+            return;
+        }
+
+        policies.Add(new ProfileRolePolicy
+        {
+            Role = role,
+            AppliesTo = "paragraph",
+            Priority = priority,
+            Confidence = 0.82,
+            Match = new ProfileRoleMatch
+            {
+                StyleIds = string.IsNullOrWhiteSpace(paragraph.StyleId) ? [] : [paragraph.StyleId],
+                TextPatterns = [CreateExactTextPattern(paragraph.Text)],
+                OutlineLevels = paragraph.OutlineLevel.HasValue ? [paragraph.OutlineLevel.Value] : []
+            },
+            Format = Clone(paragraph.Format)
         });
     }
 
@@ -229,6 +309,11 @@ public static class TemplateProfileBuilder
         }
 
         return normalized.Trim().ToLowerInvariant();
+    }
+
+    private static string CreateExactTextPattern(string text)
+    {
+        return Regex.Escape(text.Trim());
     }
 
     private static PageSizeInfo Clone(PageSizeInfo value)
