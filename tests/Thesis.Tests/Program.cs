@@ -55,6 +55,8 @@ var tests = new (string Name, Action Test)[]
     ("CLI run returns profile_invalid for null profile rule containers", CliRunReturnsProfileInvalidForNullProfileRuleContainers),
     ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
     ("CLI run role target uses role policies when evidence is missing", CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing),
+    ("CLI run role policy target honors afterHeading position", CliRunRolePolicyTargetHonorsAfterHeadingPosition),
+    ("CLI run role policy target matches style outline levels", CliRunRolePolicyTargetMatchesStyleOutlineLevels),
     ("CLI run profileOverrides roleAliases resolve profile role", CliRunProfileOverridesRoleAliasesResolveProfileRole),
     ("CLI run role target merges multiple matching profile entries", CliRunRoleTargetMergesMultipleMatchingProfileEntries),
     ("CLI run role afterHeading resolves shifted paragraph", CliRunRoleAfterHeadingResolvesShiftedParagraph),
@@ -2000,6 +2002,92 @@ static void CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing()
     AssertEqual(0, exitCode);
     AssertEqual("success", result.Status);
     AssertEqual(true, result.Operations[0].Matches.Count > 0);
+}
+
+static void CliRunRolePolicyTargetHonorsAfterHeadingPosition()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "heading1",
+                AppliesTo = "paragraph",
+                Priority = 100,
+                Match = new ProfileRoleMatch { TextPatterns = ["^摘要$"] }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "after-policy",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "heading1", "position": "afterHeading", "offset": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("p4", result.Operations[0].Matches[0].Id);
+    AssertEqual("Abstract", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunRolePolicyTargetMatchesStyleOutlineLevels()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "heading1",
+                AppliesTo = "paragraph",
+                Priority = 100,
+                Match = new ProfileRoleMatch { OutlineLevels = [0], TextPatterns = ["^第一章 绪论$"] }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "style-outline-policy",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "heading1" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("p1", result.Operations[0].Matches[0].Id);
+    AssertEqual("第一章 绪论", result.Operations[0].Matches[0].Preview);
 }
 
 static void CliRunProfileOverridesRoleAliasesResolveProfileRole()

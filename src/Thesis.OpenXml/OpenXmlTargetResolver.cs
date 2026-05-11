@@ -9,14 +9,20 @@ internal sealed class OpenXmlTargetResolver
 {
     private readonly TemplateProfile? _profile;
     private readonly JsonObject? _profileOverrides;
+    private readonly IReadOnlyDictionary<string, int> _styleOutlineLevels;
     private readonly List<Table> _tables;
 
-    public OpenXmlTargetResolver(Body body, TemplateProfile? profile, JsonObject? profileOverrides)
+    public OpenXmlTargetResolver(
+        Body body,
+        TemplateProfile? profile,
+        JsonObject? profileOverrides,
+        IReadOnlyDictionary<string, int>? styleOutlineLevels = null)
     {
         ArgumentNullException.ThrowIfNull(body);
 
         _profile = profile;
         _profileOverrides = profileOverrides;
+        _styleOutlineLevels = styleOutlineLevels ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         _tables = body.Descendants<Table>().ToList();
         Paragraphs = SelectIndexedParagraphs(body);
     }
@@ -247,13 +253,13 @@ internal sealed class OpenXmlTargetResolver
             .ToList();
         if (profileRoles is null || profileRoles.Count == 0)
         {
-            return ResolveRolePolicyOrError(resolvedRole, options, "role_not_found");
+            return ResolveRolePolicyOrError(resolvedRole, position, offset.Value, options, "role_not_found");
         }
 
         var anchorIndices = GetRoleAnchorIndices(profileRoles);
         if (anchorIndices.Count == 0)
         {
-            return ResolveRolePolicyOrError(resolvedRole, options, "target_not_found");
+            return ResolveRolePolicyOrError(resolvedRole, position, offset.Value, options, "target_not_found");
         }
 
         var matches = anchorIndices
@@ -266,20 +272,35 @@ internal sealed class OpenXmlTargetResolver
         return ValidateMatchCount(matches, options);
     }
 
-    private TargetResolutionResult ResolveRolePolicyOrError(string role, RunOptions options, string fallbackError)
+    private TargetResolutionResult ResolveRolePolicyOrError(
+        string role,
+        string position,
+        int offset,
+        RunOptions options,
+        string fallbackError)
     {
-        var policyMatches = ResolveRolePolicy(role, out var policyError);
+        var policyAnchorIndices = ResolveRolePolicyAnchorIndices(role, out var policyError);
         if (policyError is not null)
         {
             return TargetResolutionResult.Error(policyError);
         }
 
-        return policyMatches is null
-            ? TargetResolutionResult.Error(fallbackError)
-            : ValidateMatchCount(policyMatches, options);
+        if (policyAnchorIndices is null)
+        {
+            return TargetResolutionResult.Error(fallbackError);
+        }
+
+        var matches = policyAnchorIndices
+            .Select(index => ApplyRolePosition(index, position, offset))
+            .Where(index => index >= 0 && index < Paragraphs.Count)
+            .Distinct()
+            .Select(index => (ResolvedTarget)new ResolvedParagraphTarget(Paragraphs[index], index))
+            .ToList();
+
+        return ValidateMatchCount(matches, options);
     }
 
-    private List<ResolvedTarget>? ResolveRolePolicy(string role, out string? error)
+    private List<int>? ResolveRolePolicyAnchorIndices(string role, out string? error)
     {
         error = null;
         var policies = _profile?.RolePolicies
@@ -298,7 +319,7 @@ internal sealed class OpenXmlTargetResolver
             return Paragraphs
                 .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
                 .Where(candidate => policies.Any(policy => RolePolicyMatches(candidate.Paragraph, policy)))
-                .Select(candidate => (ResolvedTarget)new ResolvedParagraphTarget(candidate.Paragraph, candidate.Index))
+                .Select(candidate => candidate.Index)
                 .ToList();
         }
         catch (ArgumentException)
@@ -483,7 +504,7 @@ internal sealed class OpenXmlTargetResolver
         return paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
     }
 
-    private static bool RolePolicyMatches(Paragraph paragraph, ProfileRolePolicy policy)
+    private bool RolePolicyMatches(Paragraph paragraph, ProfileRolePolicy policy)
     {
         var match = policy.Match;
         return StyleMatches(paragraph, match.StyleIds)
@@ -513,7 +534,7 @@ internal sealed class OpenXmlTargetResolver
         return textPatterns.Any(pattern => Regex.IsMatch(paragraph.InnerText, pattern, RegexOptions.CultureInvariant));
     }
 
-    private static bool OutlineLevelMatches(Paragraph paragraph, List<int> outlineLevels)
+    private bool OutlineLevelMatches(Paragraph paragraph, List<int> outlineLevels)
     {
         if (outlineLevels.Count == 0)
         {
@@ -524,9 +545,18 @@ internal sealed class OpenXmlTargetResolver
         return outlineLevel is not null && outlineLevels.Contains(outlineLevel.Value);
     }
 
-    private static int? ReadOutlineLevel(Paragraph paragraph)
+    private int? ReadOutlineLevel(Paragraph paragraph)
     {
-        return paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value;
+        var directOutlineLevel = paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value;
+        if (directOutlineLevel is not null)
+        {
+            return directOutlineLevel;
+        }
+
+        var styleId = GetParagraphStyleId(paragraph);
+        return styleId is not null && _styleOutlineLevels.TryGetValue(styleId, out var styleOutlineLevel)
+            ? styleOutlineLevel
+            : null;
     }
 
     private static JsonObject? GetTargetObject(JsonNode? node, out string? error)

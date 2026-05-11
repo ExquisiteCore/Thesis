@@ -88,7 +88,7 @@ public static class OpenXmlMicroEditor
 
             var context = new EditContext(
                 ReadParagraphStyles(mainPart),
-                new OpenXmlTargetResolver(body, profile, request.ProfileOverrides),
+                new OpenXmlTargetResolver(body, profile, request.ProfileOverrides, ReadStyleOutlineLevels(mainPart)),
                 profile,
                 request.ProfileOverrides);
             var result = new DocumentEditResult();
@@ -1670,6 +1670,20 @@ public static class OpenXmlMicroEditor
                 && !string.IsNullOrWhiteSpace(style.StyleId?.Value))
             .Select(style => style.StyleId!.Value!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? [];
+    }
+
+    private static Dictionary<string, int> ReadStyleOutlineLevels(MainDocumentPart mainPart)
+    {
+        return mainPart.StyleDefinitionsPart?.Styles?
+            .Elements<Style>()
+            .Select(style => new
+            {
+                StyleId = style.StyleId?.Value,
+                OutlineLevel = style.GetFirstChild<StyleParagraphProperties>()?.GetFirstChild<OutlineLevel>()?.Val?.Value
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.StyleId) && item.OutlineLevel is not null)
+            .ToDictionary(item => item.StyleId!, item => item.OutlineLevel!.Value, StringComparer.OrdinalIgnoreCase)
             ?? [];
     }
 
