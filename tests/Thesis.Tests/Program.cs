@@ -1958,6 +1958,14 @@ static void CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing()
     var context = CreateInitializedDocxWorkspace(temp.Path);
     var profile = new TemplateProfile
     {
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "heading1",
+                Evidence = []
+            }
+        ],
         RolePolicies =
         [
             new ProfileRolePolicy

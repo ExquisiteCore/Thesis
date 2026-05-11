@@ -247,24 +247,13 @@ internal sealed class OpenXmlTargetResolver
             .ToList();
         if (profileRoles is null || profileRoles.Count == 0)
         {
-            var policyMatches = ResolveRolePolicy(resolvedRole, out var policyError);
-            if (policyError is not null)
-            {
-                return TargetResolutionResult.Error(policyError);
-            }
-
-            if (policyMatches is not null)
-            {
-                return ValidateMatchCount(policyMatches, options);
-            }
-
-            return TargetResolutionResult.Error("role_not_found");
+            return ResolveRolePolicyOrError(resolvedRole, options, "role_not_found");
         }
 
         var anchorIndices = GetRoleAnchorIndices(profileRoles);
         if (anchorIndices.Count == 0)
         {
-            return TargetResolutionResult.Error("target_not_found");
+            return ResolveRolePolicyOrError(resolvedRole, options, "target_not_found");
         }
 
         var matches = anchorIndices
@@ -275,6 +264,19 @@ internal sealed class OpenXmlTargetResolver
             .ToList();
 
         return ValidateMatchCount(matches, options);
+    }
+
+    private TargetResolutionResult ResolveRolePolicyOrError(string role, RunOptions options, string fallbackError)
+    {
+        var policyMatches = ResolveRolePolicy(role, out var policyError);
+        if (policyError is not null)
+        {
+            return TargetResolutionResult.Error(policyError);
+        }
+
+        return policyMatches is null
+            ? TargetResolutionResult.Error(fallbackError)
+            : ValidateMatchCount(policyMatches, options);
     }
 
     private List<ResolvedTarget>? ResolveRolePolicy(string role, out string? error)
