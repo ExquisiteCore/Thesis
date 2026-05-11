@@ -71,10 +71,36 @@ public static class OpenXmlDocumentInspector
                 Index = index,
                 Text = paragraph.InnerText,
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
+                Format = ReadParagraphFormat(paragraph),
                 Numbering = ReadParagraphNumbering(paragraph),
                 Runs = ReadRuns(paragraph)
             })
             .ToList();
+    }
+
+    private static ParagraphFormatSample ReadParagraphFormat(Paragraph paragraph)
+    {
+        var properties = paragraph.ParagraphProperties;
+        var spacing = properties?.SpacingBetweenLines;
+        var indentation = properties?.Indentation;
+        var runFormat = paragraph
+            .Descendants<Run>()
+            .Select(ReadRunFormat)
+            .FirstOrDefault(HasAnyRunFormat);
+
+        return new ParagraphFormatSample
+        {
+            StyleId = properties?.ParagraphStyleId?.Val?.Value,
+            Alignment = LowerInnerText(properties?.Justification?.Val),
+            SpacingBeforeTwips = ToInt(spacing?.Before),
+            SpacingAfterTwips = ToInt(spacing?.After),
+            LineSpacing = spacing?.Line?.Value,
+            LineSpacingRule = LowerInnerText(spacing?.LineRule),
+            FirstLineIndentTwips = ToInt(indentation?.FirstLine),
+            LeftIndentTwips = ToInt(indentation?.Left),
+            RightIndentTwips = ToInt(indentation?.Right),
+            RunFormat = runFormat
+        };
     }
 
     private static NumberingReference? ReadParagraphNumbering(Paragraph paragraph)
@@ -103,15 +129,67 @@ public static class OpenXmlDocumentInspector
     {
         return paragraph
             .Descendants<Run>()
-            .Select((run, index) => new DocumentRun
+            .Select((run, index) =>
             {
-                Index = index,
-                Text = run.InnerText,
-                Bold = run.RunProperties?.Bold is not null,
-                Italic = run.RunProperties?.Italic is not null,
-                FontSizeHalfPoints = run.RunProperties?.FontSize?.Val?.Value
+                var format = ReadRunFormat(run);
+
+                return new DocumentRun
+                {
+                    Index = index,
+                    Text = run.InnerText,
+                    Bold = format.Bold == true,
+                    Italic = format.Italic == true,
+                    FontSizeHalfPoints = format.FontSizeHalfPoints,
+                    AsciiFont = format.AsciiFont,
+                    HighAnsiFont = format.HighAnsiFont,
+                    EastAsiaFont = format.EastAsiaFont,
+                    ComplexScriptFont = format.ComplexScriptFont
+                };
             })
             .ToList();
+    }
+
+    private static RunFormatSample ReadRunFormat(Run run)
+    {
+        var properties = run.RunProperties;
+        var fonts = properties?.RunFonts;
+
+        return new RunFormatSample
+        {
+            Bold = ReadOnOffValue(properties?.Bold),
+            Italic = ReadOnOffValue(properties?.Italic),
+            FontSizeHalfPoints = properties?.FontSize?.Val?.Value,
+            AsciiFont = fonts?.Ascii?.Value,
+            HighAnsiFont = fonts?.HighAnsi?.Value,
+            EastAsiaFont = fonts?.EastAsia?.Value,
+            ComplexScriptFont = fonts?.ComplexScript?.Value
+        };
+    }
+
+    private static bool HasAnyRunFormat(RunFormatSample format)
+    {
+        return format.Bold is not null
+            || format.Italic is not null
+            || format.FontSizeHalfPoints is not null
+            || format.AsciiFont is not null
+            || format.HighAnsiFont is not null
+            || format.EastAsiaFont is not null
+            || format.ComplexScriptFont is not null;
+    }
+
+    private static bool? ReadOnOffValue(OnOffType? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (value.Val is null)
+        {
+            return true;
+        }
+
+        return value.Val.Value;
     }
 
     private static List<DocumentStyle> ReadStyles(MainDocumentPart mainPart)
@@ -318,6 +396,11 @@ public static class OpenXmlDocumentInspector
     private static int? ToInt(Int32Value? value)
     {
         return value?.Value;
+    }
+
+    private static int? ToInt(StringValue? value)
+    {
+        return int.TryParse(value?.Value, out var result) ? result : null;
     }
 
     private static string Preview(string text)

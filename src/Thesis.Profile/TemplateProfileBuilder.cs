@@ -72,6 +72,7 @@ public static class TemplateProfileBuilder
             Type = style.Type,
             BasedOn = style.BasedOn,
             Confidence = evidence.Count > 0 ? 0.9 : 0.55,
+            Format = Clone(SelectRoleFormat(map, evidence, style.StyleId)),
             Evidence = evidence
         });
     }
@@ -90,6 +91,7 @@ public static class TemplateProfileBuilder
 
         var style = map.Styles.FirstOrDefault(candidate =>
             string.Equals(candidate.StyleId, paragraph.StyleId, StringComparison.OrdinalIgnoreCase));
+        var evidence = new List<ProfileParagraphEvidence> { ToParagraphEvidence(paragraph) };
 
         roles.Add(new ProfileStyleRole
         {
@@ -99,8 +101,29 @@ public static class TemplateProfileBuilder
             Type = style?.Type,
             BasedOn = style?.BasedOn,
             Confidence = 0.82,
-            Evidence = [ToParagraphEvidence(paragraph)]
+            Format = Clone(SelectRoleFormat(map, evidence, paragraph.StyleId)),
+            Evidence = evidence
         });
+    }
+
+    private static ParagraphFormatSample? SelectRoleFormat(
+        DocumentMap map,
+        List<ProfileParagraphEvidence> evidence,
+        string? styleId)
+    {
+        foreach (var item in evidence)
+        {
+            var paragraph = map.Paragraphs.FirstOrDefault(candidate => candidate.Index == item.ParagraphIndex);
+            if (paragraph is not null)
+            {
+                return paragraph.Format;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(styleId)
+            ? null
+            : map.Paragraphs.FirstOrDefault(paragraph =>
+                string.Equals(paragraph.StyleId, styleId, StringComparison.OrdinalIgnoreCase))?.Format;
     }
 
     private static ProfileNumberingPolicy BuildNumberingPolicy(DocumentMap map)
@@ -229,6 +252,41 @@ public static class TemplateProfileBuilder
             FooterTwips = value.FooterTwips,
             GutterTwips = value.GutterTwips
         };
+    }
+
+    private static ParagraphFormatSample? Clone(ParagraphFormatSample? value)
+    {
+        return value is null
+            ? null
+            : new ParagraphFormatSample
+            {
+                StyleId = value.StyleId,
+                Alignment = value.Alignment,
+                SpacingBeforeTwips = value.SpacingBeforeTwips,
+                SpacingAfterTwips = value.SpacingAfterTwips,
+                LineSpacing = value.LineSpacing,
+                LineSpacingRule = value.LineSpacingRule,
+                FirstLineIndentTwips = value.FirstLineIndentTwips,
+                LeftIndentTwips = value.LeftIndentTwips,
+                RightIndentTwips = value.RightIndentTwips,
+                RunFormat = Clone(value.RunFormat)
+            };
+    }
+
+    private static RunFormatSample? Clone(RunFormatSample? value)
+    {
+        return value is null
+            ? null
+            : new RunFormatSample
+            {
+                Bold = value.Bold,
+                Italic = value.Italic,
+                FontSizeHalfPoints = value.FontSizeHalfPoints,
+                AsciiFont = value.AsciiFont,
+                HighAnsiFont = value.HighAnsiFont,
+                EastAsiaFont = value.EastAsiaFont,
+                ComplexScriptFont = value.ComplexScriptFont
+            };
     }
 
     private static HeaderFooterReference Clone(HeaderFooterReference value)

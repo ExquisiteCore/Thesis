@@ -26,6 +26,19 @@ var tests = new (string Name, Action Test)[]
     ("CLI run resolveTarget is read-only in execute mode", CliRunResolveTargetIsReadOnlyInExecuteMode),
     ("CLI run execute resolveTarget does not create default snapshot", CliRunExecuteResolveTargetDoesNotCreateDefaultSnapshot),
     ("CLI run paragraph operation rejects table target", CliRunParagraphOperationRejectsTableTarget),
+    ("CLI run dry-run previews applyProfileRole without changing DOCX", CliRunDryRunPreviewsApplyProfileRoleWithoutChangingDocx),
+    ("CLI run dry-run previews actual applyProfileRole after format", CliRunDryRunPreviewsActualApplyProfileRoleAfterFormat),
+    ("CLI run applyProfileRole returns role_not_found", CliRunApplyProfileRoleReturnsRoleNotFound),
+    ("CLI run applyProfileRole rejects table target", CliRunApplyProfileRoleRejectsTableTarget),
+    ("CLI run applyProfileRole returns format missing", CliRunApplyProfileRoleReturnsFormatMissing),
+    ("CLI run execute applies profile role formatting", CliRunExecuteAppliesProfileRoleFormatting),
+    ("CLI run applyProfileRole format overrides profile values", CliRunApplyProfileRoleFormatOverridesProfileValues),
+    ("CLI run applyProfileRole uses profile override role aliases", CliRunApplyProfileRoleUsesProfileOverrideRoleAliases),
+    ("CLI run applyProfileRole rejects invalid override format", CliRunApplyProfileRoleRejectsInvalidOverrideFormat),
+    ("CLI run applyProfileRole rejects invalid override style", CliRunApplyProfileRoleRejectsInvalidOverrideStyle),
+    ("CLI run applyProfileRole rejects invalid override font size", CliRunApplyProfileRoleRejectsInvalidOverrideFontSize),
+    ("CLI run applyProfileRole rejects invalid override values in dry-run", CliRunApplyProfileRoleRejectsInvalidOverrideValuesInDryRun),
+    ("CLI run applyProfileRole accepts extracted lowercase enum values", CliRunApplyProfileRoleAcceptsExtractedLowercaseEnumValues),
     ("CLI run returns profile_invalid for malformed workspace profile", CliRunReturnsProfileInvalidForMalformedWorkspaceProfile),
     ("CLI run returns profile_invalid for structurally invalid workspace profile", CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile),
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
@@ -61,9 +74,11 @@ var tests = new (string Name, Action Test)[]
     ("Export to missing parent directory returns JSON error", ExportToMissingParentDirectoryReturnsJsonError),
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
+    ("OpenXml inspector reads paragraph and run format samples", OpenXmlInspectorReadsParagraphAndRunFormatSamples),
     ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
     ("Template profile builder returns typed profile with semantic roles", TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles),
+    ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
@@ -685,6 +700,529 @@ static void CliRunParagraphOperationRejectsTableTarget()
     AssertEqual("error", result.Operations[0].Status);
     AssertEqual("target_type_unsupported", result.Operations[0].Reason);
     AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunDryRunPreviewsApplyProfileRoleWithoutChangingDocx()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "apply-role",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertEqual("p1", result.Operations[0].Matches[0].Id);
+    AssertContains(result.Operations[0].Matches[0].PreviewAfter!, "\"alignment\":\"center\"");
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunDryRunPreviewsActualApplyProfileRoleAfterFormat()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var setupPath = Path.Combine(temp.Path, "setup.json");
+    File.WriteAllText(
+        setupPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "setup-format",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "alignment": "right",
+                "spacingBeforeTwips": 360,
+                "fontSizeHalfPoints": "30"
+              }
+            }
+          ]
+        }
+        """);
+    AssertEqual(0, RunCli(["run", "--workspace", context.Workspace, "--request", setupPath]).ExitCode);
+
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "preview-after",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("preview", result.Operations[0].Status);
+    var previewAfter = result.Operations[0].Matches[0].PreviewAfter!;
+    AssertContains(previewAfter, "\"alignment\":\"center\"");
+    AssertContains(previewAfter, "\"spacingBeforeTwips\":360");
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunApplyProfileRoleReturnsRoleNotFound()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "missing-role",
+              "op": "applyProfileRole",
+              "role": "body",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("role_not_found", result.Operations[0].Reason);
+}
+
+static void CliRunApplyProfileRoleRejectsTableTarget()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "bad-table",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "tableIndex", "index": 0 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("target_type_unsupported", result.Operations[0].Reason);
+}
+
+static void CliRunApplyProfileRoleReturnsFormatMissing()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "abstract.zh",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 3, StyleId = "Heading1", TextPreview = "摘要" }
+                ]
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "format-missing",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_role_format_missing", result.Operations[0].Reason);
+    AssertEqual("profile_role_format_missing", result.Diagnostics[0].Code);
+}
+
+static void CliRunExecuteAppliesProfileRoleFormatting()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-apply-role",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "apply-role",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("applied", result.Operations[0].Status);
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("Heading1", map.Paragraphs[1].Format.StyleId);
+    AssertEqual("center", map.Paragraphs[1].Format.Alignment);
+    AssertEqual(120, map.Paragraphs[1].Format.SpacingAfterTwips);
+    var runFormat = map.Paragraphs[1].Format.RunFormat ?? throw new UnreachableException("Expected run format.");
+    AssertEqual(true, runFormat.Bold);
+    AssertEqual("28", runFormat.FontSizeHalfPoints);
+    AssertEqual("黑体", runFormat.EastAsiaFont);
+}
+
+static void CliRunApplyProfileRoleFormatOverridesProfileValues()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "apply-role",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "alignment": "left",
+                "fontSizeHalfPoints": "32",
+                "bold": false
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("applied", result.Operations[0].Status);
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("left", map.Paragraphs[1].Format.Alignment);
+    var runFormat = map.Paragraphs[1].Format.RunFormat ?? throw new UnreachableException("Expected run format.");
+    AssertEqual(false, runFormat.Bold);
+    AssertEqual("32", runFormat.FontSizeHalfPoints);
+    AssertEqual("黑体", runFormat.EastAsiaFont);
+}
+
+static void CliRunApplyProfileRoleUsesProfileOverrideRoleAliases()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "profileOverrides": {
+            "roleAliases": {
+              "zhAbstract": "abstract.zh"
+            }
+          },
+          "operations": [
+            {
+              "id": "apply-role-alias",
+              "op": "applyProfileRole",
+              "role": "zhAbstract",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("preview", result.Operations[0].Status);
+    AssertContains(result.Operations[0].Matches[0].PreviewAfter!, "\"alignment\":\"center\"");
+}
+
+static void CliRunApplyProfileRoleRejectsInvalidOverrideFormat()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-format",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": []
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("target_value_invalid", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunApplyProfileRoleRejectsInvalidOverrideStyle()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-style",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "styleId": "MissingStyle"
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("paragraph_style_missing", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunApplyProfileRoleRejectsInvalidOverrideFontSize()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "bad-size",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "fontSizeHalfPoints": "large"
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("font_size_invalid", result.Operations[0].Reason);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunApplyProfileRoleRejectsInvalidOverrideValuesInDryRun()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var before = File.ReadAllBytes(context.Paths.WorkingDocument);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "bad-alignment",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "alignment": "sideways"
+              }
+            },
+            {
+              "id": "bad-indent",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "leftIndentTwips": -1
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("format_value_invalid", result.Operations[0].Reason);
+    AssertEqual(1, result.Operations.Count);
+    AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
+}
+
+static void CliRunApplyProfileRoleAcceptsExtractedLowercaseEnumValues()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    WriteProfileWithAbstractFormat(context);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "lowercase-enums",
+              "op": "applyProfileRole",
+              "role": "abstract.zh",
+              "target": { "type": "paragraphIndex", "index": 1 },
+              "format": {
+                "alignment": "mediumkashida",
+                "lineSpacing": "360",
+                "lineSpacingRule": "atleast"
+              }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("mediumkashida", map.Paragraphs[1].Format.Alignment);
+    AssertEqual("atleast", map.Paragraphs[1].Format.LineSpacingRule);
 }
 
 static void CliRunReturnsProfileInvalidForMalformedWorkspaceProfile()
@@ -1604,6 +2142,38 @@ static void OpenXmlInspectorReadsDocumentMap()
     AssertContains(map.Tables[0].TextPreview, "B2");
 }
 
+static void OpenXmlInspectorReadsParagraphAndRunFormatSamples()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "formatted-fixture.docx");
+    WriteFormattedFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+    var paragraph = map.Paragraphs[0];
+
+    AssertEqual("Heading1", paragraph.StyleId);
+    AssertEqual("Heading1", paragraph.Format.StyleId);
+    AssertEqual("center", paragraph.Format.Alignment);
+    AssertEqual(240, paragraph.Format.SpacingBeforeTwips);
+    AssertEqual(120, paragraph.Format.SpacingAfterTwips);
+    AssertEqual("360", paragraph.Format.LineSpacing);
+    AssertEqual("auto", paragraph.Format.LineSpacingRule);
+    AssertEqual(480, paragraph.Format.FirstLineIndentTwips);
+    AssertEqual(240, paragraph.Format.LeftIndentTwips);
+    AssertEqual(120, paragraph.Format.RightIndentTwips);
+    AssertEqual(true, paragraph.Format.RunFormat!.Bold);
+    AssertEqual("28", paragraph.Format.RunFormat.FontSizeHalfPoints);
+    AssertEqual("Times New Roman", paragraph.Format.RunFormat.AsciiFont);
+    AssertEqual("宋体", paragraph.Format.RunFormat.EastAsiaFont);
+    AssertEqual("Times New Roman", paragraph.Runs[0].AsciiFont);
+    AssertEqual("宋体", paragraph.Runs[0].EastAsiaFont);
+
+    AssertEqual(false, map.Paragraphs[1].Format.RunFormat!.Bold);
+    var emptyRunFormat = new RunFormatSample();
+    AssertEqual((bool?)null, emptyRunFormat.Bold);
+    AssertEqual((bool?)null, emptyRunFormat.Italic);
+}
+
 static void CliInspectIncludesDocumentMapForDocxWorkspaces()
 {
     using var temp = new TempDirectory();
@@ -1708,6 +2278,53 @@ static void TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles()
     map.Numbering.Add(new DocumentNumbering { NumberingId = "late" });
     AssertEqual(11906, profile.PageSetup.PageSize!.WidthTwips);
     AssertEqual(0, profile.NumberingPolicy.Instances.Count);
+}
+
+static void TemplateProfileBuilderCopiesRoleFormatSamples()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        Styles =
+        [
+            new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph" }
+        ],
+        Paragraphs =
+        [
+            new DocumentParagraph
+            {
+                Index = 0,
+                Text = "摘要",
+                StyleId = "Heading1",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "Heading1",
+                    Alignment = "center",
+                    SpacingAfterTwips = 120,
+                    RunFormat = new RunFormatSample
+                    {
+                        Bold = true,
+                        FontSizeHalfPoints = "28",
+                        EastAsiaFont = "黑体"
+                    }
+                }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+    var role = profile.StyleRoles.Single(candidate => candidate.Role == "abstract.zh");
+
+    AssertEqual("center", role.Format!.Alignment);
+    AssertEqual(120, role.Format.SpacingAfterTwips);
+    AssertEqual(true, role.Format.RunFormat!.Bold);
+    AssertEqual("28", role.Format.RunFormat.FontSizeHalfPoints);
+    AssertEqual("黑体", role.Format.RunFormat.EastAsiaFont);
+
+    map.Paragraphs[0].Format.Alignment = "left";
+    map.Paragraphs[0].Format.RunFormat!.EastAsiaFont = "宋体";
+    AssertEqual("center", role.Format.Alignment);
+    AssertEqual("黑体", role.Format.RunFormat.EastAsiaFont);
 }
 
 static void CliProfileExtractWritesTemplateProfileFromDocx()
@@ -1934,6 +2551,41 @@ static void WriteResolverProfile(WorkspaceContext context, bool includeAmbiguous
     File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
 }
 
+static void WriteProfileWithAbstractFormat(WorkspaceContext context)
+{
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "abstract.zh",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 0, StyleId = "Heading1", TextPreview = "摘要" }
+                ],
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "Heading1",
+                    Alignment = "center",
+                    SpacingAfterTwips = 120,
+                    RunFormat = new RunFormatSample
+                    {
+                        Bold = true,
+                        FontSizeHalfPoints = "28",
+                        EastAsiaFont = "黑体"
+                    }
+                }
+            }
+        ]
+    };
+
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+}
+
 static void WriteFixtureDocx(string path)
 {
     using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -2010,6 +2662,117 @@ static void WriteFixtureDocx(string path)
           <w:body>
             <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>中文摘要</w:t></w:r></w:p>
             <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>列表项</w:t></w:r></w:p>
+            <w:tbl>
+              <w:tr><w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc></w:tr>
+              <w:tr><w:tc><w:p><w:r><w:t>A2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o "1-3" \h \z \u</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>摘要</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Abstract</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>目录</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>
+            <w:sectPr>
+              <w:headerReference w:type="default" r:id="rIdHeader1"/>
+              <w:pgSz w:w="11906" w:h="16838"/>
+              <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
+            </w:sectPr>
+          </w:body>
+        </w:document>
+        """);
+}
+
+static void WriteFormattedFixtureDocx(string path)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    AddZipEntry(
+        archive,
+        "[Content_Types].xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+          <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+          <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+        </Types>
+        """);
+    AddZipEntry(
+        archive,
+        "_rels/.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/_rels/document.xml.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+          <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+          <Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/styles.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+        </w:styles>
+        """);
+    AddZipEntry(
+        archive,
+        "word/numbering.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:abstractNum w:abstractNumId="0">
+            <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+          </w:abstractNum>
+          <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+        </w:numbering>
+        """);
+    AddZipEntry(
+        archive,
+        "word/header1.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>页眉</w:t></w:r></w:p></w:hdr>
+        """);
+    AddZipEntry(
+        archive,
+        "word/document.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+          <w:body>
+            <w:p>
+              <w:pPr>
+                <w:pStyle w:val="Heading1"/>
+                <w:jc w:val="center"/>
+                <w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/>
+                <w:ind w:firstLine="480" w:left="240" w:right="120"/>
+              </w:pPr>
+              <w:r>
+                <w:rPr>
+                  <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="宋体" w:cs="Times New Roman"/>
+                  <w:b/>
+                  <w:sz w:val="28"/>
+                </w:rPr>
+                <w:t>摘要</w:t>
+              </w:r>
+            </w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>第一章 绪论</w:t></w:r></w:p>
             <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>列表项</w:t></w:r></w:p>
             <w:tbl>
               <w:tr><w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc></w:tr>

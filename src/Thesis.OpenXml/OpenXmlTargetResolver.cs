@@ -236,7 +236,7 @@ internal sealed class OpenXmlTargetResolver
             return TargetResolutionResult.Error("target_value_invalid");
         }
 
-        var resolvedRole = ResolveRoleAlias(role, out var aliasError);
+        var resolvedRole = ProfileRoleResolver.ResolveAlias(role, _profileOverrides, out var aliasError);
         if (aliasError is not null)
         {
             return TargetResolutionResult.Error(aliasError);
@@ -373,40 +373,6 @@ internal sealed class OpenXmlTargetResolver
             })
             .Select(candidate => candidate.Index)
             .ToList();
-    }
-
-    private string ResolveRoleAlias(string role, out string? error)
-    {
-        error = null;
-        if (_profileOverrides is null || !_profileOverrides.TryGetPropertyValue("roleAliases", out var roleAliases))
-        {
-            return role;
-        }
-
-        if (roleAliases is null)
-        {
-            return role;
-        }
-
-        if (roleAliases is not JsonObject aliases)
-        {
-            error = "target_value_invalid";
-            return role;
-        }
-
-        if (!aliases.TryGetPropertyValue(role, out var resolvedRoleNode) || resolvedRoleNode is null)
-        {
-            return role;
-        }
-
-        var resolvedRole = GetStringValue(resolvedRoleNode, out var valueError);
-        if (valueError is not null || string.IsNullOrWhiteSpace(resolvedRole))
-        {
-            error = valueError ?? "target_value_invalid";
-            return role;
-        }
-
-        return resolvedRole;
     }
 
     private TargetResolutionResult ValidateMatchCount(List<ResolvedTarget> matches, RunOptions options)

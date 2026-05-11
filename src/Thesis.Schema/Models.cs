@@ -34,6 +34,8 @@ public sealed class ThesisOperation
 
     public string? Op { get; set; }
 
+    public string? Role { get; set; }
+
     public JsonNode? Target { get; set; }
 
     public string? Text { get; set; }
@@ -167,9 +169,51 @@ public sealed class DocumentParagraph
 
     public string? StyleId { get; set; }
 
+    public ParagraphFormatSample Format { get; set; } = new();
+
     public NumberingReference? Numbering { get; set; }
 
     public List<DocumentRun> Runs { get; set; } = [];
+}
+
+public sealed class ParagraphFormatSample
+{
+    public string? StyleId { get; set; }
+
+    public string? Alignment { get; set; }
+
+    public int? SpacingBeforeTwips { get; set; }
+
+    public int? SpacingAfterTwips { get; set; }
+
+    public string? LineSpacing { get; set; }
+
+    public string? LineSpacingRule { get; set; }
+
+    public int? FirstLineIndentTwips { get; set; }
+
+    public int? LeftIndentTwips { get; set; }
+
+    public int? RightIndentTwips { get; set; }
+
+    public RunFormatSample? RunFormat { get; set; }
+}
+
+public sealed class RunFormatSample
+{
+    public bool? Bold { get; set; }
+
+    public bool? Italic { get; set; }
+
+    public string? FontSizeHalfPoints { get; set; }
+
+    public string? AsciiFont { get; set; }
+
+    public string? HighAnsiFont { get; set; }
+
+    public string? EastAsiaFont { get; set; }
+
+    public string? ComplexScriptFont { get; set; }
 }
 
 public sealed class DocumentRun
@@ -183,6 +227,14 @@ public sealed class DocumentRun
     public bool Italic { get; set; }
 
     public string? FontSizeHalfPoints { get; set; }
+
+    public string? AsciiFont { get; set; }
+
+    public string? HighAnsiFont { get; set; }
+
+    public string? EastAsiaFont { get; set; }
+
+    public string? ComplexScriptFont { get; set; }
 }
 
 public sealed class NumberingReference
@@ -327,6 +379,8 @@ public sealed class ProfileStyleRole
     public string? BasedOn { get; set; }
 
     public double Confidence { get; set; }
+
+    public ParagraphFormatSample? Format { get; set; }
 
     public List<ProfileParagraphEvidence> Evidence { get; set; } = [];
 }
