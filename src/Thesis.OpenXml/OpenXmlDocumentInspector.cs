@@ -161,7 +161,8 @@ public static class OpenXmlDocumentInspector
         {
             Bold = ReadOnOffValue(properties?.Bold),
             Italic = ReadOnOffValue(properties?.Italic),
-            FontSizeHalfPoints = properties?.FontSize?.Val?.Value,
+            FontSizeHalfPoints = properties?.FontSize?.Val?.Value
+                ?? properties?.FontSizeComplexScript?.Val?.Value,
             AsciiFont = fonts?.Ascii?.Value,
             HighAnsiFont = fonts?.HighAnsi?.Value,
             EastAsiaFont = fonts?.EastAsia?.Value,

@@ -72,6 +72,50 @@ internal static class ProfileRoleResolver
         return matches;
     }
 
+    public static ParagraphFormatSample? FindRoleFormat(
+        TemplateProfile? profile,
+        JsonObject? profileOverrides,
+        string? requestedRole,
+        out string? error)
+    {
+        var roles = FindRoles(profile, profileOverrides, requestedRole, out error);
+        if (error is null)
+        {
+            var roleFormat = roles.Select(role => role.Format).FirstOrDefault(candidate => candidate is not null);
+            if (roleFormat is not null)
+            {
+                return roleFormat;
+            }
+        }
+
+        if ((error is not null && error != "role_not_found") || string.IsNullOrWhiteSpace(requestedRole))
+        {
+            return null;
+        }
+
+        var role = ResolveAlias(requestedRole, profileOverrides, out var aliasError);
+        if (aliasError is not null)
+        {
+            error = aliasError;
+            return null;
+        }
+
+        var policyFormat = profile?.RolePolicies
+            .Where(policy =>
+                string.Equals(policy.Role, role, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(policy.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(policy => policy.Priority)
+            .Select(policy => policy.Format)
+            .FirstOrDefault(candidate => candidate is not null);
+        if (policyFormat is null)
+        {
+            return null;
+        }
+
+        error = null;
+        return policyFormat;
+    }
+
     private static string? GetStringValue(JsonNode value, out string? error)
     {
         error = null;

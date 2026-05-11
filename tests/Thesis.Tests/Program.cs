@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Thesis.Cli;
 using Thesis.OpenXml;
 using Thesis.Profile;
@@ -33,6 +34,7 @@ var tests = new (string Name, Action Test)[]
     ("CLI run applyProfileRole rejects table target", CliRunApplyProfileRoleRejectsTableTarget),
     ("CLI run applyProfileRole returns format missing", CliRunApplyProfileRoleReturnsFormatMissing),
     ("CLI run execute applies profile role formatting", CliRunExecuteAppliesProfileRoleFormatting),
+    ("CLI run applyProfileRole uses role policy format", CliRunApplyProfileRoleUsesRolePolicyFormat),
     ("CLI run applyProfileRole format overrides profile values", CliRunApplyProfileRoleFormatOverridesProfileValues),
     ("CLI run applyProfileRole uses profile override role aliases", CliRunApplyProfileRoleUsesProfileOverrideRoleAliases),
     ("CLI run applyProfileRole rejects invalid override format", CliRunApplyProfileRoleRejectsInvalidOverrideFormat),
@@ -89,6 +91,7 @@ var tests = new (string Name, Action Test)[]
     ("Inspect is read-only when lock exists", InspectIsReadOnlyWhenLockExists),
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
     ("OpenXml inspector reads paragraph and run format samples", OpenXmlInspectorReadsParagraphAndRunFormatSamples),
+    ("OpenXml inspector falls back to complex script font size", OpenXmlInspectorFallsBackToComplexScriptFontSize),
     ("OpenXml inspector reads style usage and outline facts", OpenXmlInspectorReadsStyleUsageAndOutlineFacts),
     ("OpenXml inspector reads outline facts from style definitions", OpenXmlInspectorReadsOutlineFactsFromStyleDefinitions),
     ("OpenXml inspector reads table format samples", OpenXmlInspectorReadsTableFormatSamples),
@@ -97,6 +100,7 @@ var tests = new (string Name, Action Test)[]
     ("Template profile builder returns typed profile with semantic roles", TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles),
     ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
     ("Template profile builder infers role policies", TemplateProfileBuilderInfersRolePolicies),
+    ("Template profile builder infers direct format roles without semantic styles", TemplateProfileBuilderInfersDirectFormatRolesWithoutSemanticStyles),
     ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
     ("Template profile builder infers three-line table archetype", TemplateProfileBuilderInfersThreeLineTableArchetype),
     ("Template profile builder reports weak profile diagnostics", TemplateProfileBuilderReportsWeakProfileDiagnostics),
@@ -1029,6 +1033,87 @@ static void CliRunExecuteAppliesProfileRoleFormatting()
     AssertEqual(true, runFormat.Bold);
     AssertEqual("28", runFormat.FontSizeHalfPoints);
     AssertEqual("黑体", runFormat.EastAsiaFont);
+}
+
+static void CliRunApplyProfileRoleUsesRolePolicyFormat()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        SourceType = "test",
+        SourceDocument = context.SourceDoc,
+        StyleRoles =
+        [
+            new ProfileStyleRole
+            {
+                Role = "heading1",
+                StyleId = "Heading1",
+                Evidence =
+                [
+                    new ProfileParagraphEvidence { ParagraphIndex = 1, StyleId = "Heading1", TextPreview = "第一章 绪论" }
+                ]
+            }
+        ],
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "heading1",
+                AppliesTo = "paragraph",
+                Priority = 95,
+                Match = new ProfileRoleMatch { TextPatterns = [@"^第.+章"] },
+                Format = new ParagraphFormatSample
+                {
+                    Alignment = "center",
+                    SpacingBeforeTwips = 240,
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    RunFormat = new RunFormatSample
+                    {
+                        Bold = true,
+                        FontSizeHalfPoints = "32",
+                        EastAsiaFont = "宋体"
+                    }
+                }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "execute",
+          "options": {
+            "createSnapshot": false
+          },
+          "operations": [
+            {
+              "id": "apply-policy-role",
+              "op": "applyProfileRole",
+              "role": "heading1",
+              "target": { "type": "paragraphIndex", "index": 1 }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual("applied", result.Operations[0].Status);
+    var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+    AssertEqual("center", map.Paragraphs[1].Format.Alignment);
+    AssertEqual(240, map.Paragraphs[1].Format.SpacingBeforeTwips);
+    AssertEqual("360", map.Paragraphs[1].Format.LineSpacing);
+    var runFormat = map.Paragraphs[1].Format.RunFormat ?? throw new UnreachableException("Expected run format.");
+    AssertEqual(true, runFormat.Bold);
+    AssertEqual("32", runFormat.FontSizeHalfPoints);
+    AssertEqual("宋体", runFormat.EastAsiaFont);
 }
 
 static void CliRunApplyProfileRoleFormatOverridesProfileValues()
@@ -2894,6 +2979,18 @@ static void OpenXmlInspectorReadsParagraphAndRunFormatSamples()
     AssertEqual((bool?)null, emptyRunFormat.Italic);
 }
 
+static void OpenXmlInspectorFallsBackToComplexScriptFontSize()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "complex-size.docx");
+    WriteComplexScriptSizeFixtureDocx(docx);
+
+    var map = OpenXmlDocumentInspector.Inspect(docx);
+
+    AssertEqual("21", map.Paragraphs[0].Format.RunFormat!.FontSizeHalfPoints);
+    AssertEqual("21", map.Paragraphs[0].Runs[0].FontSizeHalfPoints);
+}
+
 static void OpenXmlInspectorReadsStyleUsageAndOutlineFacts()
 {
     using var temp = new TempDirectory();
@@ -3157,6 +3254,162 @@ static void TemplateProfileBuilderInfersRolePolicies()
     var semanticProfile = TemplateProfileBuilder.Build(map, "doc");
     var abstractPolicy = semanticProfile.RolePolicies.Single(policy => policy.Role == "abstract.zh");
     AssertEqual("^摘要$", abstractPolicy.Match.TextPatterns[0]);
+}
+
+static void TemplateProfileBuilderInfersDirectFormatRolesWithoutSemanticStyles()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("plain-template.docx"),
+        Styles =
+        [
+            new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph", UsageCount = 0 },
+            new DocumentStyle { StyleId = "Normal", Name = "Normal", Type = "paragraph", UsageCount = 0 },
+            new DocumentStyle { StyleId = "2", Name = "Plain Text", Type = "paragraph", UsageCount = 7 }
+        ],
+        Paragraphs =
+        [
+            new DocumentParagraph
+            {
+                Index = 0,
+                Text = "第一章绪论",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    Alignment = "center",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "32" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 1,
+                Text = "1.1  研究背景",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    SpacingBeforeTwips = 240,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "24" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 2,
+                Text = "1.1.1 研究意义",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "21" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 3,
+                Text = "本文围绕系统设计与实现展开研究。",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { FontSizeHalfPoints = "21" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 4,
+                Text = "第二章  需求分析",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    Alignment = "center",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "32" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 5,
+                Text = "2.1  功能需求",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    SpacingBeforeTwips = 240,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "24" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 6,
+                Text = "正文第二段内容。",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { FontSizeHalfPoints = "21" }
+                }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    var heading1 = profile.RolePolicies
+        .Where(policy => policy.Role == "heading1")
+        .OrderByDescending(policy => policy.Priority)
+        .First();
+    AssertEqual(0, heading1.Match.StyleIds.Count);
+    AssertEqual(true, heading1.Match.TextPatterns.Any(pattern => Regex.IsMatch("第一章绪论", pattern)));
+    AssertEqual("center", heading1.Format!.Alignment);
+    AssertEqual(true, heading1.Format.RunFormat!.Bold);
+    AssertEqual("32", heading1.Format.RunFormat.FontSizeHalfPoints);
+    AssertEqual(true, heading1.Confidence >= 0.7);
+
+    var heading2 = profile.RolePolicies.Single(policy => policy.Role == "heading2");
+    AssertEqual(true, heading2.Match.TextPatterns.Any(pattern => Regex.IsMatch("1.1  研究背景", pattern)));
+    AssertEqual(240, heading2.Format!.SpacingBeforeTwips);
+    AssertEqual("24", heading2.Format.RunFormat!.FontSizeHalfPoints);
+
+    var heading3 = profile.RolePolicies.Single(policy => policy.Role == "heading3");
+    AssertEqual(true, heading3.Match.TextPatterns.Any(pattern => Regex.IsMatch("1.1.1 研究意义", pattern)));
+    AssertEqual("21", heading3.Format!.RunFormat!.FontSizeHalfPoints);
+
+    var body = profile.RolePolicies
+        .Where(policy => policy.Role == "body")
+        .OrderByDescending(policy => policy.Priority)
+        .First();
+    AssertEqual(0, body.Match.StyleIds.Count);
+    AssertEqual(true, body.Match.TextPatterns.Any(pattern => Regex.IsMatch("本文围绕系统设计与实现展开研究。", pattern)));
+    AssertEqual(false, body.Match.TextPatterns.Any(pattern => Regex.IsMatch("第一章绪论", pattern)));
+    AssertEqual(420, body.Format!.FirstLineIndentTwips);
+    AssertEqual(false, body.Format.RunFormat!.Bold);
+    AssertEqual("21", body.Format.RunFormat.FontSizeHalfPoints);
+
+    AssertEqual(true, profile.Diagnostics.Any(diagnostic =>
+        diagnostic.Code == "profile_role_inferred"
+        && diagnostic.Evidence.Any(evidence => evidence == "role:heading1")));
+    AssertEqual(true, profile.Diagnostics.Any(diagnostic =>
+        diagnostic.Code == "profile_style_ambiguous"
+        && diagnostic.Evidence.Any(evidence => evidence == "style:2")));
 }
 
 static void TemplateProfileBuilderCopiesTableFormatSamples()
@@ -3884,6 +4137,67 @@ static void WriteFormattedFixtureDocx(string path)
               <w:pgSz w:w="11906" w:h="16838"/>
               <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
             </w:sectPr>
+          </w:body>
+        </w:document>
+        """);
+}
+
+static void WriteComplexScriptSizeFixtureDocx(string path)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    AddZipEntry(
+        archive,
+        "[Content_Types].xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+        </Types>
+        """);
+    AddZipEntry(
+        archive,
+        "_rels/.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/_rels/document.xml.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/styles.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+        </w:styles>
+        """);
+    AddZipEntry(
+        archive,
+        "word/document.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body>
+            <w:p>
+              <w:r>
+                <w:rPr><w:rFonts w:eastAsia="宋体"/><w:szCs w:val="21"/></w:rPr>
+                <w:t>正文字号只在 szCs 中声明</w:t>
+              </w:r>
+            </w:p>
+            <w:sectPr/>
           </w:body>
         </w:document>
         """);

@@ -315,7 +315,7 @@ public static class OpenXmlMicroEditor
         ThesisOperation operation,
         bool writeChanges)
     {
-        var profileRoles = ProfileRoleResolver.FindRoles(
+        var profileFormat = ProfileRoleResolver.FindRoleFormat(
             context.Profile,
             context.ProfileOverrides,
             operation.Role,
@@ -325,7 +325,6 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, roleError);
         }
 
-        var profileFormat = profileRoles.Select(role => role.Format).FirstOrDefault(candidate => candidate is not null);
         if (profileFormat is null)
         {
             return OperationError(operation, "profile_role_format_missing");
