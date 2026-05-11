@@ -101,7 +101,48 @@ public static class ThesisCli
             return ExtractProfile(profileArgs);
         }
 
+        if (args is ["finalize", "plan", .. var finalizeArgs])
+        {
+            return BuildFinalizationPlan(finalizeArgs);
+        }
+
         throw new CliException("unknown_command", "Unknown command.");
+    }
+
+    private static CliResult BuildFinalizationPlan(string[] args)
+    {
+        var doc = RequiredOption(args, "--doc");
+        var fullDocPath = Path.GetFullPath(doc);
+        if (!OpenXmlDocumentInspector.TryInspect(fullDocPath, out var map, out var diagnostic) || map is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = fullDocPath,
+                Diagnostics = diagnostic is null ? [] : [diagnostic]
+            };
+        }
+
+        var plan = FinalizationPlanBuilder.Build(map);
+        var result = new CliResult
+        {
+            Status = "success",
+            Document = map.Path,
+            FinalizationPlan = plan
+        };
+
+        if (plan.Required && plan.Steps.Any(step =>
+            step.Required && string.Equals(step.Capability, "hostApplication", StringComparison.Ordinal)))
+        {
+            result.Diagnostics.Add(new Diagnostic
+            {
+                Severity = plan.Required ? "warning" : "info",
+                Code = "finalization_requires_host_application",
+                Message = "True pagination, TOC page numbers, and field values require Word/WPS or another layout-capable host application."
+            });
+        }
+
+        return result;
     }
 
     private static CliResult ExtractProfile(string[] args)

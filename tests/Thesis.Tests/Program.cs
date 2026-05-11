@@ -56,6 +56,7 @@ var tests = new (string Name, Action Test)[]
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
     ("CLI run returns profile_invalid for null profile rule containers", CliRunReturnsProfileInvalidForNullProfileRuleContainers),
     ("CLI run returns profile_invalid for malformed role format range", CliRunReturnsProfileInvalidForMalformedRoleFormatRange),
+    ("CLI run returns profile_invalid for malformed format clusters", CliRunReturnsProfileInvalidForMalformedFormatClusters),
     ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
     ("CLI run role target uses role policies when evidence is missing", CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing),
     ("CLI run role policy target honors afterHeading position", CliRunRolePolicyTargetHonorsAfterHeadingPosition),
@@ -103,6 +104,7 @@ var tests = new (string Name, Action Test)[]
     ("Template profile builder copies role format samples", TemplateProfileBuilderCopiesRoleFormatSamples),
     ("Template profile builder infers role policies", TemplateProfileBuilderInfersRolePolicies),
     ("Template profile builder infers direct format roles without semantic styles", TemplateProfileBuilderInfersDirectFormatRolesWithoutSemanticStyles),
+    ("Template profile builder clusters paragraph formats", TemplateProfileBuilderClustersParagraphFormats),
     ("Template profile builder copies table format samples", TemplateProfileBuilderCopiesTableFormatSamples),
     ("Template profile builder infers three-line table archetype", TemplateProfileBuilderInfersThreeLineTableArchetype),
     ("Template profile builder reports weak profile diagnostics", TemplateProfileBuilderReportsWeakProfileDiagnostics),
@@ -110,7 +112,10 @@ var tests = new (string Name, Action Test)[]
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
     ("CLI profile extract refuses unsafe output paths", CliProfileExtractRefusesUnsafeOutputPaths),
-    ("CLI profile extract returns JSON error for non-DOCX input", CliProfileExtractReturnsJsonErrorForNonDocxInput)
+    ("CLI profile extract returns JSON error for non-DOCX input", CliProfileExtractReturnsJsonErrorForNonDocxInput),
+    ("CLI finalize plan reports host application steps for fields", CliFinalizePlanReportsHostApplicationStepsForFields),
+    ("CLI finalize plan distinguishes generic fields from TOC", CliFinalizePlanDistinguishesGenericFieldsFromToc),
+    ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments)
 };
 
 var failures = new List<string>();
@@ -2072,6 +2077,78 @@ static void CliRunReturnsProfileInvalidForMalformedRoleFormatRange()
     AssertEqual("profile_invalid", result.Diagnostics[0].Code);
 }
 
+static void CliRunReturnsProfileInvalidForMalformedFormatClusters()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    File.WriteAllText(
+        context.Paths.ProfileJson,
+        """
+        {
+          "schemaVersion": "1.0",
+          "profileKind": "templateProfile",
+          "sourceType": "test",
+          "sourceDocument": "test.docx",
+          "finalizationReasons": [],
+          "pageSetup": {},
+          "styleRoles": [],
+          "rolePolicies": [],
+          "formatClusters": [
+            {
+              "id": "bad-cluster",
+              "appliesTo": "paragraph",
+              "roleHint": "body",
+              "styleIds": null,
+              "match": {
+                "styleIds": [],
+                "textPatterns": [],
+                "outlineLevels": [],
+                "format": {
+                  "firstLineIndentTwips": {}
+                }
+              },
+              "evidence": []
+            }
+          ],
+          "numberingPolicy": {
+            "instances": [],
+            "paragraphUses": []
+          },
+          "tablePolicy": {
+            "observedColumnCounts": []
+          },
+          "tableArchetypes": [],
+          "diagnostics": [],
+          "sourceEvidence": {
+            "paragraphSamples": []
+          }
+        }
+        """);
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-format-cluster",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-body",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "body" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
 static void CliRunResolveTargetFindsRoleEvidenceFromProfile()
 {
     using var temp = new TempDirectory();
@@ -3203,7 +3280,7 @@ static void CliInspectIncludesDocumentMapForDocxWorkspaces()
     var rawJson = RunCliRaw(["inspect", "--workspace", workspace]).Output;
     AssertContains(rawJson, "\"documentMap\"");
     AssertContains(rawJson, "\"requiresFinalization\":true");
-    AssertContains(rawJson, "\"finalizationReasons\":[\"fields\"]");
+    AssertContains(rawJson, "\"finalizationReasons\":[\"fields\",\"toc\"]");
     AssertContains(rawJson, "\"numberingId\":\"1\"");
     AssertContains(rawJson, "\"levels\":[");
     AssertDoesNotContain(rawJson, "\"DocumentMap\"");
@@ -3543,6 +3620,113 @@ static void TemplateProfileBuilderInfersDirectFormatRolesWithoutSemanticStyles()
         && diagnostic.Evidence.Any(evidence => evidence == "style:2")));
 }
 
+static void TemplateProfileBuilderClustersParagraphFormats()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("clustered-template.docx"),
+        Styles =
+        [
+            new DocumentStyle { StyleId = "2", Name = "Plain Text", Type = "paragraph", UsageCount = 6 }
+        ],
+        Paragraphs =
+        [
+            new DocumentParagraph
+            {
+                Index = 0,
+                Text = "1.1  研究背景",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    SpacingBeforeTwips = 240,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "24" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 1,
+                Text = "1.2  国内外研究现状",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    SpacingBeforeTwips = 240,
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "24" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 2,
+                Text = "本文围绕系统设计与实现展开研究。",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { Bold = false, FontSizeHalfPoints = "21" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 3,
+                Text = "系统采用分层架构提高维护性。",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    LineSpacing = "360",
+                    LineSpacingRule = "atleast",
+                    FirstLineIndentTwips = 420,
+                    RunFormat = new RunFormatSample { Bold = false, FontSizeHalfPoints = "21" }
+                }
+            },
+            new DocumentParagraph
+            {
+                Index = 4,
+                Text = "参考文献",
+                StyleId = "2",
+                Format = new ParagraphFormatSample
+                {
+                    StyleId = "2",
+                    Alignment = "center",
+                    RunFormat = new RunFormatSample { Bold = true, FontSizeHalfPoints = "28" }
+                }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    var heading2 = profile.FormatClusters.Single(cluster => cluster.RoleHint == "heading2");
+    AssertEqual("paragraph", heading2.AppliesTo);
+    AssertEqual(2, heading2.Count);
+    AssertEqual("2", heading2.StyleIds[0]);
+    AssertEqual("24", heading2.Match.Format!.FontSizeHalfPoints);
+    AssertEqual(true, heading2.Match.Format.Bold);
+    AssertEqual(240, heading2.Format!.SpacingBeforeTwips);
+    AssertEqual(0, heading2.Evidence[0].ParagraphIndex);
+    AssertEqual(1, heading2.Evidence[1].ParagraphIndex);
+
+    var body = profile.FormatClusters.Single(cluster => cluster.RoleHint == "body");
+    AssertEqual(2, body.Count);
+    AssertEqual("21", body.Match.Format!.FontSizeHalfPoints);
+    AssertEqual(false, body.Match.Format.Bold);
+    AssertEqual(420, body.Match.Format.FirstLineIndentTwips!.Exact);
+    AssertEqual(420, body.Format!.FirstLineIndentTwips);
+    AssertEqual(true, body.Confidence >= 0.7);
+
+    var json = ThesisJson.Serialize(profile);
+    AssertContains(json, "\"formatClusters\"");
+    AssertContains(json, "\"roleHint\":\"body\"");
+}
+
 static void TemplateProfileBuilderCopiesTableFormatSamples()
 {
     var map = new DocumentMap
@@ -3830,6 +4014,69 @@ static void CliProfileExtractReturnsJsonErrorForNonDocxInput()
     AssertEqual("document_map_unavailable", result.Diagnostics[0].Code);
     AssertEqual(Path.GetFullPath(notDocx), result.Diagnostics[0].Path);
     AssertEqual(false, File.Exists(outputPath));
+}
+
+static void CliFinalizePlanReportsHostApplicationStepsForFields()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "source.docx");
+    WriteFixtureDocx(docx);
+
+    var (exitCode, output) = RunCliRaw(["finalize", "plan", "--doc", docx]);
+    var result = ThesisJson.Deserialize<CliResult>(output);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(Path.GetFullPath(docx), result.Document);
+    AssertEqual(true, result.FinalizationPlan!.Required);
+    AssertEqual(true, result.FinalizationPlan.Reasons.Contains("fields", StringComparer.Ordinal));
+    AssertEqual(true, result.FinalizationPlan.Steps.Any(step =>
+        step.Id == "updateFields" && step.Capability == "hostApplication"));
+    AssertEqual(true, result.FinalizationPlan.Steps.Any(step =>
+        step.Id == "updateTableOfContents" && step.Capability == "hostApplication"));
+    AssertEqual(true, result.FinalizationPlan.Steps.Any(step =>
+        step.Id == "repaginate" && step.Capability == "hostApplication"));
+    AssertEqual(true, result.Diagnostics.Any(diagnostic =>
+        diagnostic.Code == "finalization_requires_host_application"));
+    AssertContains(output, "\"finalizationPlan\"");
+    AssertContains(output, "\"capability\":\"hostApplication\"");
+}
+
+static void CliFinalizePlanDistinguishesGenericFieldsFromToc()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "date-field.docx");
+    WriteSimpleDocx(
+        docx,
+        """
+        <w:p><w:r><w:t>封面日期：</w:t></w:r><w:fldSimple w:instr="DATE \@ &quot;yyyy-MM-dd&quot;"><w:r><w:t>2026-05-11</w:t></w:r></w:fldSimple></w:p>
+        """);
+
+    var (exitCode, result) = RunCli(["finalize", "plan", "--doc", docx]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(true, result.FinalizationPlan!.Required);
+    AssertEqual(true, result.FinalizationPlan.Reasons.Contains("fields", StringComparer.Ordinal));
+    AssertEqual(false, result.FinalizationPlan.Reasons.Contains("toc", StringComparer.Ordinal));
+    AssertEqual(true, result.FinalizationPlan.Steps.Any(step => step.Id == "updateFields"));
+    AssertEqual(false, result.FinalizationPlan.Steps.Any(step => step.Id == "updateTableOfContents"));
+}
+
+static void CliFinalizePlanIsQuietForCleanDocuments()
+{
+    using var temp = new TempDirectory();
+    var docx = Path.Combine(temp.Path, "clean.docx");
+    WriteSimpleDocx(docx, """<w:p><w:r><w:t>普通正文</w:t></w:r></w:p>""");
+
+    var (exitCode, result) = RunCli(["finalize", "plan", "--doc", docx]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(false, result.FinalizationPlan!.Required);
+    AssertEqual(0, result.FinalizationPlan.Reasons.Count);
+    AssertEqual(false, result.FinalizationPlan.Steps.Any(step => step.Required));
+    AssertEqual(0, result.Diagnostics.Count);
 }
 
 static (int ExitCode, CliResult Result) RunCli(string[] args)
@@ -4471,6 +4718,43 @@ static void InjectHyperlinkIntoFirstParagraph(string docxPath)
         StringComparison.Ordinal);
     entry.Delete();
     AddZipEntry(archive, "word/document.xml", xml);
+}
+
+static void WriteSimpleDocx(string path, string bodyXml)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    AddZipEntry(
+        archive,
+        "[Content_Types].xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+        </Types>
+        """);
+    AddZipEntry(
+        archive,
+        "_rels/.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/document.xml",
+        $$"""
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body>
+            {{bodyXml}}
+            <w:sectPr/>
+          </w:body>
+        </w:document>
+        """);
 }
 
 static void AssertEqual<T>(T expected, T actual)

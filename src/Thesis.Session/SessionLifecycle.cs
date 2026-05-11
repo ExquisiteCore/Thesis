@@ -399,6 +399,7 @@ public static class SessionLifecycle
         return profile is not null
             && profile.StyleRoles is not null
             && profile.RolePolicies is not null
+            && profile.FormatClusters is not null
             && profile.FinalizationReasons is not null
             && profile.PageSetup is not null
             && profile.NumberingPolicy is not null
@@ -413,6 +414,7 @@ public static class SessionLifecycle
                 && policy.Match.TextPatterns is not null
                 && policy.Match.OutlineLevels is not null
                 && IsValidRoleFormatMatch(policy.Match.Format))
+            && profile.FormatClusters.All(IsValidFormatCluster)
             && profile.NumberingPolicy.Instances is not null
             && profile.NumberingPolicy.ParagraphUses is not null
             && profile.TablePolicy.ObservedColumnCounts is not null
@@ -421,6 +423,29 @@ public static class SessionLifecycle
                 && archetype.Match.ColumnCounts is not null)
             && profile.Diagnostics.All(diagnostic => diagnostic.Evidence is not null)
             && profile.SourceEvidence.ParagraphSamples is not null;
+    }
+
+    private static bool IsValidFormatCluster(ProfileFormatCluster cluster)
+    {
+        return !string.IsNullOrWhiteSpace(cluster.Id)
+            && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase)
+            && IsKnownClusterRoleHint(cluster.RoleHint)
+            && cluster.Count >= 0
+            && cluster.Confidence is >= 0 and <= 1
+            && cluster.StyleIds is not null
+            && cluster.Match is not null
+            && cluster.Match.StyleIds is not null
+            && cluster.Match.TextPatterns is not null
+            && cluster.Match.OutlineLevels is not null
+            && IsValidRoleFormatMatch(cluster.Match.Format)
+            && cluster.Format is not null
+            && cluster.Evidence is not null
+            && cluster.Evidence.All(evidence => evidence is not null);
+    }
+
+    private static bool IsKnownClusterRoleHint(string? roleHint)
+    {
+        return roleHint is "unknown" or "title" or "heading1" or "heading2" or "heading3" or "body" or "abstract.zh" or "abstract.en" or "toc" or "references";
     }
 
     private static bool IsValidRoleFormatMatch(ProfileRoleFormatMatch? format)

@@ -18,6 +18,7 @@ public static class TemplateProfileBuilder
             PageSetup = BuildPageSetup(map),
             StyleRoles = BuildStyleRoles(map),
             RolePolicies = BuildRolePolicies(map),
+            FormatClusters = ProfileFormatClusterBuilder.Build(map),
             NumberingPolicy = BuildNumberingPolicy(map),
             TablePolicy = BuildTablePolicy(map),
             TableArchetypes = BuildTableArchetypes(map),

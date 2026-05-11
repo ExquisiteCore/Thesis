@@ -83,6 +83,8 @@ public sealed class CliResult
 
     public DocumentMap? DocumentMap { get; set; }
 
+    public FinalizationPlan? FinalizationPlan { get; set; }
+
     public SnapshotInfo? Snapshot { get; set; }
 
     public List<SnapshotInfo> Snapshots { get; set; } = [];
@@ -412,6 +414,8 @@ public sealed class TemplateProfile
 
     public List<ProfileRolePolicy> RolePolicies { get; set; } = [];
 
+    public List<ProfileFormatCluster> FormatClusters { get; set; } = [];
+
     public ProfileNumberingPolicy NumberingPolicy { get; set; } = new();
 
     public ProfileTablePolicy TablePolicy { get; set; } = new();
@@ -477,6 +481,27 @@ public sealed class ProfileRoleMatch
     public List<int> OutlineLevels { get; set; } = [];
 
     public ProfileRoleFormatMatch? Format { get; set; }
+}
+
+public sealed class ProfileFormatCluster
+{
+    public string Id { get; set; } = "";
+
+    public string AppliesTo { get; set; } = "paragraph";
+
+    public string RoleHint { get; set; } = "unknown";
+
+    public int Count { get; set; }
+
+    public double Confidence { get; set; }
+
+    public List<string> StyleIds { get; set; } = [];
+
+    public ProfileRoleMatch Match { get; set; } = new();
+
+    public ParagraphFormatSample? Format { get; set; }
+
+    public List<ProfileParagraphEvidence> Evidence { get; set; } = [];
 }
 
 public sealed class ProfileRoleFormatMatch
@@ -606,4 +631,24 @@ public sealed class ProfileSourceEvidence
     public int TableCount { get; set; }
 
     public List<ProfileParagraphEvidence> ParagraphSamples { get; set; } = [];
+}
+
+public sealed class FinalizationPlan
+{
+    public bool Required { get; set; }
+
+    public List<string> Reasons { get; set; } = [];
+
+    public List<FinalizationStep> Steps { get; set; } = [];
+}
+
+public sealed class FinalizationStep
+{
+    public string Id { get; set; } = "";
+
+    public string Capability { get; set; } = "";
+
+    public string Description { get; set; } = "";
+
+    public bool Required { get; set; }
 }

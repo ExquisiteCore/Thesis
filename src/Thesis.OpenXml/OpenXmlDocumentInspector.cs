@@ -496,7 +496,18 @@ public static class OpenXmlDocumentInspector
             reasons.Add("fields");
         }
 
+        if (body.Descendants<FieldCode>().Any(field => IsTocInstruction(field.Text))
+            || body.Descendants<SimpleField>().Any(field => IsTocInstruction(field.Instruction?.Value)))
+        {
+            reasons.Add("toc");
+        }
+
         return reasons;
+    }
+
+    private static bool IsTocInstruction(string? value)
+    {
+        return value?.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static bool IsFieldOnlyParagraph(Paragraph paragraph)
