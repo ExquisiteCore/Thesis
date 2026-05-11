@@ -54,6 +54,7 @@ var tests = new (string Name, Action Test)[]
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
     ("CLI run returns profile_invalid for null profile rule containers", CliRunReturnsProfileInvalidForNullProfileRuleContainers),
     ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
+    ("CLI run role target uses role policies when evidence is missing", CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing),
     ("CLI run profileOverrides roleAliases resolve profile role", CliRunProfileOverridesRoleAliasesResolveProfileRole),
     ("CLI run role target merges multiple matching profile entries", CliRunRoleTargetMergesMultipleMatchingProfileEntries),
     ("CLI run role afterHeading resolves shifted paragraph", CliRunRoleAfterHeadingResolvesShiftedParagraph),
@@ -1949,6 +1950,48 @@ static void CliRunResolveTargetFindsRoleEvidenceFromProfile()
     AssertEqual("摘要", result.Operations[0].Matches[0].Preview);
     AssertEqual("p6", result.Operations[0].Matches[1].Id);
     AssertEqual("参考文献", result.Operations[0].Matches[1].Preview);
+}
+
+static void CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "heading1",
+                AppliesTo = "paragraph",
+                Priority = 100,
+                Match = new ProfileRoleMatch { StyleIds = ["Heading1"] }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-heading",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "heading1" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(true, result.Operations[0].Matches.Count > 0);
 }
 
 static void CliRunProfileOverridesRoleAliasesResolveProfileRole()

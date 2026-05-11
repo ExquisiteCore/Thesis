@@ -247,6 +247,17 @@ internal sealed class OpenXmlTargetResolver
             .ToList();
         if (profileRoles is null || profileRoles.Count == 0)
         {
+            var policyMatches = ResolveRolePolicy(resolvedRole, out var policyError);
+            if (policyError is not null)
+            {
+                return TargetResolutionResult.Error(policyError);
+            }
+
+            if (policyMatches is not null)
+            {
+                return ValidateMatchCount(policyMatches, options);
+            }
+
             return TargetResolutionResult.Error("role_not_found");
         }
 
@@ -264,6 +275,35 @@ internal sealed class OpenXmlTargetResolver
             .ToList();
 
         return ValidateMatchCount(matches, options);
+    }
+
+    private List<ResolvedTarget>? ResolveRolePolicy(string role, out string? error)
+    {
+        error = null;
+        var policies = _profile?.RolePolicies
+            .Where(policy =>
+                string.Equals(policy.Role, role, StringComparison.Ordinal)
+                && string.Equals(policy.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(policy => policy.Priority)
+            .ToList();
+        if (policies is null || policies.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Paragraphs
+                .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+                .Where(candidate => policies.Any(policy => RolePolicyMatches(candidate.Paragraph, policy)))
+                .Select(candidate => (ResolvedTarget)new ResolvedParagraphTarget(candidate.Paragraph, candidate.Index))
+                .ToList();
+        }
+        catch (ArgumentException)
+        {
+            error = "target_value_invalid";
+            return [];
+        }
     }
 
     private TargetResolutionResult ResolveSectionRange(JsonObject target, RunOptions options)
@@ -439,6 +479,52 @@ internal sealed class OpenXmlTargetResolver
     private static string? GetParagraphStyleId(Paragraph paragraph)
     {
         return paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+    }
+
+    private static bool RolePolicyMatches(Paragraph paragraph, ProfileRolePolicy policy)
+    {
+        var match = policy.Match;
+        return StyleMatches(paragraph, match.StyleIds)
+            && TextPatternMatches(paragraph, match.TextPatterns)
+            && OutlineLevelMatches(paragraph, match.OutlineLevels);
+    }
+
+    private static bool StyleMatches(Paragraph paragraph, List<string> styleIds)
+    {
+        if (styleIds.Count == 0)
+        {
+            return true;
+        }
+
+        var paragraphStyleId = GetParagraphStyleId(paragraph);
+        return paragraphStyleId is not null
+            && styleIds.Any(styleId => string.Equals(styleId, paragraphStyleId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TextPatternMatches(Paragraph paragraph, List<string> textPatterns)
+    {
+        if (textPatterns.Count == 0)
+        {
+            return true;
+        }
+
+        return textPatterns.Any(pattern => Regex.IsMatch(paragraph.InnerText, pattern, RegexOptions.CultureInvariant));
+    }
+
+    private static bool OutlineLevelMatches(Paragraph paragraph, List<int> outlineLevels)
+    {
+        if (outlineLevels.Count == 0)
+        {
+            return true;
+        }
+
+        var outlineLevel = ReadOutlineLevel(paragraph);
+        return outlineLevel is not null && outlineLevels.Contains(outlineLevel.Value);
+    }
+
+    private static int? ReadOutlineLevel(Paragraph paragraph)
+    {
+        return paragraph.ParagraphProperties?.OutlineLevel?.Val?.Value;
     }
 
     private static JsonObject? GetTargetObject(JsonNode? node, out string? error)
