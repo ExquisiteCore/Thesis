@@ -4,6 +4,9 @@ using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Thesis.Schema;
+using A = DocumentFormat.OpenXml.Drawing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
+using WP = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace Thesis.OpenXml;
 
@@ -84,8 +87,10 @@ public static class OpenXmlMicroEditor
                 ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
             var context = new EditContext(
+                mainPart,
+                body,
                 ReadParagraphStyles(mainPart),
-                new OpenXmlTargetResolver(body, profile, request.ProfileOverrides, ReadStyleOutlineLevels(mainPart)),
+                ReadStyleOutlineLevels(mainPart),
                 profile,
                 request.ProfileOverrides);
             var result = new DocumentEditResult();
@@ -139,6 +144,9 @@ public static class OpenXmlMicroEditor
             "replaceParagraphText" => ReplaceParagraphText(context, options, operation, writeChanges),
             "setParagraphStyle" => SetParagraphStyle(context, options, operation, writeChanges),
             "setRunFormat" => SetRunFormat(context, operation, writeChanges),
+            "insertParagraph" => InsertParagraph(context, options, operation, writeChanges),
+            "deleteParagraph" => DeleteParagraph(context, options, operation, writeChanges),
+            "moveParagraph" => MoveParagraph(context, options, operation, writeChanges),
             "applyProfileRole" => ApplyProfileRole(context, options, operation, writeChanges),
             "applyProfileTable" => ApplyProfileTable(context, options, operation, writeChanges),
             "setTableBorders" => SetTableBorders(context, options, operation, writeChanges),
@@ -146,7 +154,10 @@ public static class OpenXmlMicroEditor
             "setTableCellFormat" => SetTableCellFormat(context, options, operation, writeChanges),
             "setTableColumnWidth" => SetTableColumnWidth(context, options, operation, writeChanges),
             "setTableRowHeader" => SetTableRowHeader(context, options, operation, writeChanges),
+            "insertTableRow" => InsertTableRow(context, options, operation, writeChanges),
+            "deleteTableRow" => DeleteTableRow(context, options, operation, writeChanges),
             "applyThreeLineTable" => ApplyThreeLineTable(context, options, operation, writeChanges),
+            "insertImage" => InsertImage(context, options, operation, writeChanges),
             null or "" => OperationError(operation, "operation_missing"),
             _ => OperationError(operation, "operation_unknown")
         };
@@ -303,6 +314,133 @@ public static class OpenXmlMicroEditor
 
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
         result.Matches.Add(target.ToMatchInfo(before, OpenXmlFormatReader.FormatPreview(operation.Format)));
+        return result;
+    }
+
+    private static OperationResult InsertParagraph(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (operation.Text is null)
+        {
+            return OperationError(operation, "text_missing");
+        }
+
+        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        if (!TryCreateOperationParagraphFormat(context, operation.Format, out var format, out var formatError))
+        {
+            return OperationError(operation, formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                var paragraph = CreateTextParagraph(operation.Text, format);
+                InsertRelativeTo(target.Paragraph, paragraph, position);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, operation.Text));
+        }
+
+        return result;
+    }
+
+    private static OperationResult DeleteParagraph(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>().OrderByDescending(target => target.ParagraphIndex))
+        {
+            var before = target.Paragraph.InnerText;
+            if (writeChanges)
+            {
+                target.Paragraph.Remove();
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, ""));
+        }
+
+        return result;
+    }
+
+    private static OperationResult MoveParagraph(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        var anchorNode = operation.Format?["anchor"];
+        if (anchorNode is null)
+        {
+            return OperationError(operation, "target_value_invalid");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var anchorResolution = context.Resolver.Resolve(anchorNode, SingleMatchOptions());
+        if (!anchorResolution.Success)
+        {
+            return OperationError(operation, anchorResolution.ErrorCode!);
+        }
+
+        if (anchorResolution.Matches.Any(match => match.Kind != ResolvedTargetKind.Paragraph))
+        {
+            return OperationError(operation, "target_type_unsupported");
+        }
+
+        var anchor = (ResolvedParagraphTarget)anchorResolution.Matches.Single();
+        if (targets.Any(target => ReferenceEquals(((ResolvedParagraphTarget)target).Paragraph, anchor.Paragraph)))
+        {
+            return OperationError(operation, "target_value_invalid");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            var before = target.Paragraph.InnerText;
+            if (writeChanges)
+            {
+                target.Paragraph.Remove();
+                InsertRelativeTo(anchor.Paragraph, target.Paragraph, position);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, $"{position}:{anchor.Paragraph.InnerText}"));
+        }
+
         return result;
     }
 
@@ -664,6 +802,107 @@ public static class OpenXmlMicroEditor
         return result;
     }
 
+    private static OperationResult InsertTableRow(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        if (rowIndexError is not null || rowIndex is null || rowIndex < 0)
+        {
+            return OperationError(operation, rowIndexError ?? "target_value_invalid");
+        }
+
+        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        var cells = GetStringArray(operation.Format, "cells", out var cellsError);
+        if (cellsError is not null)
+        {
+            return OperationError(operation, cellsError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var tableTargets = targets.Cast<ResolvedTableTarget>().ToList();
+        if (tableTargets.Any(target => rowIndex.Value >= target.RowCount))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        if (tableTargets.Any(target => cells.Count > target.CellCounts.DefaultIfEmpty(0).Max()))
+        {
+            return OperationError(operation, "table_cell_count_invalid");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in tableTargets)
+        {
+            var before = target.Table.InnerText;
+            if (writeChanges)
+            {
+                InsertTableRow(target.Table, rowIndex.Value, position, cells);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, string.Join(" ", cells)));
+        }
+
+        return result;
+    }
+
+    private static OperationResult DeleteTableRow(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        if (rowIndexError is not null || rowIndex is null || rowIndex < 0)
+        {
+            return OperationError(operation, rowIndexError ?? "target_value_invalid");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var tableTargets = targets.Cast<ResolvedTableTarget>().ToList();
+        if (tableTargets.Any(target => rowIndex.Value >= target.RowCount))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        if (tableTargets.Any(target => target.RowCount <= 1))
+        {
+            return OperationError(operation, "table_row_count_invalid");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in tableTargets)
+        {
+            var rows = target.Table.Elements<TableRow>().ToList();
+            var before = rows[rowIndex.Value].InnerText;
+            if (writeChanges)
+            {
+                rows[rowIndex.Value].Remove();
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, ""));
+        }
+
+        return result;
+    }
+
     private static OperationResult ApplyThreeLineTable(
         EditContext context,
         RunOptions options,
@@ -694,6 +933,77 @@ public static class OpenXmlMicroEditor
                 ? OpenXmlFormatReader.TableFormatPreview(target.Table)
                 : OpenXmlFormatReader.FormatPreview(OpenXmlFormatMerger.MergeTableFormat(OpenXmlFormatReader.ReadTableFormat(target.Table), format));
             result.Matches.Add(target.ToMatchInfo(before, after));
+        }
+
+        return result;
+    }
+
+    private static OperationResult InsertImage(
+        EditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var imagePath = GetString(operation.Format, "imagePath", out var imagePathError);
+        if (imagePathError is not null || string.IsNullOrWhiteSpace(imagePath))
+        {
+            return OperationError(operation, imagePathError ?? "target_value_invalid");
+        }
+
+        var widthEmu = GetInt(operation.Format, "widthEmu", out var widthError);
+        var heightEmu = GetInt(operation.Format, "heightEmu", out var heightError);
+        if (widthError is not null || heightError is not null || widthEmu is null || heightEmu is null || widthEmu <= 0 || heightEmu <= 0)
+        {
+            return OperationError(operation, widthError ?? heightError ?? "target_value_invalid");
+        }
+
+        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        var fullImagePath = Path.GetFullPath(imagePath);
+        if (!File.Exists(fullImagePath))
+        {
+            return OperationError(operation, "image_not_found");
+        }
+
+        var altText = GetString(operation.Format, "altText", out var altTextError) ?? "";
+        if (altTextError is not null)
+        {
+            return OperationError(operation, altTextError);
+        }
+
+        if (!TryCreateOperationParagraphFormat(context, operation.Format, out var format, out var formatError))
+        {
+            return OperationError(operation, formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                var imagePart = AddImagePart(context.MainPart, fullImagePath);
+                var relationshipId = context.MainPart.GetIdOfPart(imagePart);
+                var paragraph = CreateImageParagraph(
+                    relationshipId,
+                    widthEmu.Value,
+                    heightEmu.Value,
+                    altText,
+                    NextDrawingId(context.MainPart),
+                    format);
+                InsertRelativeTo(target.Paragraph, paragraph, position);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, fullImagePath));
         }
 
         return result;
@@ -738,6 +1048,152 @@ public static class OpenXmlMicroEditor
 
         matches = resolution.Matches;
         return true;
+    }
+
+    private static bool TryCreateOperationParagraphFormat(
+        EditContext context,
+        JsonNode? operationFormat,
+        out ParagraphFormatSample format,
+        out string error)
+    {
+        return OpenXmlOperationFormatBuilder.TryCreateEffectiveFormat(
+            context.ParagraphStyleIds,
+            new ParagraphFormatSample(),
+            operationFormat,
+            out format,
+            out error);
+    }
+
+    private static Paragraph CreateTextParagraph(string text, ParagraphFormatSample format)
+    {
+        var paragraph = new Paragraph(new Run(new Text(text)
+        {
+            Space = NeedsPreservedSpace(text) ? SpaceProcessingModeValues.Preserve : null
+        }));
+        OpenXmlFormatApplier.ApplyParagraphFormat(paragraph, format);
+        return paragraph;
+    }
+
+    private static void InsertRelativeTo(Paragraph anchor, Paragraph paragraph, string position)
+    {
+        if (position == "before")
+        {
+            anchor.InsertBeforeSelf(paragraph);
+        }
+        else
+        {
+            anchor.InsertAfterSelf(paragraph);
+        }
+    }
+
+    private static void InsertTableRow(Table table, int rowIndex, string position, List<string> cells)
+    {
+        var rows = table.Elements<TableRow>().ToList();
+        var anchor = rows[rowIndex];
+        var template = anchor.CloneNode(deep: true) as TableRow
+            ?? throw new InvalidDataException("Could not clone table row.");
+        var templateCells = template.Elements<TableCell>().ToList();
+        var cellCount = templateCells.Count;
+        while (templateCells.Count < cellCount)
+        {
+            var cell = new TableCell(new Paragraph(new Run(new Text(""))));
+            template.AppendChild(cell);
+            templateCells.Add(cell);
+        }
+
+        for (var index = 0; index < cellCount; index++)
+        {
+            OpenXmlFormatApplier.ReplaceTableCellText(templateCells[index], index < cells.Count ? cells[index] : "");
+        }
+
+        if (position == "before")
+        {
+            anchor.InsertBeforeSelf(template);
+        }
+        else
+        {
+            anchor.InsertAfterSelf(template);
+        }
+    }
+
+    private static ImagePart AddImagePart(MainDocumentPart mainPart, string imagePath)
+    {
+        var imagePartType = Path.GetExtension(imagePath).ToLowerInvariant() switch
+        {
+            ".bmp" => ImagePartType.Bmp,
+            ".gif" => ImagePartType.Gif,
+            ".ico" => ImagePartType.Icon,
+            ".jpeg" or ".jpg" => ImagePartType.Jpeg,
+            ".png" => ImagePartType.Png,
+            ".tif" or ".tiff" => ImagePartType.Tiff,
+            _ => throw new InvalidDataException("Unsupported image format.")
+        };
+
+        var part = mainPart.AddImagePart(imagePartType);
+        using var stream = File.OpenRead(imagePath);
+        part.FeedData(stream);
+        return part;
+    }
+
+    private static Paragraph CreateImageParagraph(
+        string relationshipId,
+        int widthEmu,
+        int heightEmu,
+        string altText,
+        uint drawingId,
+        ParagraphFormatSample format)
+    {
+        var drawing = new Drawing(
+            new WP.Inline(
+                new WP.Extent { Cx = widthEmu, Cy = heightEmu },
+                new WP.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
+                new WP.DocProperties { Id = drawingId, Name = string.IsNullOrWhiteSpace(altText) ? $"Picture {drawingId}" : altText, Description = altText },
+                new WP.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(
+                    new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = 0U, Name = string.IsNullOrWhiteSpace(altText) ? "Picture" : altText },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = relationshipId },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(
+                                    new A.Offset { X = 0, Y = 0 },
+                                    new A.Extents { Cx = widthEmu, Cy = heightEmu }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+                    { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            {
+                DistanceFromTop = 0U,
+                DistanceFromBottom = 0U,
+                DistanceFromLeft = 0U,
+                DistanceFromRight = 0U
+            });
+        var paragraph = new Paragraph(new Run(drawing));
+        OpenXmlFormatApplier.ApplyParagraphFormat(paragraph, format);
+        return paragraph;
+    }
+
+    private static RunOptions SingleMatchOptions()
+    {
+        return new RunOptions
+        {
+            CreateSnapshot = false,
+            StopOnError = true,
+            RequireSingleMatch = true,
+            TrackChanges = false
+        };
+    }
+
+    private static uint NextDrawingId(MainDocumentPart mainPart)
+    {
+        var maxId = mainPart.Document!
+            .Descendants<WP.DocProperties>()
+            .Select(properties => properties.Id?.Value ?? 0U)
+            .DefaultIfEmpty(0U)
+            .Max();
+        return maxId + 1U;
     }
 
     private static void ReplaceParagraphRuns(Paragraph paragraph, string text)
@@ -982,6 +1438,60 @@ public static class OpenXmlMicroEditor
         }
     }
 
+    private static string GetPosition(JsonNode? node, string defaultValue, out string? error)
+    {
+        var position = GetString(node, "position", out error) ?? defaultValue;
+        if (error is not null)
+        {
+            return defaultValue;
+        }
+
+        if (position is not "before" and not "after")
+        {
+            error = "target_value_invalid";
+            return defaultValue;
+        }
+
+        return position;
+    }
+
+    private static List<string> GetStringArray(JsonNode? node, string propertyName, out string? error)
+    {
+        error = null;
+        var value = node?[propertyName];
+        if (value is null)
+        {
+            return [];
+        }
+
+        if (value is not JsonArray array)
+        {
+            error = "target_value_invalid";
+            return [];
+        }
+
+        var result = new List<string>();
+        foreach (var item in array)
+        {
+            try
+            {
+                result.Add(item?.GetValue<string>() ?? "");
+            }
+            catch (InvalidOperationException)
+            {
+                error = "target_value_invalid";
+                return [];
+            }
+            catch (FormatException)
+            {
+                error = "target_value_invalid";
+                return [];
+            }
+        }
+
+        return result;
+    }
+
     private static bool NeedsPreservedSpace(string text)
     {
         return text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
@@ -1059,17 +1569,39 @@ public static class OpenXmlMicroEditor
     }
 
     private sealed class EditContext(
+        MainDocumentPart mainPart,
+        Body body,
         HashSet<string> paragraphStyleIds,
-        OpenXmlTargetResolver resolver,
+        IReadOnlyDictionary<string, int> styleOutlineLevels,
         TemplateProfile? profile,
         JsonObject? profileOverrides)
     {
+        public MainDocumentPart MainPart { get; } = mainPart;
+
+        public Body Body { get; } = body;
+
         public HashSet<string> ParagraphStyleIds { get; } = paragraphStyleIds;
 
-        public OpenXmlTargetResolver Resolver { get; } = resolver;
+        public IReadOnlyDictionary<string, int> StyleOutlineLevels { get; } = styleOutlineLevels;
+
+        public OpenXmlTargetResolver Resolver { get; private set; } = CreateResolver(body, profile, profileOverrides, styleOutlineLevels);
 
         public TemplateProfile? Profile { get; } = profile;
 
         public JsonObject? ProfileOverrides { get; } = profileOverrides;
+
+        public void RefreshResolver()
+        {
+            Resolver = CreateResolver(Body, Profile, ProfileOverrides, StyleOutlineLevels);
+        }
+
+        private static OpenXmlTargetResolver CreateResolver(
+            Body body,
+            TemplateProfile? profile,
+            JsonObject? profileOverrides,
+            IReadOnlyDictionary<string, int> styleOutlineLevels)
+        {
+            return new OpenXmlTargetResolver(body, profile, profileOverrides, styleOutlineLevels);
+        }
     }
 }
