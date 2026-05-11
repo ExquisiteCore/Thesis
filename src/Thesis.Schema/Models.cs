@@ -475,6 +475,40 @@ public sealed class ProfileRoleMatch
     public List<string> TextPatterns { get; set; } = [];
 
     public List<int> OutlineLevels { get; set; } = [];
+
+    public ProfileRoleFormatMatch? Format { get; set; }
+}
+
+public sealed class ProfileRoleFormatMatch
+{
+    public string? StyleId { get; set; }
+
+    public string? Alignment { get; set; }
+
+    public string? FontSizeHalfPoints { get; set; }
+
+    public bool? Bold { get; set; }
+
+    public bool? Italic { get; set; }
+
+    public string? LineSpacing { get; set; }
+
+    public string? LineSpacingRule { get; set; }
+
+    public IntRangeMatch? FirstLineIndentTwips { get; set; }
+
+    public IntRangeMatch? LeftIndentTwips { get; set; }
+
+    public IntRangeMatch? RightIndentTwips { get; set; }
+}
+
+public sealed class IntRangeMatch
+{
+    public int? Min { get; set; }
+
+    public int? Max { get; set; }
+
+    public int? Exact { get; set; }
 }
 
 public sealed class ProfileParagraphEvidence

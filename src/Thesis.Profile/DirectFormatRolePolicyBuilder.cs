@@ -72,9 +72,50 @@ internal static class DirectFormatRolePolicyBuilder
             Match = new ProfileRoleMatch
             {
                 TextPatterns = [textPattern],
-                OutlineLevels = paragraph.OutlineLevel.HasValue ? [paragraph.OutlineLevel.Value] : []
+                OutlineLevels = paragraph.OutlineLevel.HasValue ? [paragraph.OutlineLevel.Value] : [],
+                Format = BuildFormatMatch(role, paragraph.Format)
             },
             Format = ProfileSampleCloner.Clone(ProfileFormatComparison.NormalizePolicyFormat(paragraph.Format))
         });
+    }
+
+    private static ProfileRoleFormatMatch BuildFormatMatch(string role, ParagraphFormatSample format)
+    {
+        return role switch
+        {
+            "heading1" => new ProfileRoleFormatMatch
+            {
+                Alignment = "center",
+                Bold = true,
+                FontSizeHalfPoints = format.RunFormat?.FontSizeHalfPoints
+            },
+            "heading2" or "heading3" => new ProfileRoleFormatMatch
+            {
+                Bold = true,
+                FontSizeHalfPoints = format.RunFormat?.FontSizeHalfPoints,
+                FirstLineIndentTwips = new IntRangeMatch { Exact = format.FirstLineIndentTwips ?? 0 }
+            },
+            "body" => new ProfileRoleFormatMatch
+            {
+                Bold = false,
+                FontSizeHalfPoints = format.RunFormat?.FontSizeHalfPoints,
+                LineSpacing = format.LineSpacing,
+                LineSpacingRule = format.LineSpacingRule,
+                FirstLineIndentTwips = CreateBodyFirstLineIndentMatch(format.FirstLineIndentTwips)
+            },
+            _ => new ProfileRoleFormatMatch()
+        };
+    }
+
+    private static IntRangeMatch? CreateBodyFirstLineIndentMatch(int? sampleFirstLineIndentTwips)
+    {
+        if (sampleFirstLineIndentTwips is null)
+        {
+            return null;
+        }
+
+        var min = Math.Min(360, sampleFirstLineIndentTwips.Value);
+        var max = Math.Max(560, sampleFirstLineIndentTwips.Value);
+        return new IntRangeMatch { Min = min, Max = max };
     }
 }

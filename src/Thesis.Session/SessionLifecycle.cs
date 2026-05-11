@@ -411,7 +411,8 @@ public static class SessionLifecycle
                 policy.Match is not null
                 && policy.Match.StyleIds is not null
                 && policy.Match.TextPatterns is not null
-                && policy.Match.OutlineLevels is not null)
+                && policy.Match.OutlineLevels is not null
+                && IsValidRoleFormatMatch(policy.Match.Format))
             && profile.NumberingPolicy.Instances is not null
             && profile.NumberingPolicy.ParagraphUses is not null
             && profile.TablePolicy.ObservedColumnCounts is not null
@@ -420,6 +421,34 @@ public static class SessionLifecycle
                 && archetype.Match.ColumnCounts is not null)
             && profile.Diagnostics.All(diagnostic => diagnostic.Evidence is not null)
             && profile.SourceEvidence.ParagraphSamples is not null;
+    }
+
+    private static bool IsValidRoleFormatMatch(ProfileRoleFormatMatch? format)
+    {
+        return format is null
+            || (IsValidRange(format.FirstLineIndentTwips)
+                && IsValidRange(format.LeftIndentTwips)
+                && IsValidRange(format.RightIndentTwips));
+    }
+
+    private static bool IsValidRange(IntRangeMatch? range)
+    {
+        if (range is null)
+        {
+            return true;
+        }
+
+        if (range.Exact is null && range.Min is null && range.Max is null)
+        {
+            return false;
+        }
+
+        if (range.Exact is not null && (range.Min is not null || range.Max is not null))
+        {
+            return false;
+        }
+
+        return range.Min is null || range.Max is null || range.Min <= range.Max;
     }
 
     private static CliResult ProfileInvalid(string path, string message)

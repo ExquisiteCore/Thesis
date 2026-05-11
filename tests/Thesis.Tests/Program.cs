@@ -55,10 +55,12 @@ var tests = new (string Name, Action Test)[]
     ("CLI run returns profile_invalid for structurally invalid workspace profile", CliRunReturnsProfileInvalidForStructurallyInvalidWorkspaceProfile),
     ("CLI run returns profile_invalid for null role evidence", CliRunReturnsProfileInvalidForNullRoleEvidence),
     ("CLI run returns profile_invalid for null profile rule containers", CliRunReturnsProfileInvalidForNullProfileRuleContainers),
+    ("CLI run returns profile_invalid for malformed role format range", CliRunReturnsProfileInvalidForMalformedRoleFormatRange),
     ("CLI run resolveTarget finds role evidence from profile", CliRunResolveTargetFindsRoleEvidenceFromProfile),
     ("CLI run role target uses role policies when evidence is missing", CliRunRoleTargetUsesRolePoliciesWhenEvidenceIsMissing),
     ("CLI run role policy target honors afterHeading position", CliRunRolePolicyTargetHonorsAfterHeadingPosition),
     ("CLI run role policy target matches style outline levels", CliRunRolePolicyTargetMatchesStyleOutlineLevels),
+    ("CLI run role policy target matches paragraph format", CliRunRolePolicyTargetMatchesParagraphFormat),
     ("CLI run profileOverrides roleAliases resolve profile role", CliRunProfileOverridesRoleAliasesResolveProfileRole),
     ("CLI run role target merges multiple matching profile entries", CliRunRoleTargetMergesMultipleMatchingProfileEntries),
     ("CLI run role afterHeading resolves shifted paragraph", CliRunRoleAfterHeadingResolvesShiftedParagraph),
@@ -184,7 +186,14 @@ static void TemplateProfileRulesSerializeAsCamelCaseJson()
                 {
                     StyleIds = ["Heading1"],
                     TextPatterns = ["^第.+章"],
-                    OutlineLevels = [0]
+                    OutlineLevels = [0],
+                    Format = new ProfileRoleFormatMatch
+                    {
+                        Alignment = "center",
+                        FontSizeHalfPoints = "28",
+                        Bold = true,
+                        FirstLineIndentTwips = new IntRangeMatch { Min = 360, Max = 560 }
+                    }
                 },
                 Format = new ParagraphFormatSample
                 {
@@ -227,8 +236,16 @@ static void TemplateProfileRulesSerializeAsCamelCaseJson()
     AssertContains(json, "\"rolePolicies\"");
     AssertContains(json, "\"appliesTo\":\"paragraph\"");
     AssertContains(json, "\"outlineLevels\":[0]");
+    AssertContains(json, "\"format\"");
+    AssertContains(json, "\"alignment\":\"center\"");
+    AssertContains(json, "\"fontSizeHalfPoints\":\"28\"");
+    AssertContains(json, "\"bold\":true");
+    AssertContains(json, "\"firstLineIndentTwips\":{\"min\":360,\"max\":560");
     AssertContains(json, "\"tableArchetypes\"");
     AssertContains(json, "\"diagnostics\"");
+
+    var roundtrip = ThesisJson.Deserialize<TemplateProfile>(json);
+    AssertEqual(360, roundtrip.RolePolicies[0].Match.Format!.FirstLineIndentTwips!.Min);
 }
 
 static void SessionPathsResolvesExpectedFilenames()
@@ -2006,6 +2023,55 @@ static void CliRunReturnsProfileInvalidForNullProfileRuleContainers()
     AssertEqual("profile_invalid", result.Diagnostics[0].Code);
 }
 
+static void CliRunReturnsProfileInvalidForMalformedRoleFormatRange()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "body",
+                AppliesTo = "paragraph",
+                Match = new ProfileRoleMatch
+                {
+                    TextPatterns = [".+"],
+                    Format = new ProfileRoleFormatMatch
+                    {
+                        FirstLineIndentTwips = new IntRangeMatch { Exact = 480, Min = 360 }
+                    }
+                }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "requestId": "req-bad-format-range",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "find-body",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "body" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(1, exitCode);
+    AssertEqual("error", result.Status);
+    AssertEqual("profile_invalid", result.Diagnostics[0].Code);
+}
+
 static void CliRunResolveTargetFindsRoleEvidenceFromProfile()
 {
     using var temp = new TempDirectory();
@@ -2173,6 +2239,65 @@ static void CliRunRolePolicyTargetMatchesStyleOutlineLevels()
     AssertEqual("success", result.Status);
     AssertEqual("p1", result.Operations[0].Matches[0].Id);
     AssertEqual("第一章 绪论", result.Operations[0].Matches[0].Preview);
+}
+
+static void CliRunRolePolicyTargetMatchesParagraphFormat()
+{
+    using var temp = new TempDirectory();
+    var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+    var profile = new TemplateProfile
+    {
+        RolePolicies =
+        [
+            new ProfileRolePolicy
+            {
+                Role = "body",
+                AppliesTo = "paragraph",
+                Priority = 15,
+                Match = new ProfileRoleMatch
+                {
+                    TextPatterns = ["^本文.+$"],
+                    Format = new ProfileRoleFormatMatch
+                    {
+                        StyleId = "2",
+                        Alignment = "both",
+                        FontSizeHalfPoints = "21",
+                        Bold = false,
+                        Italic = false,
+                        LineSpacing = "360",
+                        LineSpacingRule = "atleast",
+                        FirstLineIndentTwips = new IntRangeMatch { Min = 360, Max = 560 },
+                        LeftIndentTwips = new IntRangeMatch { Exact = 0 }
+                    }
+                }
+            }
+        ]
+    };
+    File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    var requestPath = Path.Combine(temp.Path, "request.json");
+    File.WriteAllText(
+        requestPath,
+        """
+        {
+          "schemaVersion": "1.0",
+          "mode": "dryRun",
+          "operations": [
+            {
+              "id": "format-body",
+              "op": "resolveTarget",
+              "target": { "type": "role", "role": "body" }
+            }
+          ]
+        }
+        """);
+
+    var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+    AssertEqual(0, exitCode);
+    AssertEqual("success", result.Status);
+    AssertEqual(1, result.Operations[0].Matches.Count);
+    AssertEqual("p0", result.Operations[0].Matches[0].Id);
+    AssertEqual("本文围绕系统设计与实现展开研究。", result.Operations[0].Matches[0].Preview);
 }
 
 static void CliRunProfileOverridesRoleAliasesResolveProfileRole()
@@ -3400,6 +3525,12 @@ static void TemplateProfileBuilderInfersDirectFormatRolesWithoutSemanticStyles()
     AssertEqual(0, body.Match.StyleIds.Count);
     AssertEqual(true, body.Match.TextPatterns.Any(pattern => Regex.IsMatch("本文围绕系统设计与实现展开研究。", pattern)));
     AssertEqual(false, body.Match.TextPatterns.Any(pattern => Regex.IsMatch("第一章绪论", pattern)));
+    AssertEqual("21", body.Match.Format!.FontSizeHalfPoints);
+    AssertEqual(false, body.Match.Format.Bold);
+    AssertEqual("360", body.Match.Format.LineSpacing);
+    AssertEqual("atleast", body.Match.Format.LineSpacingRule);
+    AssertEqual(360, body.Match.Format.FirstLineIndentTwips!.Min);
+    AssertEqual(560, body.Match.Format.FirstLineIndentTwips.Max);
     AssertEqual(420, body.Format!.FirstLineIndentTwips);
     AssertEqual(false, body.Format.RunFormat!.Bold);
     AssertEqual("21", body.Format.RunFormat.FontSizeHalfPoints);
@@ -3746,6 +3877,28 @@ static WorkspaceContext CreateInitializedDocxWorkspace(string root)
     var workspace = Path.Combine(root, ".thesis");
 
     WriteFixtureDocx(sourceDoc);
+    File.WriteAllText(profile, "{}");
+
+    var result = SessionInitializer.Initialize(sourceDoc, profile, workspace);
+    AssertEqual("success", result.Status);
+
+    return new WorkspaceContext(
+        sourceDoc,
+        profile,
+        Path.GetFullPath(workspace),
+        SessionPaths.FromWorkspace(workspace),
+        File.ReadAllBytes(sourceDoc));
+}
+
+static WorkspaceContext CreateInitializedFormatMatchDocxWorkspace(string root)
+{
+    Directory.CreateDirectory(root);
+
+    var sourceDoc = Path.GetFullPath(Path.Combine(root, "source.docx"));
+    var profile = Path.Combine(root, "input-profile.json");
+    var workspace = Path.Combine(root, ".thesis");
+
+    WriteFormatMatchFixtureDocx(sourceDoc);
     File.WriteAllText(profile, "{}");
 
     var result = SessionInitializer.Initialize(sourceDoc, profile, workspace);
@@ -4137,6 +4290,98 @@ static void WriteFormattedFixtureDocx(string path)
               <w:pgSz w:w="11906" w:h="16838"/>
               <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
             </w:sectPr>
+          </w:body>
+        </w:document>
+        """);
+}
+
+static void WriteFormatMatchFixtureDocx(string path)
+{
+    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+    AddZipEntry(
+        archive,
+        "[Content_Types].xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+        </Types>
+        """);
+    AddZipEntry(
+        archive,
+        "_rels/.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/_rels/document.xml.rels",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+        </Relationships>
+        """);
+    AddZipEntry(
+        archive,
+        "word/styles.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+          <w:style w:type="paragraph" w:styleId="2"><w:name w:val="Plain Text"/></w:style>
+        </w:styles>
+        """);
+    AddZipEntry(
+        archive,
+        "word/document.xml",
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body>
+            <w:p>
+              <w:pPr>
+                <w:pStyle w:val="2"/>
+                <w:jc w:val="both"/>
+                <w:spacing w:line="360" w:lineRule="atLeast"/>
+                <w:ind w:firstLine="420" w:left="0"/>
+              </w:pPr>
+              <w:r>
+                <w:rPr><w:b w:val="false"/><w:i w:val="false"/><w:sz w:val="21"/></w:rPr>
+                <w:t>本文围绕系统设计与实现展开研究。</w:t>
+              </w:r>
+            </w:p>
+            <w:p>
+              <w:pPr>
+                <w:pStyle w:val="2"/>
+                <w:jc w:val="center"/>
+                <w:spacing w:line="360" w:lineRule="atLeast"/>
+                <w:ind w:firstLine="0" w:left="0"/>
+              </w:pPr>
+              <w:r>
+                <w:rPr><w:b/><w:i w:val="false"/><w:sz w:val="21"/></w:rPr>
+                <w:t>本文围绕标题样式展开说明。</w:t>
+              </w:r>
+            </w:p>
+            <w:p>
+              <w:pPr>
+                <w:pStyle w:val="2"/>
+                <w:jc w:val="both"/>
+                <w:spacing w:line="360" w:lineRule="atLeast"/>
+                <w:ind w:firstLine="420" w:left="0"/>
+              </w:pPr>
+              <w:r>
+                <w:rPr><w:b w:val="false"/><w:i w:val="false"/><w:sz w:val="24"/></w:rPr>
+                <w:t>本文围绕字号差异展开说明。</w:t>
+              </w:r>
+            </w:p>
+            <w:sectPr/>
           </w:body>
         </w:document>
         """);
