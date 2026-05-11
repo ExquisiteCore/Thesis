@@ -1,79 +1,55 @@
-using System.Text.Json.Nodes;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
 
 public static class TemplateProfileBuilder
 {
-    public static JsonObject Build(DocumentMap map, string sourceType)
+    public static TemplateProfile Build(DocumentMap map, string sourceType)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceType);
 
-        return new JsonObject
+        return new TemplateProfile
         {
-            ["schemaVersion"] = "1.0",
-            ["profileKind"] = "templateProfile",
-            ["sourceType"] = sourceType,
-            ["sourceDocument"] = map.Path,
-            ["requiresFinalization"] = map.RequiresFinalization,
-            ["finalizationReasons"] = ToJsonArray(map.FinalizationReasons),
-            ["pageSetup"] = BuildPageSetup(map),
-            ["styleRoles"] = BuildStyleRoles(map),
-            ["numberingPolicy"] = BuildNumberingPolicy(map),
-            ["tablePolicy"] = BuildTablePolicy(map),
-            ["sourceEvidence"] = BuildSourceEvidence(map)
+            SourceType = sourceType,
+            SourceDocument = map.Path,
+            RequiresFinalization = map.RequiresFinalization,
+            FinalizationReasons = [.. map.FinalizationReasons],
+            PageSetup = BuildPageSetup(map),
+            StyleRoles = BuildStyleRoles(map),
+            NumberingPolicy = BuildNumberingPolicy(map),
+            TablePolicy = BuildTablePolicy(map),
+            SourceEvidence = BuildSourceEvidence(map)
         };
     }
 
-    private static JsonObject BuildPageSetup(DocumentMap map)
+    private static ProfilePageSetup BuildPageSetup(DocumentMap map)
     {
         var section = map.Sections.FirstOrDefault();
-        return new JsonObject
+        return new ProfilePageSetup
         {
-            ["pageSize"] = section?.PageSize is null
-                ? null
-                : new JsonObject
-                {
-                    ["widthTwips"] = section.PageSize.WidthTwips,
-                    ["heightTwips"] = section.PageSize.HeightTwips,
-                    ["orientation"] = section.PageSize.Orientation
-                },
-            ["margins"] = section?.PageMargin is null
-                ? null
-                : new JsonObject
-                {
-                    ["topTwips"] = section.PageMargin.TopTwips,
-                    ["rightTwips"] = section.PageMargin.RightTwips,
-                    ["bottomTwips"] = section.PageMargin.BottomTwips,
-                    ["leftTwips"] = section.PageMargin.LeftTwips,
-                    ["headerTwips"] = section.PageMargin.HeaderTwips,
-                    ["footerTwips"] = section.PageMargin.FooterTwips,
-                    ["gutterTwips"] = section.PageMargin.GutterTwips
-                },
-            ["headers"] = ToJsonArray(section?.Headers.Select(header => new JsonObject
-            {
-                ["type"] = header.Type,
-                ["relationshipId"] = header.RelationshipId
-            }) ?? []),
-            ["footers"] = ToJsonArray(section?.Footers.Select(footer => new JsonObject
-            {
-                ["type"] = footer.Type,
-                ["relationshipId"] = footer.RelationshipId
-            }) ?? [])
+            PageSize = section?.PageSize is null ? null : Clone(section.PageSize),
+            Margins = section?.PageMargin is null ? null : Clone(section.PageMargin),
+            Headers = section is null ? [] : [.. section.Headers.Select(Clone)],
+            Footers = section is null ? [] : [.. section.Footers.Select(Clone)]
         };
     }
 
-    private static JsonArray BuildStyleRoles(DocumentMap map)
+    private static List<ProfileStyleRole> BuildStyleRoles(DocumentMap map)
     {
-        var roles = new List<JsonObject>();
-        AddRole(roles, map, "title", "Title");
-        AddRole(roles, map, "heading1", "Heading1");
-        AddRole(roles, map, "normal", "Normal");
-        return ToJsonArray(roles);
+        var roles = new List<ProfileStyleRole>();
+        AddStyleRole(roles, map, "title", "Title");
+        AddStyleRole(roles, map, "heading1", "Heading1");
+        AddStyleRole(roles, map, "normal", "Normal");
+        AddStyleRole(roles, map, "body", "Normal");
+        AddSemanticRole(roles, map, "abstract.zh", IsChineseAbstractHeading);
+        AddSemanticRole(roles, map, "abstract.en", IsEnglishAbstractHeading);
+        AddSemanticRole(roles, map, "toc", IsTocHeading);
+        AddSemanticRole(roles, map, "references", IsReferencesHeading);
+        return roles;
     }
 
-    private static void AddRole(List<JsonObject> roles, DocumentMap map, string role, string styleId)
+    private static void AddStyleRole(List<ProfileStyleRole> roles, DocumentMap map, string role, string styleId)
     {
         var style = map.Styles.FirstOrDefault(candidate =>
             string.Equals(candidate.StyleId, styleId, StringComparison.OrdinalIgnoreCase));
@@ -85,130 +61,198 @@ public static class TemplateProfileBuilder
         var evidence = map.Paragraphs
             .Where(paragraph => string.Equals(paragraph.StyleId, style.StyleId, StringComparison.OrdinalIgnoreCase))
             .Take(3)
-            .Select(paragraph => new JsonObject
-            {
-                ["paragraphIndex"] = paragraph.Index,
-                ["textPreview"] = Preview(paragraph.Text)
-            });
+            .Select(ToParagraphEvidence)
+            .ToList();
 
-        roles.Add(new JsonObject
+        roles.Add(new ProfileStyleRole
         {
-            ["role"] = role,
-            ["styleId"] = style.StyleId,
-            ["name"] = style.Name,
-            ["type"] = style.Type,
-            ["basedOn"] = style.BasedOn,
-            ["confidence"] = map.Paragraphs.Any(paragraph => string.Equals(paragraph.StyleId, style.StyleId, StringComparison.OrdinalIgnoreCase))
-                ? 0.9
-                : 0.55,
-            ["evidence"] = ToJsonArray(evidence)
+            Role = role,
+            StyleId = style.StyleId,
+            Name = style.Name,
+            Type = style.Type,
+            BasedOn = style.BasedOn,
+            Confidence = evidence.Count > 0 ? 0.9 : 0.55,
+            Evidence = evidence
         });
     }
 
-    private static JsonObject BuildTablePolicy(DocumentMap map)
+    private static void AddSemanticRole(
+        List<ProfileStyleRole> roles,
+        DocumentMap map,
+        string role,
+        Func<string, bool> predicate)
     {
-        var observedColumnCounts = map.Tables
-            .SelectMany(table => table.CellCounts)
-            .Where(count => count > 0)
-            .Distinct()
-            .OrderBy(count => count)
-            .ToArray();
-
-        return new JsonObject
+        var paragraph = map.Paragraphs.FirstOrDefault(candidate => predicate(candidate.Text));
+        if (paragraph is null || string.IsNullOrWhiteSpace(paragraph.StyleId))
         {
-            ["detected"] = map.Tables.Count > 0,
-            ["tableCount"] = map.Tables.Count,
-            ["observedColumnCounts"] = ToJsonArray(observedColumnCounts),
-            ["default"] = map.Tables.FirstOrDefault() is null
-                ? null
-                : new JsonObject
+            return;
+        }
+
+        var style = map.Styles.FirstOrDefault(candidate =>
+            string.Equals(candidate.StyleId, paragraph.StyleId, StringComparison.OrdinalIgnoreCase));
+
+        roles.Add(new ProfileStyleRole
+        {
+            Role = role,
+            StyleId = paragraph.StyleId,
+            Name = style?.Name,
+            Type = style?.Type,
+            BasedOn = style?.BasedOn,
+            Confidence = 0.82,
+            Evidence = [ToParagraphEvidence(paragraph)]
+        });
+    }
+
+    private static ProfileNumberingPolicy BuildNumberingPolicy(DocumentMap map)
+    {
+        return new ProfileNumberingPolicy
+        {
+            Detected = map.Numbering.Count > 0 || map.Paragraphs.Any(paragraph => paragraph.Numbering is not null),
+            Instances = [.. map.Numbering.Select(Clone)],
+            ParagraphUses = [.. map.Paragraphs
+                .Where(paragraph => paragraph.Numbering is not null)
+                .Take(10)
+                .Select(paragraph => new ProfileNumberingUse
                 {
-                    ["rowCount"] = map.Tables[0].RowCount,
-                    ["cellCounts"] = ToJsonArray(map.Tables[0].CellCounts),
-                    ["textPreview"] = map.Tables[0].TextPreview
+                    ParagraphIndex = paragraph.Index,
+                    NumberingId = paragraph.Numbering!.NumberingId,
+                    Level = paragraph.Numbering.Level,
+                    TextPreview = Preview(paragraph.Text)
+                })]
+        };
+    }
+
+    private static ProfileTablePolicy BuildTablePolicy(DocumentMap map)
+    {
+        var firstTable = map.Tables.FirstOrDefault();
+        return new ProfileTablePolicy
+        {
+            Detected = map.Tables.Count > 0,
+            TableCount = map.Tables.Count,
+            ObservedColumnCounts = [.. map.Tables
+                .SelectMany(table => table.CellCounts)
+                .Where(count => count > 0)
+                .Distinct()
+                .OrderBy(count => count)],
+            Default = firstTable is null
+                ? null
+                : new ProfileTableSample
+                {
+                    RowCount = firstTable.RowCount,
+                    CellCounts = [.. firstTable.CellCounts],
+                    TextPreview = firstTable.TextPreview
                 }
         };
     }
 
-    private static JsonObject BuildNumberingPolicy(DocumentMap map)
+    private static ProfileSourceEvidence BuildSourceEvidence(DocumentMap map)
     {
-        return new JsonObject
+        return new ProfileSourceEvidence
         {
-            ["detected"] = map.Numbering.Count > 0 || map.Paragraphs.Any(paragraph => paragraph.Numbering is not null),
-            ["instances"] = ToJsonArray(map.Numbering.Select(numbering => new JsonObject
-            {
-                ["numberingId"] = numbering.NumberingId,
-                ["abstractNumberingId"] = numbering.AbstractNumberingId,
-                ["levels"] = ToJsonArray(numbering.Levels.Select(level => new JsonObject
-                {
-                    ["level"] = level.Level,
-                    ["format"] = level.Format,
-                    ["text"] = level.Text
-                }))
-            })),
-            ["paragraphUses"] = ToJsonArray(map.Paragraphs
-                .Where(paragraph => paragraph.Numbering is not null)
-                .Take(10)
-                .Select(paragraph => new JsonObject
-                {
-                    ["paragraphIndex"] = paragraph.Index,
-                    ["numberingId"] = paragraph.Numbering!.NumberingId,
-                    ["level"] = paragraph.Numbering.Level,
-                    ["textPreview"] = Preview(paragraph.Text)
-                }))
+            ParagraphCount = map.Paragraphs.Count,
+            StyleCount = map.Styles.Count,
+            NumberingCount = map.Numbering.Count,
+            SectionCount = map.Sections.Count,
+            TableCount = map.Tables.Count,
+            ParagraphSamples = [.. map.Paragraphs.Take(5).Select(ToParagraphEvidence)]
         };
     }
 
-
-    private static JsonObject BuildSourceEvidence(DocumentMap map)
+    private static ProfileParagraphEvidence ToParagraphEvidence(DocumentParagraph paragraph)
     {
-        return new JsonObject
+        return new ProfileParagraphEvidence
         {
-            ["paragraphCount"] = map.Paragraphs.Count,
-            ["styleCount"] = map.Styles.Count,
-            ["numberingCount"] = map.Numbering.Count,
-            ["sectionCount"] = map.Sections.Count,
-            ["tableCount"] = map.Tables.Count,
-            ["paragraphSamples"] = ToJsonArray(map.Paragraphs.Take(5).Select(paragraph => new JsonObject
-            {
-                ["index"] = paragraph.Index,
-                ["styleId"] = paragraph.StyleId,
-                ["textPreview"] = Preview(paragraph.Text)
-            }))
+            ParagraphIndex = paragraph.Index,
+            StyleId = paragraph.StyleId,
+            TextPreview = Preview(paragraph.Text)
         };
     }
 
-    private static JsonArray ToJsonArray(IEnumerable<string> values)
+    private static bool IsChineseAbstractHeading(string text)
     {
-        var array = new JsonArray();
-        foreach (var value in values)
-        {
-            array.Add(value);
-        }
-
-        return array;
+        var normalized = NormalizeHeading(text);
+        return normalized is "摘要" or "中文摘要";
     }
 
-    private static JsonArray ToJsonArray(IEnumerable<int> values)
+    private static bool IsEnglishAbstractHeading(string text)
     {
-        var array = new JsonArray();
-        foreach (var value in values)
-        {
-            array.Add(value);
-        }
-
-        return array;
+        return string.Equals(NormalizeHeading(text), "abstract", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static JsonArray ToJsonArray(IEnumerable<JsonObject> values)
+    private static bool IsTocHeading(string text)
     {
-        var array = new JsonArray();
-        foreach (var value in values)
+        var normalized = NormalizeHeading(text);
+        return normalized is "目录" or "目次" or "contents" or "tableofcontents";
+    }
+
+    private static bool IsReferencesHeading(string text)
+    {
+        var normalized = NormalizeHeading(text);
+        return normalized is "参考文献" or "references" or "bibliography";
+    }
+
+    private static string NormalizeHeading(string text)
+    {
+        var normalized = text.Trim()
+            .Trim(':', '：')
+            .Replace(" ", "", StringComparison.Ordinal)
+            .Replace("\t", "", StringComparison.Ordinal)
+            .Replace("\u3000", "", StringComparison.Ordinal);
+
+        while (normalized.Length > 0 && (char.IsDigit(normalized[0]) || normalized[0] is '.' or '．' or '、' or ')' or '）'))
         {
-            array.Add(value);
+            normalized = normalized[1..];
         }
 
-        return array;
+        return normalized.Trim().ToLowerInvariant();
+    }
+
+    private static PageSizeInfo Clone(PageSizeInfo value)
+    {
+        return new PageSizeInfo
+        {
+            WidthTwips = value.WidthTwips,
+            HeightTwips = value.HeightTwips,
+            Orientation = value.Orientation
+        };
+    }
+
+    private static PageMarginInfo Clone(PageMarginInfo value)
+    {
+        return new PageMarginInfo
+        {
+            TopTwips = value.TopTwips,
+            RightTwips = value.RightTwips,
+            BottomTwips = value.BottomTwips,
+            LeftTwips = value.LeftTwips,
+            HeaderTwips = value.HeaderTwips,
+            FooterTwips = value.FooterTwips,
+            GutterTwips = value.GutterTwips
+        };
+    }
+
+    private static HeaderFooterReference Clone(HeaderFooterReference value)
+    {
+        return new HeaderFooterReference
+        {
+            Type = value.Type,
+            RelationshipId = value.RelationshipId
+        };
+    }
+
+    private static DocumentNumbering Clone(DocumentNumbering value)
+    {
+        return new DocumentNumbering
+        {
+            NumberingId = value.NumberingId,
+            AbstractNumberingId = value.AbstractNumberingId,
+            Levels = [.. value.Levels.Select(level => new DocumentNumberingLevel
+            {
+                Level = level.Level,
+                Format = level.Format,
+                Text = level.Text
+            })]
+        };
     }
 
     private static string Preview(string text)

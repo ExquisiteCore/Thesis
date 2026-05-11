@@ -270,3 +270,120 @@ public sealed class DocumentTable
 
     public string TextPreview { get; set; } = "";
 }
+
+public sealed class TemplateProfile
+{
+    public string SchemaVersion { get; set; } = "1.0";
+
+    public string ProfileKind { get; set; } = "templateProfile";
+
+    public string SourceType { get; set; } = "";
+
+    public string SourceDocument { get; set; } = "";
+
+    public bool RequiresFinalization { get; set; }
+
+    public List<string> FinalizationReasons { get; set; } = [];
+
+    public ProfilePageSetup PageSetup { get; set; } = new();
+
+    public List<ProfileStyleRole> StyleRoles { get; set; } = [];
+
+    public ProfileNumberingPolicy NumberingPolicy { get; set; } = new();
+
+    public ProfileTablePolicy TablePolicy { get; set; } = new();
+
+    public ProfileSourceEvidence SourceEvidence { get; set; } = new();
+}
+
+public sealed class ProfilePageSetup
+{
+    public PageSizeInfo? PageSize { get; set; }
+
+    public PageMarginInfo? Margins { get; set; }
+
+    public List<HeaderFooterReference> Headers { get; set; } = [];
+
+    public List<HeaderFooterReference> Footers { get; set; } = [];
+}
+
+public sealed class ProfileStyleRole
+{
+    public string Role { get; set; } = "";
+
+    public string? StyleId { get; set; }
+
+    public string? Name { get; set; }
+
+    public string? Type { get; set; }
+
+    public string? BasedOn { get; set; }
+
+    public double Confidence { get; set; }
+
+    public List<ProfileParagraphEvidence> Evidence { get; set; } = [];
+}
+
+public sealed class ProfileParagraphEvidence
+{
+    public int ParagraphIndex { get; set; }
+
+    public string? StyleId { get; set; }
+
+    public string TextPreview { get; set; } = "";
+}
+
+public sealed class ProfileNumberingPolicy
+{
+    public bool Detected { get; set; }
+
+    public List<DocumentNumbering> Instances { get; set; } = [];
+
+    public List<ProfileNumberingUse> ParagraphUses { get; set; } = [];
+}
+
+public sealed class ProfileNumberingUse
+{
+    public int ParagraphIndex { get; set; }
+
+    public string? NumberingId { get; set; }
+
+    public string? Level { get; set; }
+
+    public string TextPreview { get; set; } = "";
+}
+
+public sealed class ProfileTablePolicy
+{
+    public bool Detected { get; set; }
+
+    public int TableCount { get; set; }
+
+    public List<int> ObservedColumnCounts { get; set; } = [];
+
+    public ProfileTableSample? Default { get; set; }
+}
+
+public sealed class ProfileTableSample
+{
+    public int RowCount { get; set; }
+
+    public List<int> CellCounts { get; set; } = [];
+
+    public string TextPreview { get; set; } = "";
+}
+
+public sealed class ProfileSourceEvidence
+{
+    public int ParagraphCount { get; set; }
+
+    public int StyleCount { get; set; }
+
+    public int NumberingCount { get; set; }
+
+    public int SectionCount { get; set; }
+
+    public int TableCount { get; set; }
+
+    public List<ProfileParagraphEvidence> ParagraphSamples { get; set; } = [];
+}

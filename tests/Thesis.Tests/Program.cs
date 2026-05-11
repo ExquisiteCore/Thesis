@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text.Json.Nodes;
 using Thesis.Cli;
 using Thesis.OpenXml;
+using Thesis.Profile;
 using Thesis.Schema;
 using Thesis.Session;
 
@@ -36,6 +37,7 @@ var tests = new (string Name, Action Test)[]
     ("OpenXml inspector reads paragraphs, styles, numbering, sections, and tables", OpenXmlInspectorReadsDocumentMap),
     ("CLI inspect includes document map for DOCX workspaces", CliInspectIncludesDocumentMapForDocxWorkspaces),
     ("CLI inspect reports JSON warning when document map is unavailable", CliInspectReportsJsonWarningWhenDocumentMapUnavailable),
+    ("Template profile builder returns typed profile with semantic roles", TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles),
     ("CLI profile extract writes template profile from DOCX", CliProfileExtractWritesTemplateProfileFromDocx),
     ("CLI profile extract supports workspace working document", CliProfileExtractSupportsWorkspaceWorkingDocument),
     ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
@@ -583,7 +585,7 @@ static void OpenXmlInspectorReadsDocumentMap()
     AssertEqual(true, map.RequiresFinalization);
     AssertEqual(true, map.FinalizationReasons.Contains("fields", StringComparer.Ordinal));
 
-    AssertEqual(3, map.Paragraphs.Count);
+    AssertEqual(7, map.Paragraphs.Count);
     AssertEqual("中文摘要", map.Paragraphs[0].Text);
     AssertEqual("Title", map.Paragraphs[0].StyleId);
     AssertEqual("第一章 绪论", map.Paragraphs[1].Text);
@@ -628,7 +630,7 @@ static void CliInspectIncludesDocumentMapForDocxWorkspaces()
     AssertEqual(0, exitCode);
     AssertEqual("success", result.Status);
     AssertEqual(Path.Combine(Path.GetFullPath(workspace), "working.docx"), result.DocumentMap!.Path);
-    AssertEqual(3, result.DocumentMap.Paragraphs.Count);
+    AssertEqual(7, result.DocumentMap.Paragraphs.Count);
     AssertEqual(1, result.DocumentMap.Tables.Count);
 
     var rawJson = RunCliRaw(["inspect", "--workspace", workspace]).Output;
@@ -660,6 +662,62 @@ static void CliInspectReportsJsonWarningWhenDocumentMapUnavailable()
     AssertContains(output, "\"path\":\"");
 }
 
+static void TemplateProfileBuilderReturnsTypedProfileWithSemanticRoles()
+{
+    var map = new DocumentMap
+    {
+        Path = Path.GetFullPath("sample.docx"),
+        RequiresFinalization = true,
+        FinalizationReasons = ["fields"],
+        Styles =
+        [
+            new DocumentStyle { StyleId = "Title", Name = "Title", Type = "paragraph" },
+            new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph" },
+            new DocumentStyle { StyleId = "Normal", Name = "Normal", Type = "paragraph" }
+        ],
+        Paragraphs =
+        [
+            new DocumentParagraph { Index = 0, Text = "论文题目", StyleId = "Title" },
+            new DocumentParagraph { Index = 1, Text = "中文摘要", StyleId = "Heading1" },
+            new DocumentParagraph { Index = 2, Text = "本文研究系统实现。", StyleId = "Normal" },
+            new DocumentParagraph { Index = 3, Text = "摘 要", StyleId = "Heading1" },
+            new DocumentParagraph { Index = 4, Text = "This thesis studies implementation.", StyleId = "Normal" },
+            new DocumentParagraph { Index = 5, Text = "1 Abstract", StyleId = "Heading1" },
+            new DocumentParagraph { Index = 6, Text = "Contents", StyleId = "Heading1" },
+            new DocumentParagraph { Index = 7, Text = "参考文献", StyleId = "Heading1" }
+        ],
+        Sections =
+        [
+            new DocumentSection
+            {
+                Index = 0,
+                PageSize = new PageSizeInfo { WidthTwips = 11906, HeightTwips = 16838 },
+                PageMargin = new PageMarginInfo { TopTwips = 1440, RightTwips = 1800, BottomTwips = 1440, LeftTwips = 1800 }
+            }
+        ]
+    };
+
+    var profile = TemplateProfileBuilder.Build(map, "doc");
+
+    AssertEqual("templateProfile", profile.ProfileKind);
+    AssertEqual("doc", profile.SourceType);
+    AssertEqual(Path.GetFullPath("sample.docx"), profile.SourceDocument);
+    AssertEqual(true, profile.RequiresFinalization);
+    AssertEqual(11906, profile.PageSetup.PageSize!.WidthTwips);
+    AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "body" && role.StyleId == "Normal"));
+    AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "abstract.zh" && role.StyleId == "Heading1"));
+    AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "abstract.en" && role.StyleId == "Heading1"));
+    AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "toc" && role.StyleId == "Heading1"));
+    AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "references" && role.StyleId == "Heading1"));
+    AssertEqual(true, profile.SourceEvidence.ParagraphSamples.Any(sample => sample.TextPreview == "论文题目"));
+
+    var sourcePageSize = map.Sections[0].PageSize ?? throw new UnreachableException("Expected fixture page size.");
+    sourcePageSize.WidthTwips = 1;
+    map.Numbering.Add(new DocumentNumbering { NumberingId = "late" });
+    AssertEqual(11906, profile.PageSetup.PageSize!.WidthTwips);
+    AssertEqual(0, profile.NumberingPolicy.Instances.Count);
+}
+
 static void CliProfileExtractWritesTemplateProfileFromDocx()
 {
     using var temp = new TempDirectory();
@@ -682,6 +740,10 @@ static void CliProfileExtractWritesTemplateProfileFromDocx()
     AssertContains(profileJson, "\"pageSetup\"");
     AssertContains(profileJson, "\"styleRoles\"");
     AssertContains(profileJson, "\"role\":\"heading1\"");
+    AssertContains(profileJson, "\"role\":\"body\"");
+    AssertContains(profileJson, "\"role\":\"abstract.zh\"");
+    AssertContains(profileJson, "\"role\":\"toc\"");
+    AssertContains(profileJson, "\"role\":\"references\"");
     AssertContains(profileJson, "\"styleId\":\"Heading1\"");
     AssertContains(profileJson, "\"numberingPolicy\"");
     AssertContains(profileJson, "\"abstractNumberingId\":\"0\"");
@@ -894,6 +956,10 @@ static void WriteFixtureDocx(string path)
               <w:tr><w:tc><w:p><w:r><w:t>A2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc></w:tr>
             </w:tbl>
             <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o "1-3" \h \z \u</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>摘要</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Abstract</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>目录</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>
             <w:sectPr>
               <w:headerReference w:type="default" r:id="rIdHeader1"/>
               <w:pgSz w:w="11906" w:h="16838"/>
