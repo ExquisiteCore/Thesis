@@ -1,6 +1,8 @@
 # Local analysis and source samples requested by the user
 .analysis/
 docs/
+lizi/
+.thesis/
 论文正文格式.docx
 
 # .NET build outputs
