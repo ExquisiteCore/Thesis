@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Thesis.Host\Thesis.Host.csproj" />
     <ProjectReference Include="..\Thesis.OpenXml\Thesis.OpenXml.csproj" />
     <ProjectReference Include="..\Thesis.Profile\Thesis.Profile.csproj" />
     <ProjectReference Include="..\Thesis.Session\Thesis.Session.csproj" />

@@ -36,6 +36,18 @@ public static class SessionLifecycle
         return WithLock(paths, () => RunLocked(paths, request, editDocument));
     }
 
+    public static CliResult RunWithWorkingDocumentLock(
+        string workspace,
+        string snapshotName,
+        Func<string, CliResult> action)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotName);
+        ArgumentNullException.ThrowIfNull(action);
+
+        var paths = SessionPaths.FromWorkspace(workspace);
+        return WithLock(paths, () => RunWithWorkingDocumentLockLocked(paths, snapshotName, action));
+    }
+
     public static CliResult Inspect(string workspace)
     {
         var paths = SessionPaths.FromWorkspace(workspace);
@@ -285,6 +297,40 @@ public static class SessionLifecycle
             Operations = edit.Operations,
             Diagnostics = edit.Diagnostics
         };
+    }
+
+    private static CliResult RunWithWorkingDocumentLockLocked(
+        SessionPaths paths,
+        string snapshotName,
+        Func<string, CliResult> action)
+    {
+        if (!TryLoadReadySession(paths, out var session, out var error))
+        {
+            return error!;
+        }
+
+        if (!Directory.Exists(paths.SnapshotsDirectory))
+        {
+            return SessionStore.Error(paths, "snapshots_missing", $"Snapshots directory not found: {paths.SnapshotsDirectory}");
+        }
+
+        if (!SnapshotIdentifiers.TrySanitizeName(snapshotName, out var safeName))
+        {
+            return SessionStore.Error(paths, "invalid_snapshot_identifier", "Run snapshot name is invalid.");
+        }
+
+        if (!TryCreateSnapshot(paths, session, safeName, out var snapshot, out error))
+        {
+            return error!;
+        }
+
+        var result = action(session.WorkingPath);
+        result.Workspace = paths.Workspace;
+        result.Document ??= session.WorkingPath;
+        result.Session = session;
+        result.Snapshot = snapshot;
+        result.Snapshots = ListSnapshots(paths);
+        return result;
     }
 
     private static bool TryCreateSnapshot(

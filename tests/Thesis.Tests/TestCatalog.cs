@@ -139,6 +139,10 @@ internal static partial class Program
         ("CLI profile diff validates inputs", CliProfileDiffValidatesInputs),
         ("CLI finalize plan reports host application steps for fields", CliFinalizePlanReportsHostApplicationStepsForFields),
         ("CLI finalize plan distinguishes generic fields from TOC", CliFinalizePlanDistinguishesGenericFieldsFromToc),
-        ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments)
+        ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments),
+        ("CLI finalize apply validates source options", CliFinalizeApplyValidatesSourceOptions),
+        ("CLI finalize apply reports unavailable COM host", CliFinalizeApplyReportsUnavailableComHost),
+        ("CLI finalize apply workspace respects session lock", CliFinalizeApplyWorkspaceRespectsSessionLock),
+        ("CLI validate host layout reports unavailable COM host", CliValidateHostLayoutReportsUnavailableComHost)
     ];
 }

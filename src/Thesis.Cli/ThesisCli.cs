@@ -2,6 +2,7 @@ using Thesis.Schema;
 using Thesis.Session;
 using Thesis.OpenXml;
 using Thesis.Profile;
+using Thesis.Host;
 
 namespace Thesis.Cli;
 
@@ -146,6 +147,11 @@ public static class ThesisCli
             return BuildFinalizationPlan(finalizeArgs);
         }
 
+        if (args is ["finalize", "apply", .. var finalizeApplyArgs])
+        {
+            return ApplyFinalization(finalizeApplyArgs);
+        }
+
         throw new CliException("unknown_command", "Unknown command.");
     }
 
@@ -153,6 +159,8 @@ public static class ThesisCli
     {
         var workspace = RequiredOption(args, "--workspace");
         var profilePath = OptionalOption(args, "--profile");
+        var hostOption = OptionalOption(args, "--host");
+        var progId = OptionalOption(args, "--prog-id");
         var inspect = SessionLifecycle.Inspect(workspace);
         if (!string.Equals(inspect.Status, "success", StringComparison.OrdinalIgnoreCase))
         {
@@ -179,7 +187,7 @@ public static class ThesisCli
         }
 
         NormalizeProfile(profile!);
-        return new CliResult
+        var result = new CliResult
         {
             Status = "success",
             Workspace = inspect.Workspace,
@@ -188,6 +196,19 @@ public static class ThesisCli
             Snapshots = inspect.Snapshots,
             Validation = ProfileComplianceValidator.Validate(map, profile!)
         };
+
+        if (hostOption is not null || progId is not null || HasFlag(args, "--host-layout"))
+        {
+            var hostOptions = ParseHostOptions(args, action: "validate", defaultHost: hostOption ?? "wps");
+            hostOptions.ProgId = progId;
+            result.HostApplication = RunHostValidation(documentPath, hostOptions, result.Diagnostics);
+            if (result.HostApplication is null)
+            {
+                result.Status = "error";
+            }
+        }
+
+        return result;
     }
 
     private static CliResult BuildFinalizationPlan(string[] args)
@@ -224,6 +245,125 @@ public static class ThesisCli
         }
 
         return result;
+    }
+
+    private static CliResult ApplyFinalization(string[] args)
+    {
+        var workspace = OptionalOption(args, "--workspace");
+        var doc = OptionalOption(args, "--doc");
+        if (workspace is not null && doc is not null)
+        {
+            return Error("finalize_source_ambiguous", "Specify either --workspace or --doc, not both.");
+        }
+
+        if (workspace is null && doc is null)
+        {
+            return Error("finalize_source_missing", "Specify either --workspace or --doc.");
+        }
+
+        if (workspace is not null)
+        {
+            return SessionLifecycle.RunWithWorkingDocumentLock(
+                workspace,
+                "before-finalize-apply",
+                workingDocument => ApplyFinalizationToDocument(args, workingDocument));
+        }
+
+        return ApplyFinalizationToDocument(args, doc!);
+    }
+
+    private static CliResult ApplyFinalizationToDocument(string[] args, string doc)
+    {
+        var fullDocPath = Path.GetFullPath(doc);
+        if (!OpenXmlDocumentInspector.TryInspect(fullDocPath, out var map, out var diagnostic) || map is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = fullDocPath,
+                Diagnostics = diagnostic is null ? [] : [diagnostic]
+            };
+        }
+
+        var result = new CliResult
+        {
+            Status = "success",
+            Document = map.Path,
+            FinalizationPlan = FinalizationPlanBuilder.Build(map)
+        };
+
+        var hostOptions = ParseHostOptions(args, action: "finalize", defaultHost: "wps");
+        var report = RunHostFinalization(fullDocPath, hostOptions, result.Diagnostics);
+        if (report is null)
+        {
+            result.Status = "error";
+        }
+        else
+        {
+            result.HostApplication = report;
+        }
+
+        return result;
+    }
+
+    private static HostApplicationReport? RunHostFinalization(
+        string documentPath,
+        HostApplicationOptions hostOptions,
+        List<Diagnostic> diagnostics)
+    {
+        try
+        {
+            return new WpsComAutomationHost().FinalizeDocument(documentPath, hostOptions);
+        }
+        catch (HostApplicationException ex)
+        {
+            diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = ex.Code,
+                Message = ex.Message,
+                Path = documentPath
+            });
+            return null;
+        }
+    }
+
+    private static HostApplicationReport? RunHostValidation(
+        string documentPath,
+        HostApplicationOptions hostOptions,
+        List<Diagnostic> diagnostics)
+    {
+        try
+        {
+            return new WpsComAutomationHost().ValidateLayout(documentPath, hostOptions);
+        }
+        catch (HostApplicationException ex)
+        {
+            diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = ex.Code,
+                Message = ex.Message,
+                Path = documentPath
+            });
+            return null;
+        }
+    }
+
+    private static HostApplicationOptions ParseHostOptions(string[] args, string action, string defaultHost)
+    {
+        return new HostApplicationOptions
+        {
+            Action = action,
+            RequestedHost = OptionalOption(args, "--host") ?? defaultHost,
+            ProgId = OptionalOption(args, "--prog-id"),
+            Visible = HasFlag(args, "--visible"),
+            KeepOpen = HasFlag(args, "--keep-open"),
+            UpdateFields = !HasFlag(args, "--skip-fields"),
+            UpdateTableOfContents = !HasFlag(args, "--skip-toc"),
+            Repaginate = !HasFlag(args, "--skip-repaginate"),
+            Save = !HasFlag(args, "--no-save")
+        };
     }
 
     private static CliResult ExtractProfile(string[] args)
@@ -440,6 +580,11 @@ public static class ThesisCli
         }
 
         return null;
+    }
+
+    private static bool HasFlag(string[] args, string name)
+    {
+        return args.Any(arg => string.Equals(arg, name, StringComparison.Ordinal));
     }
 
     private static CliResult Error(string code, string message)

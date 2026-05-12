@@ -3,6 +3,7 @@ global using System.IO.Compression;
 global using System.Text.Json.Nodes;
 global using System.Text.RegularExpressions;
 global using Thesis.Cli;
+global using Thesis.Host;
 global using Thesis.OpenXml;
 global using Thesis.Profile;
 global using Thesis.Schema;
