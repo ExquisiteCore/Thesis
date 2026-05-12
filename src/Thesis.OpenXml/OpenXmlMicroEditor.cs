@@ -10,7 +10,7 @@ using WP = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace Thesis.OpenXml;
 
-public static class OpenXmlMicroEditor
+public static partial class OpenXmlMicroEditor
 {
     public static DocumentEditResult Apply(string docxPath, OperationRequest request)
     {
@@ -86,7 +86,7 @@ public static class OpenXmlMicroEditor
             var body = wordDocument.Body
                 ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
-            var context = new EditContext(
+            var context = new OpenXmlEditContext(
                 mainPart,
                 body,
                 ReadParagraphStyles(mainPart),
@@ -133,7 +133,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult ApplyOperation(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -164,7 +164,7 @@ public static class OpenXmlMicroEditor
         };
     }
 
-    private static OperationResult ResolveTarget(EditContext context, RunOptions options, ThesisOperation operation)
+    private static OperationResult ResolveTarget(OpenXmlEditContext context, RunOptions options, ThesisOperation operation)
     {
         var resolution = context.Resolver.Resolve(operation.Target, options);
         if (!resolution.Success)
@@ -178,7 +178,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult ReplaceParagraphText(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -215,12 +215,12 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetParagraphStyle(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var styleId = GetString(operation.Format, "styleId", out var formatError);
+        var styleId = OpenXmlOperationJson.GetString(operation.Format, "styleId", out var formatError);
         if (formatError is not null)
         {
             return OperationError(operation, formatError);
@@ -265,7 +265,7 @@ public static class OpenXmlMicroEditor
         return result;
     }
 
-    private static OperationResult SetRunFormat(EditContext context, ThesisOperation operation, bool writeChanges)
+    private static OperationResult SetRunFormat(OpenXmlEditContext context, ThesisOperation operation, bool writeChanges)
     {
         var singleRun = new RunOptions
         {
@@ -281,7 +281,7 @@ public static class OpenXmlMicroEditor
 
         var target = (ResolvedRunTarget)targets.Single();
         var run = target.Run;
-        var size = GetString(operation.Format, "fontSizeHalfPoints", out var formatError);
+        var size = OpenXmlOperationJson.GetString(operation.Format, "fontSizeHalfPoints", out var formatError);
         if (formatError is not null)
         {
             return OperationError(operation, formatError);
@@ -319,7 +319,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult InsertParagraph(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -329,7 +329,7 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, "text_missing");
         }
 
-        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
         if (positionError is not null)
         {
             return OperationError(operation, positionError);
@@ -362,7 +362,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult DeleteParagraph(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -389,12 +389,12 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult MoveParagraph(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
         if (positionError is not null)
         {
             return OperationError(operation, positionError);
@@ -445,7 +445,7 @@ public static class OpenXmlMicroEditor
         return result;
     }
 
-    private static OperationResult ApplyProfilePageSetup(EditContext context, ThesisOperation operation, bool writeChanges)
+    private static OperationResult ApplyProfilePageSetup(OpenXmlEditContext context, ThesisOperation operation, bool writeChanges)
     {
         var profileSetup = context.Profile?.PageSetup;
         if (profileSetup is null || (profileSetup.PageSize is null && profileSetup.Margins is null))
@@ -480,7 +480,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult ApplyProfileRole(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -529,7 +529,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult ApplyProfileTable(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -581,7 +581,7 @@ public static class OpenXmlMicroEditor
         out string? error)
     {
         error = null;
-        var archetypeName = GetString(operationFormat, "archetype", out var archetypeError);
+        var archetypeName = OpenXmlOperationJson.GetString(operationFormat, "archetype", out var archetypeError);
         if (archetypeError is not null)
         {
             error = archetypeError;
@@ -642,7 +642,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetTableBorders(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -685,7 +685,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetTableCellText(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -716,7 +716,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetTableCellFormat(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -750,13 +750,13 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetTableColumnWidth(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var columnIndex = GetInt(operation.Format, "columnIndex", out var columnIndexError);
-        var widthTwips = GetInt(operation.Format, "widthTwips", out var widthError);
+        var columnIndex = OpenXmlOperationJson.GetInt(operation.Format, "columnIndex", out var columnIndexError);
+        var widthTwips = OpenXmlOperationJson.GetInt(operation.Format, "widthTwips", out var widthError);
         if (columnIndexError is not null || widthError is not null || columnIndex is null || widthTwips is null
             || columnIndex < 0 || !OpenXmlOperationFormatBuilder.IsValidTwips(widthTwips))
         {
@@ -796,13 +796,13 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult SetTableRowHeader(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
-        var header = GetBool(operation.Format, "header", out var headerError);
+        var rowIndex = OpenXmlOperationJson.GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        var header = OpenXmlOperationJson.GetBool(operation.Format, "header", out var headerError);
         if (rowIndexError is not null || headerError is not null || rowIndex is null || rowIndex < 0)
         {
             return OperationError(operation, rowIndexError ?? headerError ?? "target_value_invalid");
@@ -838,24 +838,24 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult InsertTableRow(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        var rowIndex = OpenXmlOperationJson.GetInt(operation.Format, "rowIndex", out var rowIndexError);
         if (rowIndexError is not null || rowIndex is null || rowIndex < 0)
         {
             return OperationError(operation, rowIndexError ?? "target_value_invalid");
         }
 
-        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
         if (positionError is not null)
         {
             return OperationError(operation, positionError);
         }
 
-        var cells = GetStringArray(operation.Format, "cells", out var cellsError);
+        var cells = OpenXmlOperationJson.GetStringArray(operation.Format, "cells", out var cellsError);
         if (cellsError is not null)
         {
             return OperationError(operation, cellsError);
@@ -894,12 +894,12 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult DeleteTableRow(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var rowIndex = GetInt(operation.Format, "rowIndex", out var rowIndexError);
+        var rowIndex = OpenXmlOperationJson.GetInt(operation.Format, "rowIndex", out var rowIndexError);
         if (rowIndexError is not null || rowIndex is null || rowIndex < 0)
         {
             return OperationError(operation, rowIndexError ?? "target_value_invalid");
@@ -939,7 +939,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult ApplyThreeLineTable(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
@@ -974,25 +974,25 @@ public static class OpenXmlMicroEditor
     }
 
     private static OperationResult InsertImage(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges)
     {
-        var imagePath = GetString(operation.Format, "imagePath", out var imagePathError);
+        var imagePath = OpenXmlOperationJson.GetString(operation.Format, "imagePath", out var imagePathError);
         if (imagePathError is not null || string.IsNullOrWhiteSpace(imagePath))
         {
             return OperationError(operation, imagePathError ?? "target_value_invalid");
         }
 
-        var widthEmu = GetInt(operation.Format, "widthEmu", out var widthError);
-        var heightEmu = GetInt(operation.Format, "heightEmu", out var heightError);
+        var widthEmu = OpenXmlOperationJson.GetInt(operation.Format, "widthEmu", out var widthError);
+        var heightEmu = OpenXmlOperationJson.GetInt(operation.Format, "heightEmu", out var heightError);
         if (widthError is not null || heightError is not null || widthEmu is null || heightEmu is null || widthEmu <= 0 || heightEmu <= 0)
         {
             return OperationError(operation, widthError ?? heightError ?? "target_value_invalid");
         }
 
-        var position = GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
         if (positionError is not null)
         {
             return OperationError(operation, positionError);
@@ -1004,7 +1004,7 @@ public static class OpenXmlMicroEditor
             return OperationError(operation, "image_not_found");
         }
 
-        var altText = GetString(operation.Format, "altText", out var altTextError) ?? "";
+        var altText = OpenXmlOperationJson.GetString(operation.Format, "altText", out var altTextError) ?? "";
         if (altTextError is not null)
         {
             return OperationError(operation, altTextError);
@@ -1058,7 +1058,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static bool TryResolveTargets(
-        EditContext context,
+        OpenXmlEditContext context,
         RunOptions options,
         ThesisOperation operation,
         ResolvedTargetKind acceptedKind,
@@ -1086,7 +1086,7 @@ public static class OpenXmlMicroEditor
     }
 
     private static bool TryCreateOperationParagraphFormat(
-        EditContext context,
+        OpenXmlEditContext context,
         JsonNode? operationFormat,
         out ParagraphFormatSample format,
         out string error)
@@ -1441,7 +1441,7 @@ public static class OpenXmlMicroEditor
         Action<PageSizeInfo, int> apply,
         out string error)
     {
-        var value = GetInt(overrideFormat, propertyName, out var valueError);
+        var value = OpenXmlOperationJson.GetInt(overrideFormat, propertyName, out var valueError);
         if (valueError is not null)
         {
             error = valueError;
@@ -1464,7 +1464,7 @@ public static class OpenXmlMicroEditor
         Action<PageSizeInfo, string> apply,
         out string error)
     {
-        var value = GetString(overrideFormat, propertyName, out var valueError);
+        var value = OpenXmlOperationJson.GetString(overrideFormat, propertyName, out var valueError);
         if (valueError is not null)
         {
             error = valueError;
@@ -1487,7 +1487,7 @@ public static class OpenXmlMicroEditor
         Action<PageMarginInfo, int> apply,
         out string error)
     {
-        var value = GetInt(overrideFormat, propertyName, out var valueError);
+        var value = OpenXmlOperationJson.GetInt(overrideFormat, propertyName, out var valueError);
         if (valueError is not null)
         {
             error = valueError;
@@ -1619,7 +1619,7 @@ public static class OpenXmlMicroEditor
         where T : OpenXmlElement
     {
         error = "";
-        var value = GetBool(format, propertyName, out var valueError);
+        var value = OpenXmlOperationJson.GetBool(format, propertyName, out var valueError);
         if (valueError is not null)
         {
             error = valueError;
@@ -1720,140 +1720,6 @@ public static class OpenXmlMicroEditor
         return paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run);
     }
 
-    private static string? GetString(JsonNode? node, string propertyName)
-    {
-        return GetString(node, propertyName, out _);
-    }
-
-    private static string? GetString(JsonNode? node, string propertyName, out string? error)
-    {
-        error = null;
-        var value = node?[propertyName];
-        if (value is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return value.GetValue<string>();
-        }
-        catch (InvalidOperationException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-        catch (FormatException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-    }
-
-    private static bool? GetBool(JsonNode? node, string propertyName, out string? error)
-    {
-        error = null;
-        var value = node?[propertyName];
-        if (value is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return value.GetValue<bool>();
-        }
-        catch (InvalidOperationException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-        catch (FormatException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-    }
-
-    private static int? GetInt(JsonNode? node, string propertyName, out string? error)
-    {
-        error = null;
-        var value = node?[propertyName];
-        if (value is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return value.GetValue<int>();
-        }
-        catch (InvalidOperationException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-        catch (FormatException)
-        {
-            error = "target_value_invalid";
-            return null;
-        }
-    }
-
-    private static string GetPosition(JsonNode? node, string defaultValue, out string? error)
-    {
-        var position = GetString(node, "position", out error) ?? defaultValue;
-        if (error is not null)
-        {
-            return defaultValue;
-        }
-
-        if (position is not "before" and not "after")
-        {
-            error = "target_value_invalid";
-            return defaultValue;
-        }
-
-        return position;
-    }
-
-    private static List<string> GetStringArray(JsonNode? node, string propertyName, out string? error)
-    {
-        error = null;
-        var value = node?[propertyName];
-        if (value is null)
-        {
-            return [];
-        }
-
-        if (value is not JsonArray array)
-        {
-            error = "target_value_invalid";
-            return [];
-        }
-
-        var result = new List<string>();
-        foreach (var item in array)
-        {
-            try
-            {
-                result.Add(item?.GetValue<string>() ?? "");
-            }
-            catch (InvalidOperationException)
-            {
-                error = "target_value_invalid";
-                return [];
-            }
-            catch (FormatException)
-            {
-                error = "target_value_invalid";
-                return [];
-            }
-        }
-
-        return result;
-    }
-
     private static bool NeedsPreservedSpace(string text)
     {
         return text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
@@ -1930,40 +1796,5 @@ public static class OpenXmlMicroEditor
         }
     }
 
-    private sealed class EditContext(
-        MainDocumentPart mainPart,
-        Body body,
-        HashSet<string> paragraphStyleIds,
-        IReadOnlyDictionary<string, int> styleOutlineLevels,
-        TemplateProfile? profile,
-        JsonObject? profileOverrides)
-    {
-        public MainDocumentPart MainPart { get; } = mainPart;
 
-        public Body Body { get; } = body;
-
-        public HashSet<string> ParagraphStyleIds { get; } = paragraphStyleIds;
-
-        public IReadOnlyDictionary<string, int> StyleOutlineLevels { get; } = styleOutlineLevels;
-
-        public OpenXmlTargetResolver Resolver { get; private set; } = CreateResolver(body, profile, profileOverrides, styleOutlineLevels);
-
-        public TemplateProfile? Profile { get; } = profile;
-
-        public JsonObject? ProfileOverrides { get; } = profileOverrides;
-
-        public void RefreshResolver()
-        {
-            Resolver = CreateResolver(Body, Profile, ProfileOverrides, StyleOutlineLevels);
-        }
-
-        private static OpenXmlTargetResolver CreateResolver(
-            Body body,
-            TemplateProfile? profile,
-            JsonObject? profileOverrides,
-            IReadOnlyDictionary<string, int> styleOutlineLevels)
-        {
-            return new OpenXmlTargetResolver(body, profile, profileOverrides, styleOutlineLevels);
-        }
-    }
 }
