@@ -208,6 +208,124 @@ internal static partial class Program
         AssertEqual("center", map.Paragraphs[1].Format.Alignment);
     }
 
+    static void CliRunExecuteAddsPageBreakBookmarkAndFootnote()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "page-break",
+                  "op": "insertPageBreak",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "format": { "position": "after" }
+                },
+                {
+                  "id": "bookmark-title",
+                  "op": "addBookmark",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "format": { "name": "abstract_anchor" }
+                },
+                {
+                  "id": "footnote-title",
+                  "op": "addFootnote",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "text": "脚注内容"
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        foreach (var operation in result.Operations)
+        {
+            AssertEqual("applied", operation.Status);
+        }
+
+        using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(context.Paths.WorkingDocument, false);
+        var body = document.MainDocumentPart!.Document.Body!;
+        AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Break>().Any(element =>
+            element.Type?.Value == DocumentFormat.OpenXml.Wordprocessing.BreakValues.Page));
+        AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.BookmarkStart>().Any(element =>
+            element.Name?.Value == "abstract_anchor"));
+        AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.FootnoteReference>().Any());
+        AssertEqual(true, document.MainDocumentPart.FootnotesPart!.Footnotes!.Elements<DocumentFormat.OpenXml.Wordprocessing.Footnote>().Any(note =>
+            note.InnerText.Contains("脚注内容", StringComparison.Ordinal)));
+    }
+
+    static void CliRunExecuteInsertsAndDeletesTableColumns()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "insert-column",
+                  "op": "insertTableColumn",
+                  "target": { "type": "tableIndex", "index": 0 },
+                  "format": {
+                    "columnIndex": 1,
+                    "position": "before",
+                    "widthTwips": 1800,
+                    "cells": ["H-new", "R-new"]
+                  }
+                },
+                {
+                  "id": "delete-last-column",
+                  "op": "deleteTableColumn",
+                  "target": { "type": "tableIndex", "index": 0 },
+                  "format": { "columnIndex": 2 }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        if (exitCode != 0)
+        {
+            throw new UnreachableException(ThesisJson.Serialize(result));
+        }
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        AssertEqual("applied", result.Operations[1].Status);
+
+        var table = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument).Tables[0];
+        AssertEqual(2, table.RowCount);
+        AssertEqual(2, table.CellCounts[0]);
+        AssertEqual(2, table.CellCounts[1]);
+        AssertEqual(1800, table.Format.GridColumnWidthsTwips[1]);
+        AssertContains(table.TextPreview, "A1");
+        AssertContains(table.TextPreview, "H-new");
+        AssertContains(table.TextPreview, "A2");
+        AssertContains(table.TextPreview, "R-new");
+        AssertEqual(false, table.TextPreview.Contains("B1", StringComparison.Ordinal));
+        AssertEqual(false, table.TextPreview.Contains("B2", StringComparison.Ordinal));
+    }
+
     static void CliRunRejectsInvalidStructureOperations()
     {
         using var temp = new TempDirectory();

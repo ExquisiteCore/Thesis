@@ -20,6 +20,8 @@ internal static partial class Program
         ("CLI run dry-run previews insert paragraph without changing DOCX", CliRunDryRunPreviewsInsertParagraphWithoutChangingDocx),
         ("CLI run execute inserts and deletes table rows", CliRunExecuteInsertsAndDeletesTableRows),
         ("CLI run execute inserts image paragraph", CliRunExecuteInsertsImageParagraph),
+        ("CLI run execute adds page break bookmark and footnote", CliRunExecuteAddsPageBreakBookmarkAndFootnote),
+        ("CLI run execute inserts and deletes table columns", CliRunExecuteInsertsAndDeletesTableColumns),
         ("CLI run rejects invalid structure operations", CliRunRejectsInvalidStructureOperations),
         ("CLI run rejects deleting only table row", CliRunRejectsDeletingOnlyTableRow),
         ("CLI run execute applies profile page setup", CliRunExecuteAppliesProfilePageSetup),

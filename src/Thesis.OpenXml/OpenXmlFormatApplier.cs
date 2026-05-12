@@ -298,15 +298,8 @@ internal static class OpenXmlFormatApplier
             grid.AppendChild(column);
         }
 
-        var properties = table.TableProperties;
-        if (properties is not null)
-        {
-            table.InsertAfter(grid, properties);
-        }
-        else
-        {
-            table.PrependChild(grid);
-        }
+        var properties = GetOrCreateTableProperties(table);
+        table.InsertAfter(grid, properties);
     }
 
     public static void EnsureTableGrid(Table table)

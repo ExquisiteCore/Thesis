@@ -147,6 +147,9 @@ public static partial class OpenXmlMicroEditor
             "insertParagraph" => InsertParagraph(context, options, operation, writeChanges),
             "deleteParagraph" => DeleteParagraph(context, options, operation, writeChanges),
             "moveParagraph" => MoveParagraph(context, options, operation, writeChanges),
+            "insertPageBreak" => InsertPageBreak(context, options, operation, writeChanges),
+            "addBookmark" => AddBookmark(context, options, operation, writeChanges),
+            "addFootnote" => AddFootnote(context, options, operation, writeChanges),
             "applyProfilePageSetup" => ApplyProfilePageSetup(context, operation, writeChanges),
             "applyProfileRole" => ApplyProfileRole(context, options, operation, writeChanges),
             "applyProfileTable" => ApplyProfileTable(context, options, operation, writeChanges),
@@ -157,6 +160,8 @@ public static partial class OpenXmlMicroEditor
             "setTableRowHeader" => SetTableRowHeader(context, options, operation, writeChanges),
             "insertTableRow" => InsertTableRow(context, options, operation, writeChanges),
             "deleteTableRow" => DeleteTableRow(context, options, operation, writeChanges),
+            "insertTableColumn" => InsertTableColumn(context, options, operation, writeChanges),
+            "deleteTableColumn" => DeleteTableColumn(context, options, operation, writeChanges),
             "applyThreeLineTable" => ApplyThreeLineTable(context, options, operation, writeChanges),
             "insertImage" => InsertImage(context, options, operation, writeChanges),
             null or "" => OperationError(operation, "operation_missing"),
@@ -440,6 +445,111 @@ public static partial class OpenXmlMicroEditor
             }
 
             result.Matches.Add(target.ToMatchInfo(before, $"{position}:{anchor.Paragraph.InnerText}"));
+        }
+
+        return result;
+    }
+
+    private static OperationResult InsertPageBreak(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                var paragraph = new Paragraph(new Run(new Break { Type = BreakValues.Page }));
+                InsertRelativeTo(target.Paragraph, paragraph, position);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, "pageBreak"));
+        }
+
+        return result;
+    }
+
+    private static OperationResult AddBookmark(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var name = OpenXmlOperationJson.GetString(operation.Format, "name", out var nameError);
+        if (nameError is not null || string.IsNullOrWhiteSpace(name) || !IsValidBookmarkName(name))
+        {
+            return OperationError(operation, nameError ?? "target_value_invalid");
+        }
+
+        if (context.Body.Descendants<BookmarkStart>().Any(bookmark =>
+            string.Equals(bookmark.Name?.Value, name, StringComparison.Ordinal)))
+        {
+            return OperationError(operation, "bookmark_exists");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        var bookmarkId = NextBookmarkId(context.Body);
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                AddBookmarkToParagraph(target.Paragraph, name, bookmarkId++);
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, name));
+        }
+
+        return result;
+    }
+
+    private static OperationResult AddFootnote(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (operation.Text is null)
+        {
+            return OperationError(operation, "text_missing");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        var nextFootnoteId = writeChanges ? NextFootnoteId(EnsureFootnotesPart(context.MainPart)) : 1;
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                var footnotesPart = EnsureFootnotesPart(context.MainPart);
+                var footnoteId = nextFootnoteId++;
+                AddFootnoteBody(footnotesPart, footnoteId, operation.Text);
+                AddFootnoteReference(target.Paragraph, footnoteId);
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, operation.Text));
         }
 
         return result;
@@ -938,6 +1048,112 @@ public static partial class OpenXmlMicroEditor
         return result;
     }
 
+    private static OperationResult InsertTableColumn(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var columnIndex = OpenXmlOperationJson.GetInt(operation.Format, "columnIndex", out var columnIndexError);
+        if (columnIndexError is not null || columnIndex is null || columnIndex < 0)
+        {
+            return OperationError(operation, columnIndexError ?? "target_value_invalid");
+        }
+
+        var position = OpenXmlOperationJson.GetPosition(operation.Format, defaultValue: "after", out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        var widthTwips = OpenXmlOperationJson.GetInt(operation.Format, "widthTwips", out var widthError);
+        if (widthError is not null || (widthTwips is not null && !OpenXmlOperationFormatBuilder.IsValidTwips(widthTwips)))
+        {
+            return OperationError(operation, widthError ?? "format_value_invalid");
+        }
+
+        var cells = OpenXmlOperationJson.GetStringArray(operation.Format, "cells", out var cellsError);
+        if (cellsError is not null)
+        {
+            return OperationError(operation, cellsError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var tableTargets = targets.Cast<ResolvedTableTarget>().ToList();
+        if (tableTargets.Any(target => columnIndex.Value >= target.CellCounts.DefaultIfEmpty(0).Max()))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        if (tableTargets.Any(target => cells.Count > target.RowCount))
+        {
+            return OperationError(operation, "table_cell_count_invalid");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in tableTargets)
+        {
+            var before = target.Table.InnerText;
+            if (writeChanges)
+            {
+                InsertTableColumn(target.Table, columnIndex.Value, position, cells, widthTwips);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, string.Join(" ", cells)));
+        }
+
+        return result;
+    }
+
+    private static OperationResult DeleteTableColumn(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        var columnIndex = OpenXmlOperationJson.GetInt(operation.Format, "columnIndex", out var columnIndexError);
+        if (columnIndexError is not null || columnIndex is null || columnIndex < 0)
+        {
+            return OperationError(operation, columnIndexError ?? "target_value_invalid");
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Table, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var tableTargets = targets.Cast<ResolvedTableTarget>().ToList();
+        if (tableTargets.Any(target => columnIndex.Value >= target.CellCounts.DefaultIfEmpty(0).Max()))
+        {
+            return OperationError(operation, "target_not_found");
+        }
+
+        if (tableTargets.Any(target => target.CellCounts.DefaultIfEmpty(0).Max() <= 1))
+        {
+            return OperationError(operation, "table_cell_count_invalid");
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in tableTargets)
+        {
+            var before = target.Table.InnerText;
+            if (writeChanges)
+            {
+                DeleteTableColumn(target.Table, columnIndex.Value);
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(before, ""));
+        }
+
+        return result;
+    }
+
     private static OperationResult ApplyThreeLineTable(
         OpenXmlEditContext context,
         RunOptions options,
@@ -1149,6 +1365,186 @@ public static partial class OpenXmlMicroEditor
         {
             anchor.InsertAfterSelf(template);
         }
+    }
+
+    private static void InsertTableColumn(Table table, int columnIndex, string position, List<string> cells, int? widthTwips)
+    {
+        var insertIndex = position == "before" ? columnIndex : columnIndex + 1;
+        var rows = table.Elements<TableRow>().ToList();
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            var rowCells = rows[rowIndex].Elements<TableCell>().ToList();
+            var templateIndex = Math.Min(columnIndex, rowCells.Count - 1);
+            var template = rowCells[templateIndex].CloneNode(deep: true) as TableCell
+                ?? throw new InvalidDataException("Could not clone table cell.");
+            OpenXmlFormatApplier.ReplaceTableCellText(template, rowIndex < cells.Count ? cells[rowIndex] : "");
+            if (widthTwips is not null)
+            {
+                SetTableCellWidth(template, widthTwips.Value);
+            }
+
+            if (insertIndex >= rowCells.Count)
+            {
+                rows[rowIndex].AppendChild(template);
+            }
+            else
+            {
+                rowCells[insertIndex].InsertBeforeSelf(template);
+            }
+        }
+
+        InsertGridColumn(table, insertIndex, widthTwips);
+    }
+
+    private static void DeleteTableColumn(Table table, int columnIndex)
+    {
+        foreach (var row in table.Elements<TableRow>())
+        {
+            var cells = row.Elements<TableCell>().ToList();
+            if (columnIndex < cells.Count)
+            {
+                cells[columnIndex].Remove();
+            }
+        }
+
+        var gridColumns = table.TableGrid?.Elements<GridColumn>().ToList() ?? [];
+        if (columnIndex < gridColumns.Count)
+        {
+            gridColumns[columnIndex].Remove();
+        }
+
+        OpenXmlFormatApplier.ApplyTableGrid(table, ReadTableGridWidths(table));
+    }
+
+    private static void InsertGridColumn(Table table, int columnIndex, int? widthTwips)
+    {
+        var widths = ReadTableGridWidths(table);
+        var columnCount = table.Elements<TableRow>()
+            .Select(row => row.Elements<TableCell>().Count())
+            .DefaultIfEmpty(0)
+            .Max();
+        while (widths.Count < columnCount - 1)
+        {
+            widths.Add(0);
+        }
+
+        widths.Insert(Math.Min(columnIndex, widths.Count), widthTwips ?? 0);
+        OpenXmlFormatApplier.ApplyTableGrid(table, widths);
+    }
+
+    private static List<int> ReadTableGridWidths(Table table)
+    {
+        return table.TableGrid?
+            .Elements<GridColumn>()
+            .Select(column => ToInt(column.Width) ?? 0)
+            .ToList() ?? [];
+    }
+
+    private static void SetTableCellWidth(TableCell cell, int widthTwips)
+    {
+        var properties = cell.TableCellProperties;
+        if (properties is null)
+        {
+            properties = new TableCellProperties();
+            cell.PrependChild(properties);
+        }
+
+        properties.TableCellWidth ??= new TableCellWidth();
+        properties.TableCellWidth.Width = widthTwips.ToString();
+        properties.TableCellWidth.Type = TableWidthUnitValues.Dxa;
+    }
+
+    private static bool IsValidBookmarkName(string name)
+    {
+        return name.Length <= 40
+            && (char.IsLetter(name[0]) || name[0] == '_')
+            && name.All(character => char.IsLetterOrDigit(character) || character == '_');
+    }
+
+    private static int NextBookmarkId(Body body)
+    {
+        return body
+            .Descendants<BookmarkStart>()
+            .Select(bookmark => bookmark.Id?.Value)
+            .Select(value => int.TryParse(value, out var id) ? id : 0)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+    }
+
+    private static void AddBookmarkToParagraph(Paragraph paragraph, string name, int id)
+    {
+        var bookmarkId = id.ToString();
+        var start = new BookmarkStart { Name = name, Id = bookmarkId };
+        var end = new BookmarkEnd { Id = bookmarkId };
+        var firstContent = paragraph.ChildElements.FirstOrDefault(child => child is not ParagraphProperties);
+        if (firstContent is null)
+        {
+            paragraph.AppendChild(start);
+            paragraph.AppendChild(end);
+            return;
+        }
+
+        firstContent.InsertBeforeSelf(start);
+        paragraph.AppendChild(end);
+    }
+
+    private static FootnotesPart EnsureFootnotesPart(MainDocumentPart mainPart)
+    {
+        var part = mainPart.FootnotesPart ?? mainPart.AddNewPart<FootnotesPart>();
+        if (part.Footnotes is null)
+        {
+            part.Footnotes = new Footnotes();
+        }
+
+        EnsureSpecialFootnote(part.Footnotes, -1, FootnoteEndnoteValues.Separator);
+        EnsureSpecialFootnote(part.Footnotes, 0, FootnoteEndnoteValues.ContinuationSeparator);
+        part.Footnotes.Save();
+        return part;
+    }
+
+    private static void EnsureSpecialFootnote(Footnotes footnotes, int id, FootnoteEndnoteValues type)
+    {
+        if (footnotes.Elements<Footnote>().Any(footnote => footnote.Id?.Value == id))
+        {
+            return;
+        }
+
+        footnotes.AppendChild(new Footnote(
+            new Paragraph(new Run(new SeparatorMark())))
+        {
+            Id = id,
+            Type = type
+        });
+    }
+
+    private static int NextFootnoteId(FootnotesPart part)
+    {
+        var next = part.Footnotes!
+            .Elements<Footnote>()
+            .Select(footnote => footnote.Id?.Value ?? 0)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+        return checked((int)next);
+    }
+
+    private static void AddFootnoteBody(FootnotesPart part, int id, string text)
+    {
+        part.Footnotes!.AppendChild(new Footnote(
+            new Paragraph(
+                new Run(new FootnoteReferenceMark()),
+                new Run(new Text(text)
+                {
+                    Space = NeedsPreservedSpace(text) ? SpaceProcessingModeValues.Preserve : null
+                })))
+        {
+            Id = id
+        });
+        part.Footnotes.Save();
+    }
+
+    private static void AddFootnoteReference(Paragraph paragraph, int id)
+    {
+        paragraph.AppendChild(new Run(new FootnoteReference { Id = id }));
     }
 
     private static ImagePart AddImagePart(MainDocumentPart mainPart, string imagePath)
@@ -1740,7 +2136,7 @@ public static partial class OpenXmlMicroEditor
         {
             Severity = "error",
             Code = "document_validation_failed",
-            Message = $"Edited document failed OpenXML validation: {firstNewError.Description}",
+            Message = $"Edited document failed OpenXML validation at {firstNewError.Path?.XPath ?? "unknown path"}: {firstNewError.Description}",
             Path = Path.GetFullPath(path)
         };
     }
