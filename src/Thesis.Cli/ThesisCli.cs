@@ -101,6 +101,31 @@ public static class ThesisCli
             return ExtractProfile(profileArgs);
         }
 
+        if (args is ["operations", "list"])
+        {
+            return new CliResult
+            {
+                Status = "success",
+                OperationsCatalog = OperationCatalog.List()
+            };
+        }
+
+        if (args is ["operations", "sample", .. var operationArgs])
+        {
+            var op = RequiredOption(operationArgs, "--op");
+            var sample = OperationCatalog.CreateSample(op);
+            if (sample is null)
+            {
+                return Error("operation_unknown", $"Unknown operation: {op}");
+            }
+
+            return new CliResult
+            {
+                Status = "success",
+                OperationSample = sample
+            };
+        }
+
         if (args is ["finalize", "plan", .. var finalizeArgs])
         {
             return BuildFinalizationPlan(finalizeArgs);

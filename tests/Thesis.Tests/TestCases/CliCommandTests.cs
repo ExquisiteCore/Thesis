@@ -44,4 +44,49 @@ internal static partial class Program
         AssertEqual("unknown_command", result.Diagnostics[0].Code);
     }
 
+    static void CliOperationsListReturnsOperationMetadata()
+    {
+        var output = new StringWriter();
+        var exitCode = ThesisCli.Run(["operations", "list"], output, TextWriter.Null);
+
+        AssertEqual(0, exitCode);
+        var result = ThesisJson.Deserialize<CliResult>(output.ToString());
+        AssertEqual("success", result.Status);
+        AssertEqual(true, result.OperationsCatalog.Any(operation =>
+            operation.Op == "insertParagraph"
+            && operation.TargetTypes.Contains("paragraphIndex")
+            && operation.RequiredFields.Contains("text")));
+        AssertEqual(true, result.OperationsCatalog.Any(operation =>
+            operation.Op == "applyProfilePageSetup"
+            && operation.ProfileRequired));
+        AssertEqual(true, result.OperationsCatalog.Any(operation =>
+            operation.Op == "insertImage"
+            && operation.RequiredFormat.Contains("imagePath")));
+    }
+
+    static void CliOperationsSampleReturnsExecutableRequestJson()
+    {
+        var output = new StringWriter();
+        var exitCode = ThesisCli.Run(["operations", "sample", "--op", "insertParagraph"], output, TextWriter.Null);
+
+        AssertEqual(0, exitCode);
+        var result = ThesisJson.Deserialize<CliResult>(output.ToString());
+        AssertEqual("success", result.Status);
+        AssertEqual("insertParagraph", result.OperationSample!.Operations[0].Op);
+        AssertEqual("example-insertParagraph", result.OperationSample.RequestId);
+        AssertEqual(RequestMode.DryRun, result.OperationSample.Mode);
+        AssertEqual("新增段落", result.OperationSample.Operations[0].Text);
+    }
+
+    static void CliOperationsSampleRejectsUnknownOperation()
+    {
+        var output = new StringWriter();
+        var exitCode = ThesisCli.Run(["operations", "sample", "--op", "missingOp"], output, TextWriter.Null);
+
+        AssertEqual(1, exitCode);
+        var result = ThesisJson.Deserialize<CliResult>(output.ToString());
+        AssertEqual("error", result.Status);
+        AssertEqual("operation_unknown", result.Diagnostics[0].Code);
+    }
+
 }

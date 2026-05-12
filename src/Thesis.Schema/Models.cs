@@ -85,6 +85,10 @@ public sealed class CliResult
 
     public FinalizationPlan? FinalizationPlan { get; set; }
 
+    public List<OperationCatalogItem> OperationsCatalog { get; set; } = [];
+
+    public OperationRequest? OperationSample { get; set; }
+
     public SnapshotInfo? Snapshot { get; set; }
 
     public List<SnapshotInfo> Snapshots { get; set; } = [];
@@ -92,6 +96,25 @@ public sealed class CliResult
     public List<OperationResult> Operations { get; set; } = [];
 
     public List<Diagnostic> Diagnostics { get; set; } = [];
+}
+
+public sealed class OperationCatalogItem
+{
+    public string Op { get; set; } = "";
+
+    public string Description { get; set; } = "";
+
+    public List<string> TargetTypes { get; set; } = [];
+
+    public List<string> RequiredFields { get; set; } = [];
+
+    public List<string> OptionalFields { get; set; } = [];
+
+    public List<string> RequiredFormat { get; set; } = [];
+
+    public List<string> OptionalFormat { get; set; } = [];
+
+    public bool ProfileRequired { get; set; }
 }
 
 public sealed class SessionState
