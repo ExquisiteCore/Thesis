@@ -126,6 +126,9 @@ internal static partial class Program
         ("CLI profile extract validates source and output options", CliProfileExtractValidatesSourceAndOutputOptions),
         ("CLI profile extract refuses unsafe output paths", CliProfileExtractRefusesUnsafeOutputPaths),
         ("CLI profile extract returns JSON error for non-DOCX input", CliProfileExtractReturnsJsonErrorForNonDocxInput),
+        ("CLI profile explain summarizes rules and risks", CliProfileExplainSummarizesRulesAndRisks),
+        ("CLI profile explain supports workspace profile", CliProfileExplainSupportsWorkspaceProfile),
+        ("CLI profile explain validates options and JSON", CliProfileExplainValidatesOptionsAndJson),
         ("CLI finalize plan reports host application steps for fields", CliFinalizePlanReportsHostApplicationStepsForFields),
         ("CLI finalize plan distinguishes generic fields from TOC", CliFinalizePlanDistinguishesGenericFieldsFromToc),
         ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments)

@@ -124,4 +124,86 @@ internal static partial class Program
         AssertEqual(false, File.Exists(outputPath));
     }
 
+    static void CliProfileExplainSummarizesRulesAndRisks()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteFixtureDocx(docx);
+        AssertEqual(0, RunCli(["profile", "extract", "--doc", docx, "--out", profilePath]).ExitCode);
+
+        var (exitCode, result) = RunCli(["profile", "explain", "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(Path.GetFullPath(profilePath), result.ProfileExplanation!.ProfilePath);
+        AssertEqual("doc", result.ProfileExplanation.SourceType);
+        AssertEqual(true, result.ProfileExplanation.SourceEvidence.ParagraphCount > 0);
+        AssertEqual(true, result.ProfileExplanation.RoleSummaries.Any(role =>
+            role.Role == "abstract.zh"
+            && role.EvidenceCount > 0
+            && role.HasFormat));
+        AssertEqual(true, result.ProfileExplanation.TableSummary.Detected);
+        AssertEqual(1, result.ProfileExplanation.TableSummary.TableCount);
+        AssertEqual(true, result.ProfileExplanation.Risks.Any(risk =>
+            risk.Code == "finalization_required"
+            && risk.Severity == "warning"));
+    }
+
+    static void CliProfileExplainSupportsWorkspaceProfile()
+    {
+        using var temp = new TempDirectory();
+        var sourceDoc = Path.Combine(temp.Path, "source.docx");
+        var profile = Path.Combine(temp.Path, "input-profile.json");
+        var workspace = Path.Combine(temp.Path, ".thesis");
+        WriteFixtureDocx(sourceDoc);
+        File.WriteAllText(profile, "{}");
+        AssertEqual("success", SessionInitializer.Initialize(sourceDoc, profile, workspace).Status);
+        var profileModel = new TemplateProfile
+        {
+            SourceType = "test",
+            SourceDocument = sourceDoc,
+            SourceEvidence = new ProfileSourceEvidence { ParagraphCount = 2, StyleCount = 1 },
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "body",
+                    StyleId = "Normal",
+                    Confidence = 0.9,
+                    Format = new ParagraphFormatSample { StyleId = "Normal" },
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence { ParagraphIndex = 0, TextPreview = "正文" }
+                    ]
+                }
+            ]
+        };
+        File.WriteAllText(SessionPaths.FromWorkspace(workspace).ProfileJson, ThesisJson.Serialize(profileModel));
+
+        var (exitCode, result) = RunCli(["profile", "explain", "--workspace", workspace]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(SessionPaths.FromWorkspace(workspace).ProfileJson, result.ProfileExplanation!.ProfilePath);
+        AssertEqual("test", result.ProfileExplanation.SourceType);
+        AssertEqual("body", result.ProfileExplanation.RoleSummaries[0].Role);
+    }
+
+    static void CliProfileExplainValidatesOptionsAndJson()
+    {
+        using var temp = new TempDirectory();
+        var malformedProfile = Path.Combine(temp.Path, "bad-profile.json");
+        File.WriteAllText(malformedProfile, "{");
+
+        var missingSource = RunCli(["profile", "explain"]);
+        AssertEqual(1, missingSource.ExitCode);
+        AssertEqual("profile_source_missing", missingSource.Result.Diagnostics[0].Code);
+
+        var malformed = RunCli(["profile", "explain", "--profile", malformedProfile]);
+        AssertEqual(1, malformed.ExitCode);
+        AssertEqual("profile_invalid", malformed.Result.Diagnostics[0].Code);
+        AssertEqual(Path.GetFullPath(malformedProfile), malformed.Result.Diagnostics[0].Path);
+    }
+
 }

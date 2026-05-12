@@ -101,6 +101,11 @@ public static class ThesisCli
             return ExtractProfile(profileArgs);
         }
 
+        if (args is ["profile", "explain", .. var explainArgs])
+        {
+            return ExplainProfile(explainArgs);
+        }
+
         if (args is ["operations", "list"])
         {
             return new CliResult
@@ -234,6 +239,58 @@ public static class ThesisCli
             Status = "success",
             Document = map.Path,
             OutputPath = fullOutputPath
+        };
+    }
+
+    private static CliResult ExplainProfile(string[] args)
+    {
+        var profilePath = OptionalOption(args, "--profile");
+        var workspace = OptionalOption(args, "--workspace");
+        if (profilePath is not null && workspace is not null)
+        {
+            return Error("profile_source_ambiguous", "Specify either --profile or --workspace, not both.");
+        }
+
+        if (profilePath is null && workspace is null)
+        {
+            return Error("profile_source_missing", "Specify either --profile or --workspace.");
+        }
+
+        profilePath ??= SessionPaths.FromWorkspace(workspace!).ProfileJson;
+        var fullProfilePath = Path.GetFullPath(profilePath);
+        TemplateProfile profile;
+        try
+        {
+            profile = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(fullProfilePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "profile_invalid",
+                        Message = $"Profile JSON could not be read: {ex.Message}",
+                        Path = fullProfilePath
+                    }
+                ]
+            };
+        }
+
+        profile.StyleRoles ??= [];
+        profile.Diagnostics ??= [];
+        profile.TableArchetypes ??= [];
+        profile.TablePolicy ??= new ProfileTablePolicy();
+        profile.SourceEvidence ??= new ProfileSourceEvidence();
+
+        return new CliResult
+        {
+            Status = "success",
+            ProfileExplanation = ProfileExplanationBuilder.Build(profile, fullProfilePath)
         };
     }
 
