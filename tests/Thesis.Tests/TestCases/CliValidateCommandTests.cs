@@ -46,6 +46,39 @@ internal static partial class Program
             && operation.Target?["index"]?.GetValue<int>() == 0));
     }
 
+    static void CliValidateSuggestsPageSetupFixes()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            PageSetup = new ProfilePageSetup
+            {
+                PageSize = new PageSizeInfo
+                {
+                    WidthTwips = 11906,
+                    HeightTwips = 16838
+                },
+                Margins = new PageMarginInfo
+                {
+                    TopTwips = 1200,
+                    RightTwips = 1300,
+                    BottomTwips = 1400,
+                    LeftTwips = 1500
+                }
+            }
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["validate", "--workspace", context.Workspace]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(false, result.Validation!.Compliant);
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_page_setup_mismatch"));
+        AssertEqual(true, result.Validation.SuggestedOperations.Any(operation => operation.Op == "applyProfilePageSetup"));
+    }
+
     static void CliValidateResolvesProfileRolesAgainstTargetDocument()
     {
         using var temp = new TempDirectory();

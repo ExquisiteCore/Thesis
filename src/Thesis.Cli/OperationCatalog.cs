@@ -14,7 +14,12 @@ internal static class OperationCatalog
         Item("copyParagraphFormat", "Copy paragraph formatting from a source paragraph target.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["source"]),
         Item("clearDirectFormatting", "Clear direct paragraph and/or run formatting from matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"], optionalFormat: ["scope"]),
         Item("setPageBreakBefore", "Set or clear paragraph page-break-before.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], optionalFormat: ["value"]),
-        Item("setRunFormat", "Apply run-level formatting to one matched run.", ["runText"], ["target"], optionalFormat: ["bold", "italic", "fontSizeHalfPoints"]),
+        Item("setRunFormat", "Apply run-level formatting to one matched run.", ["runIndex", "runText"], ["target"], optionalFormat: ["bold", "italic", "fontSizeHalfPoints"]),
+        Item("replaceText", "Replace text inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["find"]),
+        Item("replaceRegex", "Replace regex matches inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["pattern"]),
+        Item("insertTextBefore", "Insert text before a matched substring inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["find"]),
+        Item("insertTextAfter", "Insert text after a matched substring inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["find"]),
+        Item("deleteText", "Delete text inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"], requiredFormat: ["find"]),
         Item("insertParagraph", "Insert a paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "text"], optionalFormat: ["position", "styleId", "alignment", "runFormat", "spacing"]),
         Item("deleteParagraph", "Delete matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
         Item("moveParagraph", "Move matched paragraphs before or after an anchor paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["anchor"], optionalFormat: ["position"]),
@@ -34,10 +39,25 @@ internal static class OperationCatalog
         Item("insertTableColumn", "Insert a table column before or after an existing column.", ["tableIndex"], ["target"], requiredFormat: ["columnIndex"], optionalFormat: ["position", "widthTwips", "cells"]),
         Item("deleteTableColumn", "Delete a table column.", ["tableIndex"], ["target"], requiredFormat: ["columnIndex"]),
         Item("applyThreeLineTable", "Apply academic three-line table borders.", ["tableIndex"], ["target"]),
+        Item("insertTable", "Insert a simple table before or after a paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["rows"], optionalFormat: ["position"]),
+        Item("deleteTable", "Delete matched tables.", ["tableIndex"], ["target"]),
+        Item("mergeCells", "Merge a contiguous cell range in one table row.", ["tableIndex"], ["target"], requiredFormat: ["rowIndex", "startCellIndex", "endCellIndex"]),
+        Item("splitCell", "Split one table cell into multiple cells.", ["tableCell"], ["target"], requiredFormat: ["cellCount"], optionalFormat: ["texts"]),
         Item("insertImage", "Insert an inline image paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["imagePath"], optionalFormat: ["position", "widthEmu", "heightEmu", "altText", "alignment"]),
         Item("insertCaption", "Insert a thesis figure or table caption near a paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "text"], optionalFormat: ["position", "styleId", "alignment"]),
+        Item("insertTocField", "Insert a TOC field near a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], optionalFormat: ["position", "levels"]),
+        Item("markTocNeedsUpdate", "Mark fields and TOC as needing host update.", [], []),
+        Item("updateSimpleFields", "Clear dirty flags on simple fields where OpenXML can safely do so.", [], []),
+        Item("normalizeRuns", "Collapse simple paragraph text runs into one run.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
+        Item("removeExtraSpaces", "Collapse repeated spaces inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
+        Item("normalizeChinesePunctuationSpacing", "Remove extra spaces around Chinese punctuation.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
+        Item("removeDuplicatePageBreaks", "Remove adjacent duplicate page-break paragraphs.", [], []),
+        Item("ensureRoleOrder", "Move exact-match paragraphs into a requested order.", [], [], requiredFormat: ["order"]),
         Item("setHeaderFooterText", "Set section header or footer text.", [], ["text"], optionalFormat: ["kind", "type"]),
         Item("insertPageNumber", "Insert a PAGE field in a header or footer.", [], [], optionalFormat: ["kind", "type", "alignment"]),
+        Item("replaceReferences", "Replace reference items after a references heading.", ["paragraphIndex", "paragraphText", "role"], ["target"], requiredFormat: ["items"]),
+        Item("insertReferenceItem", "Insert one numbered reference item near a matched reference paragraph.", ["paragraphIndex", "paragraphText", "role"], ["target", "text"], optionalFormat: ["position"]),
+        Item("applyReferenceFormat", "Apply basic thesis reference paragraph formatting.", ["paragraphIndex", "paragraphText", "sectionRange"], ["target"]),
         Item("normalizeReferences", "Insert a basic numbered reference placeholder after a references heading when missing.", ["paragraphIndex", "paragraphText", "role"], ["target"], optionalFormat: ["position"])
     ];
 
@@ -58,6 +78,11 @@ internal static class OperationCatalog
             "clearDirectFormatting" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("scope", "paragraphAndRuns")))),
             "setPageBreakBefore" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("value", true)))),
             "setRunFormat" => Request(op, Operation(op, target: Obj(("type", "runText"), ("text", "关键词")), format: Obj(("bold", true), ("fontSizeHalfPoints", "24")))),
+            "replaceText" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "新文本", format: Obj(("find", "旧文本")))),
+            "replaceRegex" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "第一章", format: Obj(("pattern", "^第1章")))),
+            "insertTextBefore" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "前缀", format: Obj(("find", "标题")))),
+            "insertTextAfter" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "后缀", format: Obj(("find", "标题")))),
+            "deleteText" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("find", "多余文本")))),
             "insertParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "新增段落", format: Obj(("position", "after")))),
             "deleteParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(1))),
             "moveParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(2), format: Obj(("position", "after"), ("anchor", ParagraphIndexTarget(0))))),
@@ -77,10 +102,25 @@ internal static class OperationCatalog
             "insertTableColumn" => Request(op, Operation(op, target: TableIndexTarget(0), format: Obj(("columnIndex", 0), ("position", "after"), ("widthTwips", 2400), ("cells", Array("表头", "数据"))))),
             "deleteTableColumn" => Request(op, Operation(op, target: TableIndexTarget(0), format: Obj(("columnIndex", 1)))),
             "applyThreeLineTable" => Request(op, Operation(op, target: TableIndexTarget(0))),
+            "insertTable" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("position", "after"), ("rows", Rows(("A1", "B1"), ("A2", "B2")))))),
+            "deleteTable" => Request(op, Operation(op, target: TableIndexTarget(0))),
+            "mergeCells" => Request(op, Operation(op, target: TableIndexTarget(0), format: Obj(("rowIndex", 0), ("startCellIndex", 0), ("endCellIndex", 1)))),
+            "splitCell" => Request(op, Operation(op, target: TableCellTarget(0, 0, 0), format: Obj(("cellCount", 2), ("texts", Array("第一列", "第二列"))))),
             "insertImage" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("imagePath", "figure.png"), ("position", "after"), ("widthEmu", 3600000), ("heightEmu", 2400000)))),
             "insertCaption" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "图1-1 系统结构图", format: Obj(("position", "after"), ("alignment", "center")))),
+            "insertTocField" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("position", "after"), ("levels", "1-3")))),
+            "markTocNeedsUpdate" => Request(op, Operation(op)),
+            "updateSimpleFields" => Request(op, Operation(op)),
+            "normalizeRuns" => Request(op, Operation(op, target: ParagraphIndexTarget(0))),
+            "removeExtraSpaces" => Request(op, Operation(op, target: ParagraphIndexTarget(0))),
+            "normalizeChinesePunctuationSpacing" => Request(op, Operation(op, target: ParagraphIndexTarget(0))),
+            "removeDuplicatePageBreaks" => Request(op, Operation(op)),
+            "ensureRoleOrder" => Request(op, Operation(op, format: Obj(("order", Array("摘要", "Abstract"))))),
             "setHeaderFooterText" => Request(op, Operation(op, text: "论文题目", format: Obj(("kind", "header"), ("type", "default")))),
             "insertPageNumber" => Request(op, Operation(op, format: Obj(("kind", "footer"), ("type", "default"), ("alignment", "center")))),
+            "replaceReferences" => Request(op, Operation(op, target: Obj(("type", "paragraphText"), ("text", "参考文献"), ("match", "exact")), format: Obj(("items", Array("作者. 题名[J]. 期刊, 2024."))))),
+            "insertReferenceItem" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "作者. 题名[M]. 北京: 出版社, 2025.")),
+            "applyReferenceFormat" => Request(op, Operation(op, target: ParagraphIndexTarget(0))),
             "normalizeReferences" => Request(op, Operation(op, target: Obj(("type", "paragraphText"), ("text", "参考文献"), ("match", "exact")), format: Obj(("position", "afterHeading")))),
             _ => null
         };
@@ -180,6 +220,17 @@ internal static class OperationCatalog
         foreach (var value in values)
         {
             array.Add(value);
+        }
+
+        return array;
+    }
+
+    private static JsonArray Rows(params (string First, string Second)[] rows)
+    {
+        var array = new JsonArray();
+        foreach (var row in rows)
+        {
+            array.Add(Array(row.First, row.Second));
         }
 
         return array;

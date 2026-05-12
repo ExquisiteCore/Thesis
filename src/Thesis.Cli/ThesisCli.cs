@@ -56,6 +56,11 @@ public static class ThesisCli
             return SessionLifecycle.Run(workspace, request, OpenXmlMicroEditor.Apply);
         }
 
+        if (args is ["apply", .. var applyArgs])
+        {
+            return ApplyOneShot(applyArgs);
+        }
+
         if (args is ["snapshot", .. var snapshotArgs])
         {
             var workspace = RequiredOption(snapshotArgs, "--workspace");
@@ -99,7 +104,7 @@ public static class ThesisCli
 
         if (args is ["validate", .. var validateArgs])
         {
-            return ValidateWorkspace(validateArgs);
+            return Validate(validateArgs);
         }
 
         if (args is ["profile", "extract", .. var profileArgs])
@@ -155,9 +160,139 @@ public static class ThesisCli
         throw new CliException("unknown_command", "Unknown command.");
     }
 
-    private static CliResult ValidateWorkspace(string[] args)
+    private static CliResult ApplyOneShot(string[] args)
     {
-        var workspace = RequiredOption(args, "--workspace");
+        var doc = RequiredOption(args, "--doc");
+        var profilePath = RequiredOption(args, "--profile");
+        var requestPath = RequiredOption(args, "--request");
+        var outputPath = RequiredOption(args, "--out");
+        var fullDocPath = Path.GetFullPath(doc);
+        var fullOutputPath = Path.GetFullPath(outputPath);
+
+        if (SamePath(fullOutputPath, fullDocPath))
+        {
+            return Error("apply_output_refused", "Apply output path must not overwrite the source document.");
+        }
+
+        var parent = Path.GetDirectoryName(fullOutputPath);
+        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+        {
+            return Error("apply_output_directory_missing", $"Apply output directory not found: {parent}");
+        }
+
+        if (!TryReadProfile(profilePath, out var profile, out var profileError))
+        {
+            return profileError!;
+        }
+
+        NormalizeProfile(profile!);
+        OperationRequest request;
+        try
+        {
+            request = ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(requestPath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "request_invalid",
+                        Message = $"Request JSON could not be read: {ex.Message}",
+                        Path = Path.GetFullPath(requestPath)
+                    }
+                ]
+            };
+        }
+
+        request.Options ??= new RunOptions();
+        request.Operations ??= [];
+        request.Mode = RequestMode.Execute;
+        request.Options.CreateSnapshot = false;
+
+        var tempPath = Path.Combine(parent, Path.GetFileName(fullOutputPath) + "." + Guid.NewGuid().ToString("N") + ".tmp.docx");
+        try
+        {
+            File.Copy(fullDocPath, tempPath, overwrite: true);
+            var edit = OpenXmlMicroEditor.Apply(tempPath, request, profile);
+            var result = new CliResult
+            {
+                Status = edit.Diagnostics.Any(diagnostic => string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase))
+                    ? "error"
+                    : "success",
+                RequestId = request.RequestId,
+                Mode = request.Mode,
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Operations = edit.Operations,
+                Diagnostics = edit.Diagnostics
+            };
+
+            if (!string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                return result;
+            }
+
+            File.Move(tempPath, fullOutputPath, overwrite: true);
+            return result;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                RequestId = request.RequestId,
+                Mode = request.Mode,
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "apply_failed",
+                        Message = $"Apply failed: {ex.Message}",
+                        Path = fullDocPath
+                    }
+                ]
+            };
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+    }
+
+    private static CliResult Validate(string[] args)
+    {
+        var workspace = OptionalOption(args, "--workspace");
+        var doc = OptionalOption(args, "--doc");
+        if (workspace is not null && doc is not null)
+        {
+            return Error("validate_source_ambiguous", "Specify either --workspace or --doc, not both.");
+        }
+
+        if (doc is not null)
+        {
+            return ValidateDocument(args, Path.GetFullPath(doc), sessionResult: null);
+        }
+
+        if (workspace is null)
+        {
+            workspace = RequiredOption(args, "--workspace");
+        }
+
+        return ValidateWorkspace(args, workspace);
+    }
+
+    private static CliResult ValidateWorkspace(string[] args, string workspace)
+    {
         var profilePath = OptionalOption(args, "--profile");
         var hostOption = OptionalOption(args, "--host");
         var progId = OptionalOption(args, "--prog-id");
@@ -169,18 +304,35 @@ public static class ThesisCli
 
         var documentPath = inspect.Document
             ?? throw new CliException("working_doc_missing", "Workspace inspect did not return a working document.");
+        return ValidateDocument(args, documentPath, inspect);
+    }
+
+    private static CliResult ValidateDocument(string[] args, string documentPath, CliResult? sessionResult)
+    {
+        var profilePath = OptionalOption(args, "--profile");
+        var hostOption = OptionalOption(args, "--host");
+        var progId = OptionalOption(args, "--prog-id");
         if (!OpenXmlDocumentInspector.TryInspect(documentPath, out var map, out var diagnostic) || map is null)
         {
             return new CliResult
             {
                 Status = "error",
-                Workspace = inspect.Workspace,
+                Workspace = sessionResult?.Workspace,
                 Document = documentPath,
                 Diagnostics = diagnostic is null ? [] : [diagnostic]
             };
         }
 
-        profilePath ??= SessionPaths.FromWorkspace(workspace).ProfileJson;
+        if (profilePath is null)
+        {
+            if (sessionResult?.Workspace is null)
+            {
+                return Error("profile_missing", "Validate --doc requires --profile.");
+            }
+
+            profilePath = SessionPaths.FromWorkspace(sessionResult.Workspace).ProfileJson;
+        }
+
         if (!TryReadProfile(profilePath, out var profile, out var profileError))
         {
             return profileError!;
@@ -190,10 +342,10 @@ public static class ThesisCli
         var result = new CliResult
         {
             Status = "success",
-            Workspace = inspect.Workspace,
+            Workspace = sessionResult?.Workspace,
             Document = documentPath,
-            Session = inspect.Session,
-            Snapshots = inspect.Snapshots,
+            Session = sessionResult?.Session,
+            Snapshots = sessionResult?.Snapshots ?? [],
             Validation = ProfileComplianceValidator.Validate(map, profile!)
         };
 
@@ -429,7 +581,8 @@ public static class ThesisCli
         {
             Status = "success",
             Document = map.Path,
-            OutputPath = fullOutputPath
+            OutputPath = fullOutputPath,
+            ProfileExplanation = ProfileExplanationBuilder.Build(profile, fullOutputPath)
         };
     }
 
@@ -619,6 +772,23 @@ public static class ThesisCli
             + Path.DirectorySeparatorChar;
         var fullPath = Path.GetFullPath(path);
         return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }
 

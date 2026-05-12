@@ -217,7 +217,9 @@ internal sealed partial class OpenXmlTargetResolver
             return TargetResolutionResult.Error(startError);
         }
 
-        if (!TryResolveRangeAnchor(target["end"], out var endIndex, out var endError))
+        var endNode = target["end"];
+        var endIndex = Paragraphs.Count - 1;
+        if (endNode is not null && !TryResolveRangeAnchor(endNode, out endIndex, out var endError))
         {
             return TargetResolutionResult.Error(endError);
         }
@@ -228,7 +230,7 @@ internal sealed partial class OpenXmlTargetResolver
         }
 
         var firstIndex = includeStart ? startIndex : startIndex + 1;
-        var lastIndex = includeEnd ? endIndex : endIndex - 1;
+        var lastIndex = endNode is null || includeEnd ? endIndex : endIndex - 1;
         var matches = firstIndex > lastIndex
             ? []
             : Enumerable.Range(firstIndex, lastIndex - firstIndex + 1)

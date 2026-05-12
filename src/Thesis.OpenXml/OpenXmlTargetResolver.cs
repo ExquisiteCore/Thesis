@@ -62,6 +62,7 @@ internal sealed partial class OpenXmlTargetResolver
             "paragraphIndex" => ResolveParagraphIndex(targetObject),
             "paragraphText" => ResolveParagraphText(targetObject, options),
             "runIndex" => ResolveRunIndex(targetObject),
+            "runText" => ResolveRunText(targetObject, options),
             "paragraphId" => ResolveParagraphId(targetObject),
             "headingPath" => ResolveHeadingPath(targetObject, options),
             "within" => ResolveWithin(targetObject, options),
@@ -259,6 +260,58 @@ internal sealed partial class OpenXmlTargetResolver
 
         return TargetResolutionResult.FromMatches(
             [new ResolvedRunTarget(runs[runIndex.Value], paragraphIndex.Value, runIndex.Value)]);
+    }
+
+    private TargetResolutionResult ResolveRunText(JsonObject target, RunOptions options)
+    {
+        var text = GetString(target, "text", out var textError);
+        if (textError is not null || text is null)
+        {
+            return TargetResolutionResult.Error(textError ?? "target_value_invalid");
+        }
+
+        var match = GetString(target, "match", out var matchError) ?? "contains";
+        if (matchError is not null)
+        {
+            return TargetResolutionResult.Error(matchError);
+        }
+
+        if (match is not "exact" and not "contains" and not "regex")
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        var paragraphIndex = GetInt(target, "paragraphIndex", out var paragraphIndexError);
+        if (paragraphIndexError is not null)
+        {
+            return TargetResolutionResult.Error(paragraphIndexError);
+        }
+
+        if (paragraphIndex is not null && (paragraphIndex < 0 || paragraphIndex >= Paragraphs.Count))
+        {
+            return TargetResolutionResult.Error("target_not_found");
+        }
+
+        var paragraphCandidates = paragraphIndex is null
+            ? Paragraphs.Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+            : [(Paragraph: Paragraphs[paragraphIndex.Value], Index: paragraphIndex.Value)];
+
+        List<ResolvedTarget> matches;
+        try
+        {
+            matches = paragraphCandidates
+                .SelectMany(candidate => candidate.Paragraph.Descendants<Run>()
+                    .Select((run, runIndex) => (candidate.Index, Run: run, RunIndex: runIndex)))
+                .Where(candidate => ParagraphTextMatches(candidate.Run.InnerText, text, match))
+                .Select(candidate => (ResolvedTarget)new ResolvedRunTarget(candidate.Run, candidate.Index, candidate.RunIndex))
+                .ToList();
+        }
+        catch (ArgumentException)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        return ValidateMatchCount(matches, options);
     }
 
     private TargetResolutionResult ResolveStyleId(JsonObject target, RunOptions options)

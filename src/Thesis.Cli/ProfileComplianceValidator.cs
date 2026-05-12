@@ -20,10 +20,49 @@ internal static class ProfileComplianceValidator
             CheckedTables = map.Tables.Count
         };
 
+        ValidatePageSetup(map, profile, report);
         ValidateRoleEvidence(map, profile, report);
         ValidateTables(map, profile, report);
         report.Compliant = report.Diagnostics.Count == 0;
         return report;
+    }
+
+    private static void ValidatePageSetup(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        var expected = profile.PageSetup;
+        var hasExpectedPageSize = expected.PageSize is not null
+            && (expected.PageSize.WidthTwips is not null
+                || expected.PageSize.HeightTwips is not null
+                || expected.PageSize.Orientation is not null);
+        var hasExpectedMargins = expected.Margins is not null
+            && (expected.Margins.TopTwips is not null
+                || expected.Margins.RightTwips is not null
+                || expected.Margins.BottomTwips is not null
+                || expected.Margins.LeftTwips is not null
+                || expected.Margins.HeaderTwips is not null
+                || expected.Margins.FooterTwips is not null
+                || expected.Margins.GutterTwips is not null);
+        if (!hasExpectedPageSize && !hasExpectedMargins)
+        {
+            return;
+        }
+
+        var section = map.Sections.FirstOrDefault();
+        if (section is null || !PageSizeMatches(section.PageSize, expected.PageSize) || !MarginsMatches(section.PageMargin, expected.Margins))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "warning",
+                Code = "profile_page_setup_mismatch",
+                Message = "Document page setup does not match the template profile.",
+                Path = "sections[0]"
+            });
+            report.SuggestedOperations.Add(new ThesisOperation
+            {
+                Id = "fix-page-setup",
+                Op = "applyProfilePageSetup"
+            });
+        }
     }
 
     private static void ValidateRoleEvidence(DocumentMap map, TemplateProfile profile, ValidationReport report)
@@ -343,6 +382,34 @@ internal static class ProfileComplianceValidator
             && StringMatches(actual.Alignment, expected.Alignment)
             && ListMatches(actual.GridColumnWidthsTwips, expected.GridColumnWidthsTwips)
             && actual.HeaderRowCount == expected.HeaderRowCount;
+    }
+
+    private static bool PageSizeMatches(PageSizeInfo? actual, PageSizeInfo? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        return IntMatches(actual?.WidthTwips, expected.WidthTwips)
+            && IntMatches(actual?.HeightTwips, expected.HeightTwips)
+            && StringMatches(actual?.Orientation, expected.Orientation);
+    }
+
+    private static bool MarginsMatches(PageMarginInfo? actual, PageMarginInfo? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        return IntMatches(actual?.TopTwips, expected.TopTwips)
+            && IntMatches(actual?.RightTwips, expected.RightTwips)
+            && IntMatches(actual?.BottomTwips, expected.BottomTwips)
+            && IntMatches(actual?.LeftTwips, expected.LeftTwips)
+            && IntMatches(actual?.HeaderTwips, expected.HeaderTwips)
+            && IntMatches(actual?.FooterTwips, expected.FooterTwips)
+            && IntMatches(actual?.GutterTwips, expected.GutterTwips);
     }
 
     private static bool StringMatches(string? actual, string? expected)
