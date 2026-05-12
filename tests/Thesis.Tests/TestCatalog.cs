@@ -129,6 +129,9 @@ internal static partial class Program
         ("CLI profile explain summarizes rules and risks", CliProfileExplainSummarizesRulesAndRisks),
         ("CLI profile explain supports workspace profile", CliProfileExplainSupportsWorkspaceProfile),
         ("CLI profile explain validates options and JSON", CliProfileExplainValidatesOptionsAndJson),
+        ("CLI profile diff reports structured changes", CliProfileDiffReportsStructuredChanges),
+        ("CLI profile diff returns no changes for equivalent profiles", CliProfileDiffReturnsNoChangesForEquivalentProfiles),
+        ("CLI profile diff validates inputs", CliProfileDiffValidatesInputs),
         ("CLI finalize plan reports host application steps for fields", CliFinalizePlanReportsHostApplicationStepsForFields),
         ("CLI finalize plan distinguishes generic fields from TOC", CliFinalizePlanDistinguishesGenericFieldsFromToc),
         ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments)

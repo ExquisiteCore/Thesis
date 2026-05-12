@@ -106,6 +106,11 @@ public static class ThesisCli
             return ExplainProfile(explainArgs);
         }
 
+        if (args is ["profile", "diff", .. var diffArgs])
+        {
+            return DiffProfiles(diffArgs);
+        }
+
         if (args is ["operations", "list"])
         {
             return new CliResult
@@ -292,6 +297,70 @@ public static class ThesisCli
             Status = "success",
             ProfileExplanation = ProfileExplanationBuilder.Build(profile, fullProfilePath)
         };
+    }
+
+    private static CliResult DiffProfiles(string[] args)
+    {
+        var leftPath = RequiredOption(args, "--left");
+        var rightPath = RequiredOption(args, "--right");
+        if (!TryReadProfile(leftPath, out var left, out var leftError))
+        {
+            return leftError!;
+        }
+
+        if (!TryReadProfile(rightPath, out var right, out var rightError))
+        {
+            return rightError!;
+        }
+
+        NormalizeProfile(left!);
+        NormalizeProfile(right!);
+
+        return new CliResult
+        {
+            Status = "success",
+            ProfileDiff = ProfileDiffBuilder.Build(left!, leftPath, right!, rightPath)
+        };
+    }
+
+    private static bool TryReadProfile(string path, out TemplateProfile? profile, out CliResult? error)
+    {
+        var fullPath = Path.GetFullPath(path);
+        try
+        {
+            profile = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(fullPath));
+            error = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            profile = null;
+            error = new CliResult
+            {
+                Status = "error",
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "profile_invalid",
+                        Message = $"Profile JSON could not be read: {ex.Message}",
+                        Path = fullPath
+                    }
+                ]
+            };
+            return false;
+        }
+    }
+
+    private static void NormalizeProfile(TemplateProfile profile)
+    {
+        profile.StyleRoles ??= [];
+        profile.Diagnostics ??= [];
+        profile.TableArchetypes ??= [];
+        profile.TablePolicy ??= new ProfileTablePolicy();
+        profile.PageSetup ??= new ProfilePageSetup();
+        profile.SourceEvidence ??= new ProfileSourceEvidence();
     }
 
     private static bool IsProfileOutputRefused(string outputPath, string docPath, SessionPaths? workspacePaths)

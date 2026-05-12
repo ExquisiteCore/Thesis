@@ -206,4 +206,120 @@ internal static partial class Program
         AssertEqual(Path.GetFullPath(malformedProfile), malformed.Result.Diagnostics[0].Path);
     }
 
+    static void CliProfileDiffReportsStructuredChanges()
+    {
+        using var temp = new TempDirectory();
+        var leftPath = Path.Combine(temp.Path, "left-profile.json");
+        var rightPath = Path.Combine(temp.Path, "right-profile.json");
+        var left = new TemplateProfile
+        {
+            SourceType = "left",
+            PageSetup = new ProfilePageSetup
+            {
+                Margins = new PageMarginInfo { TopTwips = 1440, LeftTwips = 1800 }
+            },
+            StyleRoles =
+            [
+                new ProfileStyleRole { Role = "body", StyleId = "Normal", Confidence = 0.9 },
+                new ProfileStyleRole { Role = "heading1", StyleId = "Heading1", Confidence = 0.8 }
+            ],
+            TablePolicy = new ProfileTablePolicy { Detected = true, TableCount = 1, ObservedColumnCounts = [2] },
+            Diagnostics =
+            [
+                new ProfileDiagnostic { Severity = "warning", Code = "old_warning", Message = "old" }
+            ]
+        };
+        var right = new TemplateProfile
+        {
+            SourceType = "right",
+            PageSetup = new ProfilePageSetup
+            {
+                Margins = new PageMarginInfo { TopTwips = 1200, LeftTwips = 1800 }
+            },
+            StyleRoles =
+            [
+                new ProfileStyleRole { Role = "body", StyleId = "BodyText", Confidence = 0.7 },
+                new ProfileStyleRole { Role = "references", StyleId = "Heading1", Confidence = 0.82 }
+            ],
+            TablePolicy = new ProfileTablePolicy { Detected = true, TableCount = 2, ObservedColumnCounts = [2, 3] },
+            Diagnostics =
+            [
+                new ProfileDiagnostic { Severity = "warning", Code = "new_warning", Message = "new" }
+            ]
+        };
+        File.WriteAllText(leftPath, ThesisJson.Serialize(left));
+        File.WriteAllText(rightPath, ThesisJson.Serialize(right));
+
+        var (exitCode, result) = RunCli(["profile", "diff", "--left", leftPath, "--right", rightPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(Path.GetFullPath(leftPath), result.ProfileDiff!.LeftProfilePath);
+        AssertEqual(Path.GetFullPath(rightPath), result.ProfileDiff.RightProfilePath);
+        AssertEqual(true, result.ProfileDiff.HasChanges);
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "modified"
+            && change.Path == "pageSetup.margins.topTwips"
+            && change.Left == "1440"
+            && change.Right == "1200"));
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "modified"
+            && change.Path == "styleRoles.body.styleId"
+            && change.Left == "Normal"
+            && change.Right == "BodyText"));
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "removed"
+            && change.Path == "styleRoles.heading1"));
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "added"
+            && change.Path == "styleRoles.references"));
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "modified"
+            && change.Path == "tablePolicy.tableCount"
+            && change.Left == "1"
+            && change.Right == "2"));
+        AssertEqual(true, result.ProfileDiff.Changes.Any(change =>
+            change.Kind == "added"
+            && change.Path == "diagnostics.new_warning"));
+    }
+
+    static void CliProfileDiffReturnsNoChangesForEquivalentProfiles()
+    {
+        using var temp = new TempDirectory();
+        var leftPath = Path.Combine(temp.Path, "left-profile.json");
+        var rightPath = Path.Combine(temp.Path, "right-profile.json");
+        var profile = new TemplateProfile
+        {
+            SourceType = "test",
+            StyleRoles = [new ProfileStyleRole { Role = "body", StyleId = "Normal", Confidence = 0.9 }]
+        };
+        File.WriteAllText(leftPath, ThesisJson.Serialize(profile));
+        File.WriteAllText(rightPath, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["profile", "diff", "--left", leftPath, "--right", rightPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(false, result.ProfileDiff!.HasChanges);
+        AssertEqual(0, result.ProfileDiff.Changes.Count);
+    }
+
+    static void CliProfileDiffValidatesInputs()
+    {
+        using var temp = new TempDirectory();
+        var malformedProfile = Path.Combine(temp.Path, "bad-profile.json");
+        var profile = Path.Combine(temp.Path, "profile.json");
+        File.WriteAllText(malformedProfile, "{");
+        File.WriteAllText(profile, ThesisJson.Serialize(new TemplateProfile()));
+
+        var missing = RunCli(["profile", "diff", "--left", profile]);
+        AssertEqual(1, missing.ExitCode);
+        AssertEqual("missing_option", missing.Result.Diagnostics[0].Code);
+
+        var malformed = RunCli(["profile", "diff", "--left", malformedProfile, "--right", profile]);
+        AssertEqual(1, malformed.ExitCode);
+        AssertEqual("profile_invalid", malformed.Result.Diagnostics[0].Code);
+        AssertEqual(Path.GetFullPath(malformedProfile), malformed.Result.Diagnostics[0].Path);
+    }
+
 }

@@ -87,6 +87,8 @@ public sealed class CliResult
 
     public ProfileExplanation? ProfileExplanation { get; set; }
 
+    public ProfileDiff? ProfileDiff { get; set; }
+
     public List<OperationCatalogItem> OperationsCatalog { get; set; } = [];
 
     public OperationRequest? OperationSample { get; set; }
@@ -171,6 +173,30 @@ public sealed class ProfileRisk
     public string Severity { get; set; } = "info";
 
     public string Code { get; set; } = "info";
+
+    public string Message { get; set; } = "";
+}
+
+public sealed class ProfileDiff
+{
+    public string LeftProfilePath { get; set; } = "";
+
+    public string RightProfilePath { get; set; } = "";
+
+    public bool HasChanges { get; set; }
+
+    public List<ProfileDiffChange> Changes { get; set; } = [];
+}
+
+public sealed class ProfileDiffChange
+{
+    public string Kind { get; set; } = "";
+
+    public string Path { get; set; } = "";
+
+    public string? Left { get; set; }
+
+    public string? Right { get; set; }
 
     public string Message { get; set; } = "";
 }
