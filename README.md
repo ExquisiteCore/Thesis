@@ -114,6 +114,16 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
 request.json 中的单次操作参数 > profileOverrides/覆盖 JSON > profile.json > 工具默认规则
 ```
 
+## 查看 profile.json
+
+项目内置了一个静态查看页面：
+
+```text
+profile-viewer/index.html
+```
+
+直接用浏览器打开该文件，选择或拖入 `profile.json`，即可查看模板画像概览、页面设置、样式角色、角色规则、格式簇、表格策略、诊断信息和原始 JSON。该页面只在浏览器本地解析文件，不上传数据。
+
 ## 注意事项
 
 - 纯 OpenXML 修改无法计算真实页面布局。

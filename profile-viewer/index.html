@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Profile JSON 查看器</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="workspace">
+      <aside class="sidebar" aria-label="profile 文件载入区">
+        <div class="brand">
+          <span class="mark">T</span>
+          <div>
+            <h1>Profile 查看器</h1>
+            <p>本地解析 Thesis profile.json</p>
+          </div>
+        </div>
+
+        <label id="dropZone" class="drop-zone" for="fileInput">
+          <input id="fileInput" type="file" accept="application/json,.json">
+          <span class="upload-icon" aria-hidden="true">JSON</span>
+          <strong>选择或拖入 profile.json</strong>
+          <small>文件只在浏览器本地解析，不上传。</small>
+        </label>
+
+        <div class="status-block">
+          <span>状态</span>
+          <strong id="loadStatus">等待文件</strong>
+        </div>
+
+        <div class="file-block">
+          <span>当前文件</span>
+          <strong id="fileName">未载入</strong>
+        </div>
+
+        <nav class="tabs" aria-label="查看区域">
+          <button class="active" type="button" data-tab="overview">概览</button>
+          <button type="button" data-tab="roles">角色</button>
+          <button type="button" data-tab="tables">表格</button>
+          <button type="button" data-tab="json">JSON</button>
+        </nav>
+      </aside>
+
+      <section class="content">
+        <section class="panel active" data-panel="overview">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Overview</p>
+              <h2>模板画像概览</h2>
+            </div>
+          </div>
+
+          <div class="metric-grid">
+            <article>
+              <span>类型</span>
+              <strong id="profileKind">-</strong>
+            </article>
+            <article>
+              <span>Schema</span>
+              <strong id="schemaVersion">-</strong>
+            </article>
+            <article>
+              <span>来源类型</span>
+              <strong id="sourceType">-</strong>
+            </article>
+            <article>
+              <span>最终化</span>
+              <strong id="finalization">-</strong>
+            </article>
+            <article>
+              <span>角色</span>
+              <strong id="roleCount">0</strong>
+            </article>
+            <article>
+              <span>角色规则</span>
+              <strong id="policyCount">0</strong>
+            </article>
+            <article>
+              <span>格式簇</span>
+              <strong id="clusterCount">0</strong>
+            </article>
+            <article>
+              <span>表格</span>
+              <strong id="tableCount">0</strong>
+            </article>
+            <article>
+              <span>表格原型</span>
+              <strong id="archetypeCount">0</strong>
+            </article>
+            <article>
+              <span>诊断</span>
+              <strong id="diagnosticCount">0</strong>
+            </article>
+          </div>
+
+          <div class="info-grid">
+            <section>
+              <h3>来源文档</h3>
+              <p id="sourceFile">-</p>
+            </section>
+            <section>
+              <h3>页面尺寸</h3>
+              <p id="pageSize">-</p>
+            </section>
+            <section>
+              <h3>页边距</h3>
+              <p id="pageMargins">-</p>
+            </section>
+            <section>
+              <h3>页眉页脚</h3>
+              <p id="headerFooter">-</p>
+            </section>
+          </div>
+
+          <section class="diagnostics">
+            <h3>诊断信息</h3>
+            <ul id="diagnosticsList"></ul>
+          </section>
+        </section>
+
+        <section class="panel" data-panel="roles">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Roles</p>
+              <h2>样式角色与规则</h2>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>角色</th>
+                  <th>样式 ID</th>
+                  <th>样式名</th>
+                  <th>置信度</th>
+                  <th>对齐</th>
+                  <th>字号</th>
+                  <th>字体</th>
+                </tr>
+              </thead>
+              <tbody id="rolesBody"></tbody>
+            </table>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>规则角色</th>
+                  <th>优先级</th>
+                  <th>置信度</th>
+                  <th>样式匹配</th>
+                  <th>大纲级别</th>
+                  <th>文本模式</th>
+                </tr>
+              </thead>
+              <tbody id="policiesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="tables">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Tables</p>
+              <h2>表格策略与格式簇</h2>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>置信度</th>
+                  <th>行数</th>
+                  <th>列数</th>
+                  <th>宽度</th>
+                  <th>对齐</th>
+                  <th>边框</th>
+                </tr>
+              </thead>
+              <tbody id="tablesBody"></tbody>
+            </table>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>簇 ID</th>
+                  <th>角色提示</th>
+                  <th>数量</th>
+                  <th>置信度</th>
+                  <th>样式</th>
+                  <th>行距</th>
+                  <th>首行缩进</th>
+                </tr>
+              </thead>
+              <tbody id="clustersBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="json">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Raw JSON</p>
+              <h2>原始 JSON 与搜索</h2>
+            </div>
+          </div>
+
+          <div class="json-layout">
+            <aside class="search-box">
+              <label for="searchInput">搜索字段或值</label>
+              <input id="searchInput" type="search" placeholder="例如 references、margin、tableFormat">
+              <div id="searchResults" class="search-results">
+                <p class="muted">输入关键词后显示匹配路径。</p>
+              </div>
+            </aside>
+            <pre id="rawJson" class="raw-json">{}</pre>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
