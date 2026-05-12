@@ -61,6 +61,10 @@ internal sealed class OpenXmlTargetResolver
             "paragraphIndex" => ResolveParagraphIndex(targetObject),
             "paragraphText" => ResolveParagraphText(targetObject, options),
             "runIndex" => ResolveRunIndex(targetObject),
+            "paragraphId" => ResolveParagraphId(targetObject),
+            "headingPath" => ResolveHeadingPath(targetObject, options),
+            "within" => ResolveWithin(targetObject, options),
+            "format" => ResolveFormat(targetObject, options),
             "styleId" => ResolveStyleId(targetObject, options),
             "tableIndex" => ResolveTableIndex(targetObject),
             "tableCell" => ResolveTableCell(targetObject),
@@ -85,6 +89,93 @@ internal sealed class OpenXmlTargetResolver
 
         return TargetResolutionResult.FromMatches(
             [new ResolvedParagraphTarget(Paragraphs[index.Value], index.Value)]);
+    }
+
+    private TargetResolutionResult ResolveParagraphId(JsonObject target)
+    {
+        var id = GetString(target, "id", out var idError);
+        if (idError is not null || string.IsNullOrWhiteSpace(id) || !id.StartsWith('p'))
+        {
+            return TargetResolutionResult.Error(idError ?? "target_value_invalid");
+        }
+
+        return int.TryParse(id[1..], out var index)
+            ? ResolveParagraphIndex(new JsonObject { ["index"] = index })
+            : TargetResolutionResult.Error("target_value_invalid");
+    }
+
+    private TargetResolutionResult ResolveHeadingPath(JsonObject target, RunOptions options)
+    {
+        var pathNode = target["path"];
+        if (pathNode is not JsonArray path || path.Count == 0)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        var last = path.Last();
+        if (last is null)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        string text;
+        try
+        {
+            text = last.GetValue<string>();
+        }
+        catch (InvalidOperationException)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+        catch (FormatException)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        var matches = Paragraphs
+            .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+            .Where(candidate => string.Equals(candidate.Paragraph.InnerText, text, StringComparison.Ordinal))
+            .Select(candidate => (ResolvedTarget)new ResolvedParagraphTarget(candidate.Paragraph, candidate.Index))
+            .ToList();
+        return ValidateMatchCount(matches, options);
+    }
+
+    private TargetResolutionResult ResolveWithin(JsonObject target, RunOptions options)
+    {
+        var scopeNode = target["scope"];
+        var targetNode = target["target"];
+        if (scopeNode is null || targetNode is null)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        var scope = Resolve(scopeNode, new RunOptions { RequireSingleMatch = false, CreateSnapshot = false, StopOnError = true });
+        if (!scope.Success)
+        {
+            return TargetResolutionResult.Error(scope.ErrorCode!);
+        }
+
+        var allowed = scope.Matches
+            .OfType<ResolvedParagraphTarget>()
+            .Select(match => match.ParagraphIndex)
+            .ToHashSet();
+        if (allowed.Count == 0)
+        {
+            return TargetResolutionResult.Error("target_not_found");
+        }
+
+        var inner = Resolve(targetNode, new RunOptions { RequireSingleMatch = false, CreateSnapshot = false, StopOnError = true });
+        if (!inner.Success)
+        {
+            return TargetResolutionResult.Error(inner.ErrorCode!);
+        }
+
+        var matches = inner.Matches
+            .OfType<ResolvedParagraphTarget>()
+            .Where(match => allowed.Contains(match.ParagraphIndex))
+            .Cast<ResolvedTarget>()
+            .ToList();
+        return ValidateMatchCount(matches, options);
     }
 
     private TargetResolutionResult ResolveParagraphText(JsonObject target, RunOptions options)
@@ -120,6 +211,28 @@ internal sealed class OpenXmlTargetResolver
             return TargetResolutionResult.Error("target_value_invalid");
         }
 
+        return ValidateMatchCount(matches, options);
+    }
+
+    private TargetResolutionResult ResolveFormat(JsonObject target, RunOptions options)
+    {
+        var formatNode = target["format"];
+        if (formatNode is not JsonObject format)
+        {
+            return TargetResolutionResult.Error("target_value_invalid");
+        }
+
+        var match = CreateFormatMatch(format, out var error);
+        if (error is not null)
+        {
+            return TargetResolutionResult.Error(error);
+        }
+
+        var matches = Paragraphs
+            .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+            .Where(candidate => FormatMatches(candidate.Paragraph, match))
+            .Select(candidate => (ResolvedTarget)new ResolvedParagraphTarget(candidate.Paragraph, candidate.Index))
+            .ToList();
         return ValidateMatchCount(matches, options);
     }
 
@@ -625,6 +738,64 @@ internal sealed class OpenXmlTargetResolver
             && RangeMatches(ReadIndentTwips(indentation?.FirstLine), match.FirstLineIndentTwips)
             && RangeMatches(ReadIndentTwips(indentation?.Left), match.LeftIndentTwips)
             && RangeMatches(ReadIndentTwips(indentation?.Right), match.RightIndentTwips);
+    }
+
+    private static ProfileRoleFormatMatch? CreateFormatMatch(JsonObject format, out string? error)
+    {
+        error = null;
+        return new ProfileRoleFormatMatch
+        {
+            StyleId = GetString(format, "styleId", out error),
+            Alignment = error is null ? GetString(format, "alignment", out error) : null,
+            FontSizeHalfPoints = error is null ? GetString(format, "fontSizeHalfPoints", out error) : null,
+            Bold = error is null ? GetBool(format, "bold", out error) : null,
+            Italic = error is null ? GetBool(format, "italic", out error) : null,
+            LineSpacing = error is null ? GetString(format, "lineSpacing", out error) : null,
+            LineSpacingRule = error is null ? GetString(format, "lineSpacingRule", out error) : null,
+            FirstLineIndentTwips = error is null ? CreateRange(format["firstLineIndentTwips"], out error) : null,
+            LeftIndentTwips = error is null ? CreateRange(format["leftIndentTwips"], out error) : null,
+            RightIndentTwips = error is null ? CreateRange(format["rightIndentTwips"], out error) : null
+        };
+    }
+
+    private static IntRangeMatch? CreateRange(JsonNode? node, out string? error)
+    {
+        error = null;
+        if (node is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (node is JsonValue)
+            {
+                return new IntRangeMatch { Exact = node.GetValue<int>() };
+            }
+
+            if (node is not JsonObject obj)
+            {
+                error = "target_value_invalid";
+                return null;
+            }
+
+            return new IntRangeMatch
+            {
+                Exact = GetInt(obj, "exact", out error),
+                Min = error is null ? GetInt(obj, "min", out error) : null,
+                Max = error is null ? GetInt(obj, "max", out error) : null
+            };
+        }
+        catch (InvalidOperationException)
+        {
+            error = "target_value_invalid";
+            return null;
+        }
+        catch (FormatException)
+        {
+            error = "target_value_invalid";
+            return null;
+        }
     }
 
     private static RunFormatFacts ReadFirstTextRunFormat(Paragraph paragraph)

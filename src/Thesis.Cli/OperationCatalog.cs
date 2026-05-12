@@ -10,6 +10,10 @@ internal static class OperationCatalog
         Item("resolveTarget", "Preview target resolution without editing the document.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange", "tableIndex", "tableCell"], ["target"]),
         Item("replaceParagraphText", "Replace the complete text of matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"]),
         Item("setParagraphStyle", "Apply an existing paragraph style to matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"], requiredFormat: ["styleId"]),
+        Item("setParagraphFormat", "Apply paragraph and run formatting to matched paragraphs.", ["paragraphIndex", "paragraphId", "paragraphText", "headingPath", "within", "format", "styleId", "role", "sectionRange"], ["target"], optionalFormat: ["styleId", "alignment", "spacingBeforeTwips", "spacingAfterTwips", "lineSpacing", "lineSpacingRule", "firstLineIndentTwips", "bold", "italic", "fontSizeHalfPoints", "eastAsiaFont"]),
+        Item("copyParagraphFormat", "Copy paragraph formatting from a source paragraph target.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["source"]),
+        Item("clearDirectFormatting", "Clear direct paragraph and/or run formatting from matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"], optionalFormat: ["scope"]),
+        Item("setPageBreakBefore", "Set or clear paragraph page-break-before.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], optionalFormat: ["value"]),
         Item("setRunFormat", "Apply run-level formatting to one matched run.", ["runText"], ["target"], optionalFormat: ["bold", "italic", "fontSizeHalfPoints"]),
         Item("insertParagraph", "Insert a paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "text"], optionalFormat: ["position", "styleId", "alignment", "runFormat", "spacing"]),
         Item("deleteParagraph", "Delete matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
@@ -30,7 +34,11 @@ internal static class OperationCatalog
         Item("insertTableColumn", "Insert a table column before or after an existing column.", ["tableIndex"], ["target"], requiredFormat: ["columnIndex"], optionalFormat: ["position", "widthTwips", "cells"]),
         Item("deleteTableColumn", "Delete a table column.", ["tableIndex"], ["target"], requiredFormat: ["columnIndex"]),
         Item("applyThreeLineTable", "Apply academic three-line table borders.", ["tableIndex"], ["target"]),
-        Item("insertImage", "Insert an inline image paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["imagePath"], optionalFormat: ["position", "widthEmu", "heightEmu", "altText", "alignment"])
+        Item("insertImage", "Insert an inline image paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["imagePath"], optionalFormat: ["position", "widthEmu", "heightEmu", "altText", "alignment"]),
+        Item("insertCaption", "Insert a thesis figure or table caption near a paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "text"], optionalFormat: ["position", "styleId", "alignment"]),
+        Item("setHeaderFooterText", "Set section header or footer text.", [], ["text"], optionalFormat: ["kind", "type"]),
+        Item("insertPageNumber", "Insert a PAGE field in a header or footer.", [], [], optionalFormat: ["kind", "type", "alignment"]),
+        Item("normalizeReferences", "Insert a basic numbered reference placeholder after a references heading when missing.", ["paragraphIndex", "paragraphText", "role"], ["target"], optionalFormat: ["position"])
     ];
 
     public static List<OperationCatalogItem> List()
@@ -45,6 +53,10 @@ internal static class OperationCatalog
             "resolveTarget" => Request(op, Operation(op, target: ParagraphIndexTarget(0))),
             "replaceParagraphText" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "替换后的段落")),
             "setParagraphStyle" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("styleId", "BodyText")))),
+            "setParagraphFormat" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("alignment", "center"), ("fontSizeHalfPoints", "28"), ("bold", true)))),
+            "copyParagraphFormat" => Request(op, Operation(op, target: ParagraphIndexTarget(1), format: Obj(("source", ParagraphIndexTarget(0))))),
+            "clearDirectFormatting" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("scope", "paragraphAndRuns")))),
+            "setPageBreakBefore" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("value", true)))),
             "setRunFormat" => Request(op, Operation(op, target: Obj(("type", "runText"), ("text", "关键词")), format: Obj(("bold", true), ("fontSizeHalfPoints", "24")))),
             "insertParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "新增段落", format: Obj(("position", "after")))),
             "deleteParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(1))),
@@ -66,6 +78,10 @@ internal static class OperationCatalog
             "deleteTableColumn" => Request(op, Operation(op, target: TableIndexTarget(0), format: Obj(("columnIndex", 1)))),
             "applyThreeLineTable" => Request(op, Operation(op, target: TableIndexTarget(0))),
             "insertImage" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("imagePath", "figure.png"), ("position", "after"), ("widthEmu", 3600000), ("heightEmu", 2400000)))),
+            "insertCaption" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "图1-1 系统结构图", format: Obj(("position", "after"), ("alignment", "center")))),
+            "setHeaderFooterText" => Request(op, Operation(op, text: "论文题目", format: Obj(("kind", "header"), ("type", "default")))),
+            "insertPageNumber" => Request(op, Operation(op, format: Obj(("kind", "footer"), ("type", "default"), ("alignment", "center")))),
+            "normalizeReferences" => Request(op, Operation(op, target: Obj(("type", "paragraphText"), ("text", "参考文献"), ("match", "exact")), format: Obj(("position", "afterHeading")))),
             _ => null
         };
     }

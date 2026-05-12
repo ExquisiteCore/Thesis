@@ -106,6 +106,121 @@ internal static partial class Program
         AssertBytesEqual(before, File.ReadAllBytes(context.Paths.WorkingDocument));
     }
 
+    static void CliRunExecuteAppliesParagraphFormatOperations()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "format-title",
+                  "op": "setParagraphFormat",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "format": {
+                    "styleId": "Heading1",
+                    "alignment": "center",
+                    "spacingBeforeTwips": 240,
+                    "spacingAfterTwips": 120,
+                    "lineSpacing": "360",
+                    "lineSpacingRule": "atLeast",
+                    "firstLineIndentTwips": 0,
+                    "bold": true,
+                    "fontSizeHalfPoints": "28",
+                    "eastAsiaFont": "黑体"
+                  }
+                },
+                {
+                  "id": "copy-title-format",
+                  "op": "copyParagraphFormat",
+                  "target": { "type": "paragraphIndex", "index": 1 },
+                  "format": {
+                    "source": { "type": "paragraphIndex", "index": 0 }
+                  }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        AssertEqual("applied", result.Operations[1].Status);
+
+        var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+        AssertEqual("Heading1", map.Paragraphs[0].StyleId);
+        AssertEqual("center", map.Paragraphs[0].Format.Alignment);
+        AssertEqual(240, map.Paragraphs[0].Format.SpacingBeforeTwips);
+        AssertEqual(120, map.Paragraphs[0].Format.SpacingAfterTwips);
+        AssertEqual("360", map.Paragraphs[0].Format.LineSpacing);
+        AssertEqual("atleast", map.Paragraphs[0].Format.LineSpacingRule);
+        AssertEqual(true, map.Paragraphs[0].Runs[0].Bold);
+        AssertEqual("28", map.Paragraphs[0].Runs[0].FontSizeHalfPoints);
+        AssertEqual("黑体", map.Paragraphs[0].Runs[0].EastAsiaFont);
+        AssertEqual("Heading1", map.Paragraphs[1].StyleId);
+        AssertEqual("center", map.Paragraphs[1].Format.Alignment);
+        AssertEqual("28", map.Paragraphs[1].Runs[0].FontSizeHalfPoints);
+    }
+
+    static void CliRunExecuteClearsDirectFormattingAndSetsPageBreakBefore()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "clear-direct",
+                  "op": "clearDirectFormatting",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "format": { "scope": "paragraphAndRuns" }
+                },
+                {
+                  "id": "page-break-before",
+                  "op": "setPageBreakBefore",
+                  "target": { "type": "paragraphIndex", "index": 1 },
+                  "format": { "value": true }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("applied", result.Operations[0].Status);
+        AssertEqual("applied", result.Operations[1].Status);
+
+        using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(context.Paths.WorkingDocument, false);
+        var mainPart = document.MainDocumentPart ?? throw new UnreachableException("Missing main document part.");
+        var mainDocument = mainPart.Document ?? throw new UnreachableException("Missing main document.");
+        var body = mainDocument.Body ?? throw new UnreachableException("Missing document body.");
+        var paragraphs = body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>().ToList();
+        AssertEqual(null, paragraphs[0].ParagraphProperties?.Justification);
+        AssertEqual(null, paragraphs[0].ParagraphProperties?.SpacingBetweenLines);
+        AssertEqual(false, paragraphs[0].Descendants<DocumentFormat.OpenXml.Wordprocessing.RunProperties>().Any());
+        AssertEqual(true, paragraphs[1].ParagraphProperties?.PageBreakBefore is not null);
+    }
+
     static void CliRunExecuteInsertsAndDeletesTableRows()
     {
         using var temp = new TempDirectory();
@@ -255,14 +370,78 @@ internal static partial class Program
         }
 
         using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(context.Paths.WorkingDocument, false);
-        var body = document.MainDocumentPart!.Document.Body!;
+        var mainPart = document.MainDocumentPart ?? throw new UnreachableException("Missing main document part.");
+        var mainDocument = mainPart.Document ?? throw new UnreachableException("Missing main document.");
+        var body = mainDocument.Body ?? throw new UnreachableException("Missing document body.");
         AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Break>().Any(element =>
             element.Type?.Value == DocumentFormat.OpenXml.Wordprocessing.BreakValues.Page));
         AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.BookmarkStart>().Any(element =>
             element.Name?.Value == "abstract_anchor"));
         AssertEqual(true, body.Descendants<DocumentFormat.OpenXml.Wordprocessing.FootnoteReference>().Any());
-        AssertEqual(true, document.MainDocumentPart.FootnotesPart!.Footnotes!.Elements<DocumentFormat.OpenXml.Wordprocessing.Footnote>().Any(note =>
+        AssertEqual(true, mainPart.FootnotesPart!.Footnotes!.Elements<DocumentFormat.OpenXml.Wordprocessing.Footnote>().Any(note =>
             note.InnerText.Contains("脚注内容", StringComparison.Ordinal)));
+    }
+
+    static void CliRunExecuteAppliesThesisDocumentOperations()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "execute",
+              "options": {
+                "createSnapshot": false
+              },
+              "operations": [
+                {
+                  "id": "caption",
+                  "op": "insertCaption",
+                  "target": { "type": "paragraphText", "text": "第一章 绪论", "match": "exact" },
+                  "text": "图1-1 系统结构图",
+                  "format": { "position": "after", "styleId": "Normal", "alignment": "center" }
+                },
+                {
+                  "id": "header",
+                  "op": "setHeaderFooterText",
+                  "text": "论文题目",
+                  "format": { "kind": "header", "type": "default" }
+                },
+                {
+                  "id": "page-number",
+                  "op": "insertPageNumber",
+                  "format": { "kind": "footer", "type": "default", "alignment": "center" }
+                },
+                {
+                  "id": "cleanup-references",
+                  "op": "normalizeReferences",
+                  "target": { "type": "paragraphText", "text": "参考文献", "match": "exact" },
+                  "format": { "position": "afterHeading" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        foreach (var operation in result.Operations)
+        {
+            AssertEqual("applied", operation.Status);
+        }
+
+        using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(context.Paths.WorkingDocument, false);
+        var mainPart = document.MainDocumentPart ?? throw new UnreachableException("Missing main document part.");
+        AssertEqual(true, mainPart.HeaderParts.Any(part => part.Header!.InnerText.Contains("论文题目", StringComparison.Ordinal)));
+        AssertEqual(true, mainPart.FooterParts.Any(part => part.Footer!.Descendants<DocumentFormat.OpenXml.Wordprocessing.FieldCode>().Any(code =>
+            code.Text.Contains("PAGE", StringComparison.Ordinal))));
+        var map = OpenXmlDocumentInspector.Inspect(context.Paths.WorkingDocument);
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "图1-1 系统结构图" && paragraph.Format.Alignment == "center"));
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "[1] "));
     }
 
     static void CliRunExecuteInsertsAndDeletesTableColumns()

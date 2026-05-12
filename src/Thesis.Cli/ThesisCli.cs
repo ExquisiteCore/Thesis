@@ -96,6 +96,11 @@ public static class ThesisCli
             return result;
         }
 
+        if (args is ["validate", .. var validateArgs])
+        {
+            return ValidateWorkspace(validateArgs);
+        }
+
         if (args is ["profile", "extract", .. var profileArgs])
         {
             return ExtractProfile(profileArgs);
@@ -142,6 +147,47 @@ public static class ThesisCli
         }
 
         throw new CliException("unknown_command", "Unknown command.");
+    }
+
+    private static CliResult ValidateWorkspace(string[] args)
+    {
+        var workspace = RequiredOption(args, "--workspace");
+        var profilePath = OptionalOption(args, "--profile");
+        var inspect = SessionLifecycle.Inspect(workspace);
+        if (!string.Equals(inspect.Status, "success", StringComparison.OrdinalIgnoreCase))
+        {
+            return inspect;
+        }
+
+        var documentPath = inspect.Document
+            ?? throw new CliException("working_doc_missing", "Workspace inspect did not return a working document.");
+        if (!OpenXmlDocumentInspector.TryInspect(documentPath, out var map, out var diagnostic) || map is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Workspace = inspect.Workspace,
+                Document = documentPath,
+                Diagnostics = diagnostic is null ? [] : [diagnostic]
+            };
+        }
+
+        profilePath ??= SessionPaths.FromWorkspace(workspace).ProfileJson;
+        if (!TryReadProfile(profilePath, out var profile, out var profileError))
+        {
+            return profileError!;
+        }
+
+        NormalizeProfile(profile!);
+        return new CliResult
+        {
+            Status = "success",
+            Workspace = inspect.Workspace,
+            Document = documentPath,
+            Session = inspect.Session,
+            Snapshots = inspect.Snapshots,
+            Validation = ProfileComplianceValidator.Validate(map, profile!)
+        };
     }
 
     private static CliResult BuildFinalizationPlan(string[] args)

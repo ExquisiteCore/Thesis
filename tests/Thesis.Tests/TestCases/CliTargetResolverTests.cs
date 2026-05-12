@@ -615,6 +615,69 @@ internal static partial class Program
         AssertEqual("第一章 绪论", result.Operations[0].Matches[0].Preview);
     }
 
+    static void CliRunResolvesAdvancedTargets()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedFormatMatchDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "dryRun",
+              "operations": [
+                {
+                  "id": "paragraph-id",
+                  "op": "resolveTarget",
+                  "target": { "type": "paragraphId", "id": "p1" }
+                },
+                {
+                  "id": "heading-path",
+                  "op": "resolveTarget",
+                  "target": { "type": "headingPath", "path": ["本文围绕标题样式展开说明。"] }
+                },
+                {
+                  "id": "within",
+                  "op": "resolveTarget",
+                  "target": {
+                    "type": "within",
+                    "scope": {
+                      "type": "sectionRange",
+                      "start": { "type": "paragraphIndex", "index": 0 },
+                      "end": { "type": "paragraphIndex", "index": 2 },
+                      "includeStart": true,
+                      "includeEnd": true
+                    },
+                    "target": { "type": "paragraphText", "text": "字号差异", "match": "contains" }
+                  }
+                },
+                {
+                  "id": "format-target",
+                  "op": "resolveTarget",
+                  "target": {
+                    "type": "format",
+                    "format": {
+                      "alignment": "center",
+                      "bold": true,
+                      "fontSizeHalfPoints": "21"
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("p1", result.Operations[0].Matches[0].Id);
+        AssertEqual("本文围绕标题样式展开说明。", result.Operations[1].Matches[0].Preview);
+        AssertEqual("p2", result.Operations[2].Matches[0].Id);
+        AssertEqual("p1", result.Operations[3].Matches[0].Id);
+    }
+
     static void CliRunResolveTargetFindsTableCells()
     {
         using var temp = new TempDirectory();

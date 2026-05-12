@@ -89,6 +89,8 @@ public sealed class CliResult
 
     public ProfileDiff? ProfileDiff { get; set; }
 
+    public ValidationReport? Validation { get; set; }
+
     public List<OperationCatalogItem> OperationsCatalog { get; set; } = [];
 
     public OperationRequest? OperationSample { get; set; }
@@ -199,6 +201,19 @@ public sealed class ProfileDiffChange
     public string? Right { get; set; }
 
     public string Message { get; set; } = "";
+}
+
+public sealed class ValidationReport
+{
+    public bool Compliant { get; set; }
+
+    public int CheckedParagraphs { get; set; }
+
+    public int CheckedTables { get; set; }
+
+    public List<Diagnostic> Diagnostics { get; set; } = [];
+
+    public List<ThesisOperation> SuggestedOperations { get; set; } = [];
 }
 
 public sealed class SessionState

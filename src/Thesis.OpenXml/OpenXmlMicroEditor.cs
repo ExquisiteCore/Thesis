@@ -143,6 +143,10 @@ public static partial class OpenXmlMicroEditor
             "resolveTarget" => ResolveTarget(context, options, operation),
             "replaceParagraphText" => ReplaceParagraphText(context, options, operation, writeChanges),
             "setParagraphStyle" => SetParagraphStyle(context, options, operation, writeChanges),
+            "setParagraphFormat" => SetParagraphFormat(context, options, operation, writeChanges),
+            "copyParagraphFormat" => CopyParagraphFormat(context, options, operation, writeChanges),
+            "clearDirectFormatting" => ClearDirectFormatting(context, options, operation, writeChanges),
+            "setPageBreakBefore" => SetPageBreakBefore(context, options, operation, writeChanges),
             "setRunFormat" => SetRunFormat(context, operation, writeChanges),
             "insertParagraph" => InsertParagraph(context, options, operation, writeChanges),
             "deleteParagraph" => DeleteParagraph(context, options, operation, writeChanges),
@@ -164,6 +168,10 @@ public static partial class OpenXmlMicroEditor
             "deleteTableColumn" => DeleteTableColumn(context, options, operation, writeChanges),
             "applyThreeLineTable" => ApplyThreeLineTable(context, options, operation, writeChanges),
             "insertImage" => InsertImage(context, options, operation, writeChanges),
+            "insertCaption" => InsertCaption(context, options, operation, writeChanges),
+            "setHeaderFooterText" => SetHeaderFooterText(context, operation, writeChanges),
+            "insertPageNumber" => InsertPageNumber(context, operation, writeChanges),
+            "normalizeReferences" => NormalizeReferences(context, options, operation, writeChanges),
             null or "" => OperationError(operation, "operation_missing"),
             _ => OperationError(operation, "operation_unknown")
         };
