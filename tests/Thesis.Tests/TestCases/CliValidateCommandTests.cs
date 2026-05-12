@@ -286,4 +286,65 @@ internal static partial class Program
             operation.Role == "toc.title"
             && operation.Target?["index"]?.GetValue<int>() == 3));
     }
+
+    static void CliValidateTreatsAppendixRoleAsOptional()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "paper.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:pPr><w:pStyle w:val="Normal"/><w:spacing w:line="360"/><w:ind w:firstLine="480"/></w:pPr><w:r><w:rPr><w:rFonts w:eastAsia="宋体"/><w:sz w:val="24"/></w:rPr><w:t>正文段落</w:t></w:r></w:p>
+            """);
+        var profile = new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "appendix",
+                    StyleId = "Heading1",
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "Heading1",
+                        RunFormat = new RunFormatSample { FontSizeHalfPoints = "32" }
+                    },
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence { ParagraphIndex = 99, StyleId = "Heading1", TextPreview = "附录1：" }
+                    ]
+                }
+            ],
+            RolePolicies =
+            [
+                new ProfileRolePolicy
+                {
+                    Role = "appendix",
+                    AppliesTo = "paragraph",
+                    Priority = 75,
+                    Match = new ProfileRoleMatch
+                    {
+                        StyleIds = ["Heading1"],
+                        TextPatterns = ["^附录1：$"]
+                    },
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "Heading1",
+                        RunFormat = new RunFormatSample { FontSizeHalfPoints = "32" }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(profilePath, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, result.Validation!.Compliant);
+        AssertEqual(false, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "profile_role_target_unresolved"
+            && diagnostic.Path == "roles[appendix]"));
+    }
 }

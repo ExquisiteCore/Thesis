@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Profile JSON 查看器</title>
+  <title>Thesis 规则 JSON 查看器</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="shell">
     <section class="workspace">
-      <aside class="sidebar" aria-label="profile 文件载入区">
+      <aside class="sidebar" aria-label="规则 JSON 文件载入区">
         <div class="brand">
           <span class="mark">T</span>
           <div>
-            <h1>Profile 查看器</h1>
-            <p>本地解析 Thesis profile.json</p>
+            <h1>规则查看器</h1>
+            <p>本地解析 Thesis 规则 JSON</p>
           </div>
         </div>
 
         <label id="dropZone" class="drop-zone" for="fileInput">
           <input id="fileInput" type="file" accept="application/json,.json">
           <span class="upload-icon" aria-hidden="true">JSON</span>
-          <strong>选择或拖入 profile.json</strong>
-          <small>文件只在浏览器本地解析，不上传。</small>
+          <strong>选择或拖入 profile / project-rules / final-rules</strong>
+          <small>JSON 只在浏览器本地解析，不上传。</small>
         </label>
 
         <div class="status-block">
@@ -48,7 +48,7 @@
           <div class="section-head">
             <div>
               <p class="eyebrow">Overview</p>
-              <h2>模板画像概览</h2>
+              <h2>规则概览</h2>
             </div>
           </div>
 
@@ -72,6 +72,10 @@
             <article>
               <span>角色</span>
               <strong id="roleCount">0</strong>
+            </article>
+            <article>
+              <span>角色别名</span>
+              <strong id="aliasCount">0</strong>
             </article>
             <article>
               <span>角色规则</span>

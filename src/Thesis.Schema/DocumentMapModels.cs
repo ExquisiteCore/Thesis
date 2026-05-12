@@ -19,6 +19,10 @@ public sealed class DocumentMap
     public List<DocumentSection> Sections { get; set; } = [];
 
     public List<DocumentTable> Tables { get; set; } = [];
+
+    public List<DocumentComment> Comments { get; set; } = [];
+
+    public List<DocumentRequirementHint> RequirementHints { get; set; } = [];
 }
 
 public sealed class DocumentParagraph
@@ -252,3 +256,22 @@ public sealed class TableCellMarginsSample
     public int? LeftTwips { get; set; }
 }
 
+public sealed class DocumentComment
+{
+    public string? Id { get; set; }
+
+    public string? Author { get; set; }
+
+    public string Text { get; set; } = "";
+}
+
+public sealed class DocumentRequirementHint
+{
+    public string Source { get; set; } = "";
+
+    public int? ParagraphIndex { get; set; }
+
+    public string? CommentId { get; set; }
+
+    public string Text { get; set; } = "";
+}

@@ -38,7 +38,7 @@ internal sealed partial class OpenXmlTargetResolver
             return TargetResolutionResult.Error("target_value_invalid");
         }
 
-        var resolvedRole = ProfileRoleResolver.ResolveAlias(role, _profileOverrides, out var aliasError);
+        var resolvedRole = ProfileRoleResolver.ResolveAlias(role, _profile, _profileOverrides, out var aliasError);
         if (aliasError is not null)
         {
             return TargetResolutionResult.Error(aliasError);

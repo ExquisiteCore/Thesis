@@ -18,6 +18,8 @@ public sealed class TemplateProfile
 
     public List<ProfileStyleRole> StyleRoles { get; set; } = [];
 
+    public List<ProfileRoleAlias> RoleAliases { get; set; } = [];
+
     public List<ProfileRolePolicy> RolePolicies { get; set; } = [];
 
     public List<ProfileFormatCluster> FormatClusters { get; set; } = [];
@@ -61,6 +63,13 @@ public sealed class ProfileStyleRole
     public ParagraphFormatSample? Format { get; set; }
 
     public List<ProfileParagraphEvidence> Evidence { get; set; } = [];
+}
+
+public sealed class ProfileRoleAlias
+{
+    public string Alias { get; set; } = "";
+
+    public string Role { get; set; } = "";
 }
 
 public sealed class ProfileRolePolicy
@@ -238,4 +247,3 @@ public sealed class ProfileSourceEvidence
 
     public List<ProfileParagraphEvidence> ParagraphSamples { get; set; } = [];
 }
-

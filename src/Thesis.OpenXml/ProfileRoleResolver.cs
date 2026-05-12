@@ -40,6 +40,19 @@ internal static class ProfileRoleResolver
         return resolvedRole;
     }
 
+    public static string ResolveAlias(string role, TemplateProfile? profile, JsonObject? profileOverrides, out string? error)
+    {
+        var overrideRole = ResolveAlias(role, profileOverrides, out error);
+        if (error is not null || !string.Equals(overrideRole, role, StringComparison.OrdinalIgnoreCase))
+        {
+            return overrideRole;
+        }
+
+        var profileAlias = profile?.RoleAliases?.FirstOrDefault(alias =>
+            string.Equals(alias.Alias, role, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(profileAlias?.Role) ? role : profileAlias.Role;
+    }
+
     public static List<ProfileStyleRole> FindRoles(
         TemplateProfile? profile,
         JsonObject? profileOverrides,
@@ -53,7 +66,7 @@ internal static class ProfileRoleResolver
             return [];
         }
 
-        var role = ResolveAlias(requestedRole, profileOverrides, out var aliasError);
+        var role = ResolveAlias(requestedRole, profile, profileOverrides, out var aliasError);
         if (aliasError is not null)
         {
             error = aliasError;
@@ -94,7 +107,7 @@ internal static class ProfileRoleResolver
             return null;
         }
 
-        var role = ResolveAlias(requestedRole, profileOverrides, out var aliasError);
+        var role = ResolveAlias(requestedRole, profile, profileOverrides, out var aliasError);
         if (aliasError is not null)
         {
             error = aliasError;

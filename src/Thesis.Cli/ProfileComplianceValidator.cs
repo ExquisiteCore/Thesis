@@ -72,6 +72,11 @@ internal static class ProfileComplianceValidator
             var resolvedParagraphs = ResolveRoleParagraphs(map, profile, role).ToList();
             if (resolvedParagraphs.Count == 0)
             {
+                if (IsOptionalAbsentRole(map, role.Role))
+                {
+                    continue;
+                }
+
                 report.Diagnostics.Add(new Diagnostic
                 {
                     Severity = "warning",
@@ -191,6 +196,12 @@ internal static class ProfileComplianceValidator
             .Where(paragraph => !ThesisTextHeuristics.IsLikelyTocLine(paragraph.Text))
             .Where(paragraph => predicate(paragraph.Text))
             .ToList();
+    }
+
+    private static bool IsOptionalAbsentRole(DocumentMap map, string role)
+    {
+        return string.Equals(role, "appendix", StringComparison.OrdinalIgnoreCase)
+            && ResolveSemanticRoleParagraphs(map, role).Count == 0;
     }
 
     private static bool RolePolicyMatches(DocumentParagraph paragraph, ProfileRolePolicy policy)

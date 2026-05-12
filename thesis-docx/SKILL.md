@@ -1,23 +1,23 @@
 ---
 name: thesis-docx
-description: 使用 Thesis DOCX CLI 根据学校论文模板提取 profile.json，并用内容 JSON、request JSON、profileOverrides 生成、检查、套格式和微调论文 DOCX。适用于论文生成、学校模板套用、格式检查、首行缩进、三线表、重复表头、参考文献、目录字段、页眉页脚和 Word/WPS 最终化。
+description: Use when using Thesis DOCX CLI to extract thesis template rules, merge project rule JSON, generate thesis DOCX files, validate formatting, or apply teacher feedback edits.
 ---
 
 # thesis-docx
 
-这是 Thesis DOCX CLI 的封装 skill。核心目标是让 agent 用学校模板和 JSON 请求稳定处理论文 DOCX，而不是手工改 XML。
+这是 Thesis DOCX CLI 的封装 skill。它的目标是把学校模板、项目级补充规则、论文内容和老师反馈都转成可重复执行的 JSON 流程。
 
 ## 基本原则
 
 - 默认只处理副本，不覆盖用户原始 `.docx`。
-- 先检查输入，再生成或修改，再校验，最后规划最终化。
-- 优先使用构建后的 exe：
+- 先检查模板和规则，再生成或修改，再校验，最后最终化。
+- 命令写法始终是 exe 后面直接跟参数。
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe
 ```
 
-- 如果 exe 不存在，先运行：
+如果 exe 不存在，先运行：
 
 ```powershell
 dotnet build ThesisTool.slnx
@@ -25,101 +25,111 @@ dotnet build ThesisTool.slnx
 
 ## 参数优先级
 
-生成或套格式时按下面优先级解释配置：
-
 ```text
-request.json 中的单次操作参数 > profileOverrides/覆盖 JSON > profile.json > 工具默认规则
+request.json 中的单次操作参数 > project-rules.json / final-rules.json > profile.json > 工具默认规则
 ```
 
-含义：
-
-- `profile.json`：从学校模板或已排版论文提取的默认格式画像。
-- `profileOverrides`：用户或上层系统提供的全局覆盖项，优先级高于模板画像。
-- `request.json`：本次具体操作，例如改某段首行缩进、某张表改三线表、替换参考文献。
+- `profile.json`：从学校模板或成品论文提取的基础格式画像。
+- `project-rules.json`：AI/人工补充的项目级规则，用来覆盖或扩展模板画像。
+- `final-rules.json`：`profile.json` 和 `project-rules.json` 合并后的最终规则，可作为 `--profile` 或 `generate --rules` 输入。
+- `request.json`：本次微调操作，例如改首行缩进、表格改三线表、替换参考文献。
 
 ## 标准流程
 
-### 1. 提取模板画像
+### 1. 检查模板正文和批注
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe inspect --doc "模板.docx"
+```
+
+读取 `documentMap.requirementHints` 和 `documentMap.comments`，把模板正文/批注里写到的格式要求整理为 `project-rules.json`。
+
+### 2. 提取 profile.json
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile extract --doc "模板.docx" --out ".analysis\profile.json"
-```
-
-随后查看画像说明：
-
-```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile explain --profile ".analysis\profile.json"
 ```
 
-### 2. 生成或修改论文副本
+### 3. 编写 project-rules.json
 
-已有论文时，用 `apply` 把 `request.json` 应用到副本：
+最小结构：
 
-```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc "source.docx" --profile ".analysis\profile.json" --request ".analysis\request.json" --out ".analysis\output.docx"
+```json
+{
+  "schemaVersion": "1.0",
+  "rulesKind": "projectRules",
+  "roleAliases": { "mainBody": "body" },
+  "pageSetup": {
+    "margins": { "leftTwips": 1701, "rightTwips": 1701 }
+  },
+  "roleFormats": {
+    "body": {
+      "firstLineIndentTwips": 480,
+      "lineSpacing": "360",
+      "fontSizeHalfPoints": "24",
+      "eastAsiaFont": "宋体"
+    }
+  }
+}
 ```
 
-如果需要交互式多步处理，先建立 workspace：
+### 4. 合并 final-rules.json
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe session init --doc "source.docx" --profile ".analysis\profile.json" --workspace ".analysis\workspace"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rules merge --profile ".analysis\profile.json" --project ".analysis\project-rules.json" --out ".analysis\final-rules.json"
 ```
 
-然后执行请求：
+### 5. 用 content.json 生成论文
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe run --workspace ".analysis\workspace" --request ".analysis\request.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\thesis.docx"
 ```
 
-### 3. 校验格式
+`content.json` 支持标题、作者、中英文摘要、关键词、章节、小节、表格、参考文献和致谢。
+
+### 6. 校验和最终化
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\output.docx" --profile ".analysis\profile.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize plan --doc ".analysis\thesis.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis.docx" --out ".analysis\final.docx"
 ```
 
-若校验报告给出 `suggestedOperations`，优先把这些操作整理进下一轮 `request.json`。
-
-### 4. 最终化
-
-先规划：
+### 7. 老师反馈后微调
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize plan --doc ".analysis\output.docx"
-```
-
-需要更新目录、字段、页码或真实分页时，最终化到副本：
-
-```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\output.docx" --out ".analysis\final.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\final.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\revised.docx"
 ```
 
 ## 常用操作
 
-先查看支持的操作：
-
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations list
-```
-
-生成某个操作的 JSON 示例：
-
-```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations sample --op setParagraphFormat
 ```
 
-常用操作包括：
-
 - `setParagraphFormat`：段落格式、首行缩进、段前段后、行距、对齐、字体字号。
-- `applyProfileRole`：按模板画像中的角色套格式。
-- `applyProfileTable`：按模板画像套表格格式。
-- `applyThreeLineTable`：把表格改为论文常用三线表。
+- `applyProfileRole`：按最终规则中的角色套格式。
+- `applyProfileTable`：按最终规则套表格格式。
+- `applyThreeLineTable`：把表格改为论文三线表。
 - `setTableRowHeader`：设置跨页重复表头。
 - `insertCaption`：插入图题或表题。
 - `insertTocField`：插入目录字段。
 - `replaceReferences` / `applyReferenceFormat` / `normalizeReferences`：处理参考文献。
 
+## Skill 放置和命名
+
+推荐把 skill 放到项目的 `Thesis` 目录：
+
+```text
+Thesis/thesis-docx/SKILL.md
+```
+
+技能名称只能包含小写字母、数字和连字符。正确示例：`thesis-docx`。不要使用大写、下划线、空格或中文名称。
+
 ## 判断标准
 
 - 可以离线保证：DOCX 结构、样式引用、段落格式、表格边框、重复表头、参考文献编号、目录字段标记。
 - 不能纯离线保证：真实分页、目录页码、孤行、跨页显示、自动“续表”标题。
-- 真实论文交付必须经过 Word/WPS 最终化和人工抽查。
+- 正式论文交付必须经过 Word/WPS 最终化和人工抽查。

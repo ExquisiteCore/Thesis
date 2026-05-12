@@ -71,4 +71,54 @@ assert.equal(tables[0].columns, "2");
 const results = searchJson(profile, "references");
 assert.equal(results.some((result) => result.path === "styleRoles[0].role"), true);
 
+const finalSummary = buildProfileSummary(profile, "final-rules.json");
+assert.equal(finalSummary.kind, "finalRules");
+
+const projectRules = {
+  schemaVersion: "1.0",
+  rulesKind: "projectRules",
+  roleAliases: { mainBody: "body" },
+  pageSetup: {
+    margins: { leftTwips: 1701 },
+  },
+  roleFormats: {
+    body: {
+      firstLineIndentTwips: 480,
+      lineSpacing: "360",
+      fontSizeHalfPoints: "24",
+      eastAsiaFont: "宋体",
+    },
+  },
+  tableDefault: {
+    widthTwips: 8307,
+    borders: {
+      top: { value: "single" },
+      left: { value: "nil" },
+    },
+  },
+  tableArchetypes: [
+    { name: "threeLine", confidence: 0.9, match: { columnCounts: [3] } },
+  ],
+  diagnostics: [{ severity: "info", code: "ai_rule" }],
+};
+
+const projectSummary = buildProfileSummary(projectRules, "project-rules.json");
+assert.equal(projectSummary.kind, "projectRules");
+assert.equal(projectSummary.sourceFile, "项目规则 JSON");
+assert.equal(projectSummary.roleCount, 1);
+assert.equal(projectSummary.aliasCount, 1);
+assert.equal(projectSummary.tableCount, 1);
+assert.equal(projectSummary.archetypeCount, 1);
+
+const projectRoleRows = getRoleRows(projectRules);
+assert.equal(projectRoleRows[0].role, "body");
+assert.equal(projectRoleRows[0].fontSize, "12 pt");
+assert.equal(projectRoleRows[0].eastAsiaFont, "宋体");
+
+const projectTableRows = getTableRows(projectRules);
+assert.equal(projectTableRows.length, 2);
+assert.equal(projectTableRows[0].name, "tableDefault");
+assert.equal(projectTableRows[0].width, "8307 twips / 14.65 cm");
+assert.equal(projectTableRows[0].borders.includes("上:single"), true);
+
 console.log("profile-viewer tests passed");

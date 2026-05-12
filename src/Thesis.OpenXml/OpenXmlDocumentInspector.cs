@@ -58,7 +58,9 @@ public static class OpenXmlDocumentInspector
             Styles = ReadStyles(mainPart, body),
             Numbering = ReadNumbering(mainPart),
             Sections = ReadSections(body),
-            Tables = ReadTables(body)
+            Tables = ReadTables(body),
+            Comments = ReadComments(mainPart),
+            RequirementHints = ReadRequirementHints(body, mainPart)
         };
     }
 
@@ -406,6 +408,73 @@ public static class OpenXmlDocumentInspector
                 };
             })
             .ToList();
+    }
+
+    private static List<DocumentComment> ReadComments(MainDocumentPart mainPart)
+    {
+        return mainPart.WordprocessingCommentsPart?.Comments?
+            .Elements<Comment>()
+            .Select(comment => new DocumentComment
+            {
+                Id = comment.Id?.Value,
+                Author = comment.Author?.Value,
+                Text = comment.InnerText
+            })
+            .Where(comment => !string.IsNullOrWhiteSpace(comment.Text))
+            .ToList()
+            ?? [];
+    }
+
+    private static List<DocumentRequirementHint> ReadRequirementHints(Body body, MainDocumentPart mainPart)
+    {
+        var hints = new List<DocumentRequirementHint>();
+
+        foreach (var (paragraph, index) in body
+            .Descendants<Paragraph>()
+            .Where(paragraph => !paragraph.Ancestors<Table>().Any())
+            .Select((paragraph, index) => (paragraph, index)))
+        {
+            var text = paragraph.InnerText;
+            if (LooksLikeRequirement(text))
+            {
+                hints.Add(new DocumentRequirementHint
+                {
+                    Source = "paragraph",
+                    ParagraphIndex = index,
+                    Text = Preview(text)
+                });
+            }
+        }
+
+        foreach (var comment in ReadComments(mainPart))
+        {
+            if (LooksLikeRequirement(comment.Text))
+            {
+                hints.Add(new DocumentRequirementHint
+                {
+                    Source = "comment",
+                    CommentId = comment.Id,
+                    Text = Preview(comment.Text)
+                });
+            }
+        }
+
+        return hints;
+    }
+
+    private static bool LooksLikeRequirement(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var keywords = new[]
+        {
+            "格式", "要求", "应", "须", "必须", "字体", "字号", "行距", "三线表",
+            "首行缩进", "页边距", "目录", "参考文献", "页码", "标题", "正文"
+        };
+        return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
     }
 
     private static TableFormatSample ReadTableFormat(Table table, IReadOnlyList<TableRow> rows)

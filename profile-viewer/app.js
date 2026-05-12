@@ -17,26 +17,48 @@ function formatTwips(value) {
   return `${number} twips / ${cm.toFixed(2)} cm`;
 }
 
-function buildProfileSummary(profile) {
+function getDocumentKind(profile, fileName = "") {
+  if (profile?.rulesKind === "projectRules") {
+    return "projectRules";
+  }
+
+  if (fileName.toLowerCase().includes("final-rules")) {
+    return "finalRules";
+  }
+
+  return profile?.profileKind ?? "未知";
+}
+
+function buildProfileSummary(profile, fileName = "") {
+  const kind = getDocumentKind(profile, fileName);
   const sourceDocument = profile?.sourceDocument ?? "";
   const sourceFile = sourceDocument
     ? sourceDocument.split(/[\\/]/).filter(Boolean).at(-1)
-    : "未提供";
+    : kind === "projectRules" ? "项目规则 JSON" : "未提供";
   const finalizationReasons = Array.isArray(profile?.finalizationReasons)
     ? profile.finalizationReasons
     : [];
+  const roleFormats = profile?.roleFormats && typeof profile.roleFormats === "object"
+    ? Object.keys(profile.roleFormats).length
+    : 0;
+  const aliasCount = Array.isArray(profile?.roleAliases)
+    ? profile.roleAliases.length
+    : profile?.roleAliases && typeof profile.roleAliases === "object"
+      ? Object.keys(profile.roleAliases).length
+      : 0;
 
   return {
-    kind: profile?.profileKind ?? "未知",
+    kind,
     schemaVersion: profile?.schemaVersion ?? "未知",
     sourceFile,
     sourceType: profile?.sourceType ?? "未知",
     requiresFinalization: profile?.requiresFinalization === true,
     finalizationText: finalizationReasons.length > 0 ? finalizationReasons.join(", ") : "无",
-    roleCount: Array.isArray(profile?.styleRoles) ? profile.styleRoles.length : 0,
+    roleCount: Array.isArray(profile?.styleRoles) ? profile.styleRoles.length : roleFormats,
+    aliasCount,
     policyCount: Array.isArray(profile?.rolePolicies) ? profile.rolePolicies.length : 0,
     clusterCount: Array.isArray(profile?.formatClusters) ? profile.formatClusters.length : 0,
-    tableCount: profile?.tablePolicy?.tableCount ?? 0,
+    tableCount: profile?.tablePolicy?.tableCount ?? (profile?.tableDefault ? 1 : 0),
     archetypeCount: Array.isArray(profile?.tableArchetypes) ? profile.tableArchetypes.length : 0,
     diagnosticCount: Array.isArray(profile?.diagnostics) ? profile.diagnostics.length : 0,
   };
@@ -44,24 +66,58 @@ function buildProfileSummary(profile) {
 
 function getRoleRows(profile) {
   const roles = Array.isArray(profile?.styleRoles) ? profile.styleRoles : [];
-  return roles.map((role) => ({
-    role: role.role ?? "未知",
-    styleId: role.styleId ?? "未设置",
-    name: role.name ?? "未命名",
-    confidence: formatConfidence(role.confidence),
-    alignment: role.format?.alignment ?? "继承",
-    fontSize: role.format?.runFormat?.fontSizeHalfPoints
-      ? `${Number(role.format.runFormat.fontSizeHalfPoints) / 2} pt`
+  if (roles.length > 0) {
+    return roles.map((role) => ({
+      role: role.role ?? "未知",
+      styleId: role.styleId ?? "未设置",
+      name: role.name ?? "未命名",
+      confidence: formatConfidence(role.confidence),
+      alignment: role.format?.alignment ?? "继承",
+      fontSize: role.format?.runFormat?.fontSizeHalfPoints
+        ? `${Number(role.format.runFormat.fontSizeHalfPoints) / 2} pt`
+        : "继承",
+      eastAsiaFont: role.format?.runFormat?.eastAsiaFont
+        ?? role.format?.runFormat?.asciiFont
+        ?? "继承",
+    }));
+  }
+
+  const roleFormats = profile?.roleFormats && typeof profile.roleFormats === "object"
+    ? Object.entries(profile.roleFormats)
+    : [];
+  return roleFormats.map(([roleName, format]) => ({
+    role: roleName,
+    styleId: format.styleId ?? "未设置",
+    name: "项目规则",
+    confidence: "人工/AI",
+    alignment: format.alignment ?? "继承",
+    fontSize: format.runFormat?.fontSizeHalfPoints || format.fontSizeHalfPoints
+      ? `${Number(format.runFormat?.fontSizeHalfPoints ?? format.fontSizeHalfPoints) / 2} pt`
       : "继承",
-    eastAsiaFont: role.format?.runFormat?.eastAsiaFont
-      ?? role.format?.runFormat?.asciiFont
+    eastAsiaFont: format.runFormat?.eastAsiaFont
+      ?? format.eastAsiaFont
+      ?? format.runFormat?.asciiFont
+      ?? format.asciiFont
       ?? "继承",
   }));
 }
 
 function getTableRows(profile) {
   const tables = Array.isArray(profile?.tableArchetypes) ? profile.tableArchetypes : [];
-  return tables.map((table) => ({
+  const rows = [];
+  if (profile?.tableDefault) {
+    rows.push({
+      name: "tableDefault",
+      confidence: "人工/AI",
+      rows: "默认",
+      columns: "默认",
+      width: formatTwips(profile.tableDefault.widthTwips),
+      alignment: profile.tableDefault.alignment ?? "继承",
+      borders: borderText(profile.tableDefault.borders),
+    });
+  }
+
+  rows.push(...tables.map((table) => ({
     name: table.name ?? "未命名",
     confidence: formatConfidence(table.confidence),
     rows: rangeText(table.match?.minRows, table.match?.maxRows),
@@ -71,7 +127,8 @@ function getTableRows(profile) {
     width: formatTwips(table.format?.widthTwips),
     alignment: table.format?.alignment ?? "继承",
     borders: borderText(table.format?.borders),
-  }));
+  })));
+  return rows;
 }
 
 function searchJson(value, query) {
@@ -161,7 +218,7 @@ function render(profile, fileName = "") {
   state.profile = profile;
   state.fileName = fileName;
 
-  const summary = buildProfileSummary(profile);
+  const summary = buildProfileSummary(profile, fileName);
   setText("#fileName", fileName || summary.sourceFile);
   setText("#profileKind", summary.kind);
   setText("#schemaVersion", summary.schemaVersion);
@@ -169,6 +226,7 @@ function render(profile, fileName = "") {
   setText("#sourceFile", summary.sourceFile);
   setText("#finalization", summary.requiresFinalization ? `需要：${summary.finalizationText}` : "不需要");
   setText("#roleCount", summary.roleCount);
+  setText("#aliasCount", summary.aliasCount);
   setText("#policyCount", summary.policyCount);
   setText("#clusterCount", summary.clusterCount);
   setText("#tableCount", summary.tableCount);
@@ -195,7 +253,9 @@ function renderPageSetup(profile) {
     `下 ${formatTwips(setup.margins?.bottomTwips)}`,
     `左 ${formatTwips(setup.margins?.leftTwips)}`,
   ].join(" / "));
-  setText("#headerFooter", `页眉 ${setup.headers?.length ?? 0} 个 / 页脚 ${setup.footers?.length ?? 0} 个`);
+  setText("#headerFooter", profile?.rulesKind === "projectRules"
+    ? "项目规则不包含页眉页脚"
+    : `页眉 ${setup.headers?.length ?? 0} 个 / 页脚 ${setup.footers?.length ?? 0} 个`);
 }
 
 function renderRoles(profile) {
