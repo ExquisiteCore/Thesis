@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.OpenXml;
@@ -60,7 +61,7 @@ internal static class ProfileRoleResolver
         }
 
         var matches = profile?.StyleRoles
-            .Where(candidate => string.Equals(candidate.Role, role, StringComparison.OrdinalIgnoreCase))
+            .Where(candidate => RoleNameMatches(candidate.Role, role))
             .ToList()
             ?? [];
         if (matches.Count == 0)
@@ -102,7 +103,7 @@ internal static class ProfileRoleResolver
 
         var policyFormat = profile?.RolePolicies
             .Where(policy =>
-                string.Equals(policy.Role, role, StringComparison.OrdinalIgnoreCase)
+                RoleNameMatches(policy.Role, role)
                 && string.Equals(policy.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(policy => policy.Priority)
             .Select(policy => policy.Format)
@@ -111,7 +112,7 @@ internal static class ProfileRoleResolver
         {
             var clusterFormat = profile?.FormatClusters
                 .Where(cluster =>
-                    string.Equals(cluster.RoleHint, role, StringComparison.OrdinalIgnoreCase)
+                    RoleNameMatches(cluster.RoleHint, role)
                     && !string.Equals(cluster.RoleHint, "unknown", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(cluster => cluster.Confidence)
@@ -129,6 +130,22 @@ internal static class ProfileRoleResolver
 
         error = null;
         return policyFormat;
+    }
+
+    internal static bool RoleNameMatches(string? candidate, string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(requested))
+        {
+            return false;
+        }
+
+        return string.Equals(candidate, requested, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(NormalizeBuiltInRoleAlias(candidate), NormalizeBuiltInRoleAlias(requested), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeBuiltInRoleAlias(string role)
+    {
+        return ThesisTextHeuristics.NormalizeTocRole(role);
     }
 
     private static string? GetStringValue(JsonNode value, out string? error)

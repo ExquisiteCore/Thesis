@@ -45,7 +45,7 @@ internal static partial class Program
         AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "body" && role.StyleId == "Normal"));
         AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "abstract.zh" && role.StyleId == "Heading1"));
         AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "abstract.en" && role.StyleId == "Heading1"));
-        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "toc" && role.StyleId == "Heading1"));
+        AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "toc.title" && role.StyleId == "Heading1"));
         AssertEqual(true, profile.StyleRoles.Any(role => role.Role == "references" && role.StyleId == "Heading1"));
         AssertEqual(true, profile.SourceEvidence.ParagraphSamples.Any(sample => sample.TextPreview == "论文题目"));
 

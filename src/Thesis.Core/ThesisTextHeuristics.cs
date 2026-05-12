@@ -1,9 +1,9 @@
 using System.Text.RegularExpressions;
 using Thesis.Schema;
 
-namespace Thesis.Profile;
+namespace Thesis.Core;
 
-internal static class ProfileTextHeuristics
+public static class ThesisTextHeuristics
 {
     public static bool IsChineseAbstractHeading(string text)
     {
@@ -30,8 +30,7 @@ internal static class ProfileTextHeuristics
 
     public static bool IsChineseKeywords(string text)
     {
-        var normalized = NormalizeHeading(text);
-        return normalized.StartsWith("关键词", StringComparison.Ordinal);
+        return NormalizeHeading(text).StartsWith("关键词", StringComparison.Ordinal);
     }
 
     public static bool IsEnglishKeywords(string text)
@@ -139,7 +138,35 @@ internal static class ProfileTextHeuristics
             || text.Contains("……", StringComparison.Ordinal)
             || text.Contains("......", StringComparison.Ordinal)
             || Regex.IsMatch(text, @"\.{3,}|\d\s*$", RegexOptions.CultureInvariant)
-                && Regex.IsMatch(text, @"^(?:第[一二三四五六七八九十百千万零〇两0-9Xx]+章|\d{1,2}\.\d{1,2})", RegexOptions.CultureInvariant);
+                && Regex.IsMatch(text.Trim(), @"^(?:第[一二三四五六七八九十百千万零〇两0-9Xx]+章|\d{1,2}\.\d{1,2}|[A-Za-z].+)", RegexOptions.CultureInvariant);
+    }
+
+    public static Func<string, bool>? SemanticRolePredicate(string role)
+    {
+        return NormalizeTocRole(role).ToLowerInvariant() switch
+        {
+            "abstract.zh" => IsChineseAbstractHeading,
+            "abstract.en" => IsEnglishAbstractHeading,
+            "toc.title" => IsTocHeading,
+            "references" => IsReferencesHeading,
+            "keywords.zh" => IsChineseKeywords,
+            "keywords.en" => IsEnglishKeywords,
+            "acknowledgements" => IsAcknowledgementsHeading,
+            "appendix" => IsAppendixHeading,
+            "figurecaption" => IsFigureCaption,
+            "tablecaption" => IsTableCaption,
+            _ => null
+        };
+    }
+
+    public static string NormalizeTocRole(string role)
+    {
+        return string.Equals(role, "toc", StringComparison.OrdinalIgnoreCase) ? "toc.title" : role;
+    }
+
+    public static string CreateExactTextPattern(string text)
+    {
+        return "^" + Regex.Escape(text.Trim()) + "$";
     }
 
     public static string NormalizeHeading(string text)
@@ -156,11 +183,6 @@ internal static class ProfileTextHeuristics
         }
 
         return normalized.Trim().ToLowerInvariant();
-    }
-
-    public static string CreateExactTextPattern(string text)
-    {
-        return "^" + Regex.Escape(text.Trim()) + "$";
     }
 
     private static bool IsLeftOrDefaultAligned(DocumentParagraph paragraph)

@@ -1,3 +1,4 @@
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
@@ -46,16 +47,16 @@ public static class TemplateProfileBuilder
         AddStyleRole(roles, map, "heading1", "Heading1");
         AddStyleRole(roles, map, "normal", "Normal");
         AddStyleRole(roles, map, "body", "Normal");
-        AddSemanticRole(roles, map, "abstract.zh", ProfileTextHeuristics.IsChineseAbstractHeading);
-        AddSemanticRole(roles, map, "abstract.en", ProfileTextHeuristics.IsEnglishAbstractHeading);
-        AddSemanticRole(roles, map, "toc", ProfileTextHeuristics.IsTocHeading);
-        AddSemanticRole(roles, map, "references", ProfileTextHeuristics.IsReferencesHeading);
-        AddSemanticRole(roles, map, "keywords.zh", ProfileTextHeuristics.IsChineseKeywords);
-        AddSemanticRole(roles, map, "keywords.en", ProfileTextHeuristics.IsEnglishKeywords);
-        AddSemanticRole(roles, map, "acknowledgements", ProfileTextHeuristics.IsAcknowledgementsHeading);
-        AddSemanticRole(roles, map, "appendix", ProfileTextHeuristics.IsAppendixHeading);
-        AddSemanticRole(roles, map, "figureCaption", ProfileTextHeuristics.IsFigureCaption);
-        AddSemanticRole(roles, map, "tableCaption", ProfileTextHeuristics.IsTableCaption);
+        AddSemanticRole(roles, map, "abstract.zh", ThesisTextHeuristics.IsChineseAbstractHeading);
+        AddSemanticRole(roles, map, "abstract.en", ThesisTextHeuristics.IsEnglishAbstractHeading);
+        AddSemanticRole(roles, map, "toc.title", ThesisTextHeuristics.IsTocHeading);
+        AddSemanticRole(roles, map, "references", ThesisTextHeuristics.IsReferencesHeading);
+        AddSemanticRole(roles, map, "keywords.zh", ThesisTextHeuristics.IsChineseKeywords);
+        AddSemanticRole(roles, map, "keywords.en", ThesisTextHeuristics.IsEnglishKeywords);
+        AddSemanticRole(roles, map, "acknowledgements", ThesisTextHeuristics.IsAcknowledgementsHeading);
+        AddSemanticRole(roles, map, "appendix", ThesisTextHeuristics.IsAppendixHeading);
+        AddSemanticRole(roles, map, "figureCaption", ThesisTextHeuristics.IsFigureCaption);
+        AddSemanticRole(roles, map, "tableCaption", ThesisTextHeuristics.IsTableCaption);
         return roles;
     }
 
@@ -66,27 +67,27 @@ public static class TemplateProfileBuilder
         AddRolePolicy(policies, map, "heading1", 100, "Heading1", [0]);
         AddRolePolicy(policies, map, "body", 10, "Normal", []);
         DirectFormatRolePolicyBuilder.AddDirectFormatRolePolicies(policies, map);
-        AddSemanticRolePolicy(policies, map, "abstract.zh", 90, ProfileTextHeuristics.IsChineseAbstractHeading);
-        AddSemanticRolePolicy(policies, map, "abstract.en", 90, ProfileTextHeuristics.IsEnglishAbstractHeading);
-        AddSemanticRolePolicy(policies, map, "toc", 80, ProfileTextHeuristics.IsTocHeading);
-        AddSemanticRolePolicy(policies, map, "references", 80, ProfileTextHeuristics.IsReferencesHeading);
-        AddSemanticRolePolicy(policies, map, "keywords.zh", 70, ProfileTextHeuristics.IsChineseKeywords);
-        AddSemanticRolePolicy(policies, map, "keywords.en", 70, ProfileTextHeuristics.IsEnglishKeywords);
-        AddSemanticRolePolicy(policies, map, "acknowledgements", 75, ProfileTextHeuristics.IsAcknowledgementsHeading);
-        AddSemanticRolePolicy(policies, map, "appendix", 75, ProfileTextHeuristics.IsAppendixHeading);
+        AddSemanticRolePolicy(policies, map, "abstract.zh", 90, ThesisTextHeuristics.IsChineseAbstractHeading);
+        AddSemanticRolePolicy(policies, map, "abstract.en", 90, ThesisTextHeuristics.IsEnglishAbstractHeading);
+        AddSemanticRolePolicy(policies, map, "toc.title", 80, ThesisTextHeuristics.IsTocHeading);
+        AddSemanticRolePolicy(policies, map, "references", 80, ThesisTextHeuristics.IsReferencesHeading);
+        AddSemanticRolePolicy(policies, map, "keywords.zh", 70, ThesisTextHeuristics.IsChineseKeywords);
+        AddSemanticRolePolicy(policies, map, "keywords.en", 70, ThesisTextHeuristics.IsEnglishKeywords);
+        AddSemanticRolePolicy(policies, map, "acknowledgements", 75, ThesisTextHeuristics.IsAcknowledgementsHeading);
+        AddSemanticRolePolicy(policies, map, "appendix", 75, ThesisTextHeuristics.IsAppendixHeading);
         AddPatternSemanticRolePolicy(
             policies,
             map,
             "figureCaption",
             65,
-            ProfileTextHeuristics.IsFigureCaption,
+            ThesisTextHeuristics.IsFigureCaption,
             @"^(?:图\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*|Figure\s+\d+(?:[-.]\d+)?)\s+.*$");
         AddPatternSemanticRolePolicy(
             policies,
             map,
             "tableCaption",
             65,
-            ProfileTextHeuristics.IsTableCaption,
+            ThesisTextHeuristics.IsTableCaption,
             @"^(?:表\s*[\d一二三四五六七八九十IVXivx]+[-－\.．]?\d*|Table\s+\d+(?:[-.]\d+)?)\s+.*$");
         return policies;
     }
@@ -206,7 +207,7 @@ public static class TemplateProfileBuilder
             Match = new ProfileRoleMatch
             {
                 StyleIds = string.IsNullOrWhiteSpace(paragraph.StyleId) ? [] : [paragraph.StyleId],
-                TextPatterns = [ProfileTextHeuristics.CreateExactTextPattern(paragraph.Text)],
+                TextPatterns = [ThesisTextHeuristics.CreateExactTextPattern(paragraph.Text)],
                 OutlineLevels = paragraph.OutlineLevel.HasValue ? [paragraph.OutlineLevel.Value] : []
             },
             Format = ProfileSampleCloner.Clone(paragraph.Format)

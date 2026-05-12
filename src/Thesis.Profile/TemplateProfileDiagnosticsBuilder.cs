@@ -1,3 +1,4 @@
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
@@ -8,7 +9,7 @@ internal static class TemplateProfileDiagnosticsBuilder
     {
         var diagnostics = new List<ProfileDiagnostic>();
 
-        if (!map.Paragraphs.Any(paragraph => ProfileTextHeuristics.IsChineseAbstractHeading(paragraph.Text)))
+        if (!map.Paragraphs.Any(paragraph => ThesisTextHeuristics.IsChineseAbstractHeading(paragraph.Text)))
         {
             diagnostics.Add(new ProfileDiagnostic
             {
@@ -19,7 +20,7 @@ internal static class TemplateProfileDiagnosticsBuilder
             });
         }
 
-        if (!map.Paragraphs.Any(paragraph => ProfileTextHeuristics.IsReferencesHeading(paragraph.Text)))
+        if (!map.Paragraphs.Any(paragraph => ThesisTextHeuristics.IsReferencesHeading(paragraph.Text)))
         {
             diagnostics.Add(new ProfileDiagnostic
             {
@@ -48,10 +49,10 @@ internal static class TemplateProfileDiagnosticsBuilder
 
     private static void AddDirectFormatDiagnostics(List<ProfileDiagnostic> diagnostics, DocumentMap map)
     {
-        AddDirectFormatDiagnostic(diagnostics, map, "heading1", ProfileTextHeuristics.IsDirectHeading1);
-        AddDirectFormatDiagnostic(diagnostics, map, "heading2", ProfileTextHeuristics.IsDirectHeading2);
-        AddDirectFormatDiagnostic(diagnostics, map, "heading3", ProfileTextHeuristics.IsDirectHeading3);
-        AddDirectFormatDiagnostic(diagnostics, map, "body", ProfileTextHeuristics.IsDirectBody);
+        AddDirectFormatDiagnostic(diagnostics, map, "heading1", ThesisTextHeuristics.IsDirectHeading1);
+        AddDirectFormatDiagnostic(diagnostics, map, "heading2", ThesisTextHeuristics.IsDirectHeading2);
+        AddDirectFormatDiagnostic(diagnostics, map, "heading3", ThesisTextHeuristics.IsDirectHeading3);
+        AddDirectFormatDiagnostic(diagnostics, map, "body", ThesisTextHeuristics.IsDirectBody);
     }
 
     private static void AddDirectFormatDiagnostic(
@@ -87,22 +88,22 @@ internal static class TemplateProfileDiagnosticsBuilder
             .GroupBy(paragraph => paragraph.StyleId!, StringComparer.OrdinalIgnoreCase))
         {
             var detectedRoles = new List<string>();
-            if (group.Any(ProfileTextHeuristics.IsDirectHeading1))
+            if (group.Any(ThesisTextHeuristics.IsDirectHeading1))
             {
                 detectedRoles.Add("heading1");
             }
 
-            if (group.Any(ProfileTextHeuristics.IsDirectHeading2))
+            if (group.Any(ThesisTextHeuristics.IsDirectHeading2))
             {
                 detectedRoles.Add("heading2");
             }
 
-            if (group.Any(ProfileTextHeuristics.IsDirectHeading3))
+            if (group.Any(ThesisTextHeuristics.IsDirectHeading3))
             {
                 detectedRoles.Add("heading3");
             }
 
-            if (group.Any(ProfileTextHeuristics.IsDirectBody))
+            if (group.Any(ThesisTextHeuristics.IsDirectBody))
             {
                 detectedRoles.Add("body");
             }

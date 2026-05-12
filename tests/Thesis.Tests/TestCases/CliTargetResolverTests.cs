@@ -83,6 +83,177 @@ internal static partial class Program
         AssertEqual(true, result.Operations[0].Matches.Count > 0);
     }
 
+    static void CliRunRoleTargetIgnoresCrossDocumentEvidenceWhenPolicyMatches()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var profile = new TemplateProfile
+        {
+            SourceType = "doc",
+            SourceDocument = Path.Combine(temp.Path, "template.docx"),
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "toc.title",
+                    StyleId = "Heading1",
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence
+                        {
+                            ParagraphIndex = 1,
+                            StyleId = "Heading1",
+                            TextPreview = "目录"
+                        }
+                    ]
+                }
+            ],
+            RolePolicies =
+            [
+                new ProfileRolePolicy
+                {
+                    Role = "toc.title",
+                    AppliesTo = "paragraph",
+                    Priority = 80,
+                    Match = new ProfileRoleMatch { TextPatterns = ["^目录$"] }
+                }
+            ]
+        };
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "dryRun",
+              "operations": [
+                {
+                  "id": "find-toc-title",
+                  "op": "resolveTarget",
+                  "target": { "type": "role", "role": "toc.title" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(1, result.Operations[0].Matches.Count);
+        AssertEqual("p5", result.Operations[0].Matches[0].Id);
+        AssertEqual("目录", result.Operations[0].Matches[0].Preview);
+    }
+
+    static void CliRunRoleTargetUsesSemanticFallbackForTemplatePlaceholders()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "paper.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        var workspace = Path.Combine(temp.Path, ".thesis");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:pPr><w:pStyle w:val="2"/></w:pPr><w:r><w:t>摘   要</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="2"/></w:pPr><w:r><w:t>关键词：工业控制系统；入侵检测</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="2"/></w:pPr><w:r><w:t>目    录</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="2"/></w:pPr><w:r><w:t>第一章 绪论1</w:t></w:r></w:p>
+            """);
+        var profile = new TemplateProfile
+        {
+            SourceDocument = Path.GetFullPath("template.docx"),
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "keywords.zh",
+                    StyleId = "2",
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence
+                        {
+                            ParagraphIndex = 1,
+                            StyleId = "2",
+                            TextPreview = "关键词：（3~8个词）□□□□□□；"
+                        }
+                    ]
+                },
+                new ProfileStyleRole
+                {
+                    Role = "toc.title",
+                    StyleId = "2",
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence
+                        {
+                            ParagraphIndex = 3,
+                            StyleId = "2",
+                            TextPreview = "目    录"
+                        }
+                    ]
+                }
+            ],
+            RolePolicies =
+            [
+                new ProfileRolePolicy
+                {
+                    Role = "keywords.zh",
+                    AppliesTo = "paragraph",
+                    Priority = 70,
+                    Match = new ProfileRoleMatch
+                    {
+                        StyleIds = ["2"],
+                        TextPatterns = ["^关键词：（3~8个词）□□□□□□；.*$"]
+                    }
+                },
+                new ProfileRolePolicy
+                {
+                    Role = "toc.title",
+                    AppliesTo = "paragraph",
+                    Priority = 80,
+                    Match = new ProfileRoleMatch
+                    {
+                        StyleIds = ["2"],
+                        TextPatterns = ["^目\\ \\ \\ \\ 录$"]
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(profilePath, ThesisJson.Serialize(profile));
+        AssertEqual("success", SessionInitializer.Initialize(docx, profilePath, workspace).Status);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "mode": "dryRun",
+              "operations": [
+                {
+                  "id": "find-keywords",
+                  "op": "resolveTarget",
+                  "target": { "type": "role", "role": "keywords.zh" }
+                },
+                {
+                  "id": "find-toc-title",
+                  "op": "resolveTarget",
+                  "target": { "type": "role", "role": "toc.title" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual("p1", result.Operations[0].Matches[0].Id);
+        AssertEqual("关键词：工业控制系统；入侵检测", result.Operations[0].Matches[0].Preview);
+        AssertEqual("p2", result.Operations[1].Matches[0].Id);
+        AssertEqual("目    录", result.Operations[1].Matches[0].Preview);
+    }
+
     static void CliRunRolePolicyTargetHonorsAfterHeadingPosition()
     {
         using var temp = new TempDirectory();

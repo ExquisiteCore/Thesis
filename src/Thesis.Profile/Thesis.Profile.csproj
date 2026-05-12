@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Thesis.Core\Thesis.Core.csproj" />
     <ProjectReference Include="..\Thesis.Schema\Thesis.Schema.csproj" />
   </ItemGroup>
 

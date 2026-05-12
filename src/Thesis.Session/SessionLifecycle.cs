@@ -491,7 +491,7 @@ public static class SessionLifecycle
 
     private static bool IsKnownClusterRoleHint(string? roleHint)
     {
-        return roleHint is "unknown" or "title" or "heading1" or "heading2" or "heading3" or "body" or "abstract.zh" or "abstract.en" or "toc" or "references";
+        return roleHint is "unknown" or "title" or "heading1" or "heading2" or "heading3" or "body" or "abstract.zh" or "abstract.en" or "toc" or "toc.title" or "references";
     }
 
     private static bool IsValidRoleFormatMatch(ProfileRoleFormatMatch? format)

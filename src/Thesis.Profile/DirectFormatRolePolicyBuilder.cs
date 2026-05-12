@@ -1,3 +1,4 @@
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
@@ -12,7 +13,7 @@ internal static class DirectFormatRolePolicyBuilder
             "heading1",
             105,
             0.76,
-            ProfileTextHeuristics.IsDirectHeading1,
+            ThesisTextHeuristics.IsDirectHeading1,
             @"^(?!.*(?:\t|…|\.{3,}|[.．·]{3,}))第[一二三四五六七八九十百千万零〇两0-9Xx]+章(?![\d.．、])\s*.*$");
         AddDirectFormatRolePolicy(
             policies,
@@ -20,7 +21,7 @@ internal static class DirectFormatRolePolicyBuilder
             "heading2",
             85,
             0.74,
-            ProfileTextHeuristics.IsDirectHeading2,
+            ThesisTextHeuristics.IsDirectHeading2,
             @"^(?!.*(?:\t|…|\.{3,}|[.．·]{3,}))\d{1,2}\.\d{1,2}(?!\.)\s+.*$");
         AddDirectFormatRolePolicy(
             policies,
@@ -28,7 +29,7 @@ internal static class DirectFormatRolePolicyBuilder
             "heading3",
             75,
             0.72,
-            ProfileTextHeuristics.IsDirectHeading3,
+            ThesisTextHeuristics.IsDirectHeading3,
             @"^(?!.*(?:\t|…|\.{3,}|[.．·]{3,}))\d{1,2}\.\d{1,2}\.\d{1,2}(?!\.)\s+.*$");
         AddDirectFormatRolePolicy(
             policies,
@@ -36,7 +37,7 @@ internal static class DirectFormatRolePolicyBuilder
             "body",
             15,
             0.68,
-            ProfileTextHeuristics.IsDirectBody,
+            ThesisTextHeuristics.IsDirectBody,
             @"^(?!.*(?:\t|…|\.{3,}|[.．·]{3,}))(?!\s*(?:第[一二三四五六七八九十百千万零〇两0-9Xx]+章\b|\d{1,2}\.\d{1,2}|摘要\b|Abstract\b|目录\b|参考文献\b|注：|\d+、|\[序号\])).{8,}$");
     }
 

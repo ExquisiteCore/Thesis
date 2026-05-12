@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Thesis.Core;
 using Thesis.OpenXml;
 using Thesis.Schema;
 
@@ -28,21 +30,21 @@ internal static class ProfileComplianceValidator
     {
         foreach (var role in profile.StyleRoles.Where(role => role.Format is not null))
         {
-            foreach (var evidence in role.Evidence)
+            var resolvedParagraphs = ResolveRoleParagraphs(map, profile, role).ToList();
+            if (resolvedParagraphs.Count == 0)
             {
-                var paragraph = map.Paragraphs.FirstOrDefault(candidate => candidate.Index == evidence.ParagraphIndex);
-                if (paragraph is null)
+                report.Diagnostics.Add(new Diagnostic
                 {
-                    report.Diagnostics.Add(new Diagnostic
-                    {
-                        Severity = "warning",
-                        Code = "profile_role_evidence_missing",
-                        Message = $"Role '{role.Role}' evidence paragraph {evidence.ParagraphIndex} was not found.",
-                        Path = $"paragraphs[{evidence.ParagraphIndex}]"
-                    });
-                    continue;
-                }
+                    Severity = "warning",
+                    Code = "profile_role_target_unresolved",
+                    Message = $"Role '{role.Role}' could not be resolved in the target document.",
+                    Path = $"roles[{role.Role}]"
+                });
+                continue;
+            }
 
+            foreach (var paragraph in resolvedParagraphs)
+            {
                 if (ParagraphFormatMatches(paragraph.Format, role.Format!))
                 {
                     continue;
@@ -67,6 +69,205 @@ internal static class ProfileComplianceValidator
                     }
                 });
             }
+        }
+    }
+
+    private static IEnumerable<DocumentParagraph> ResolveRoleParagraphs(
+        DocumentMap map,
+        TemplateProfile profile,
+        ProfileStyleRole role)
+    {
+        var policyMatches = ResolveRolePolicyParagraphs(map, profile, role.Role);
+        if (policyMatches.Count > 0)
+        {
+            return policyMatches;
+        }
+
+        var semanticMatches = ResolveSemanticRoleParagraphs(map, role.Role);
+        if (semanticMatches.Count > 0)
+        {
+            return semanticMatches;
+        }
+
+        return ResolveEvidenceParagraphs(map, profile, role);
+    }
+
+    private static List<DocumentParagraph> ResolveRolePolicyParagraphs(
+        DocumentMap map,
+        TemplateProfile profile,
+        string role)
+    {
+        var policies = profile.RolePolicies
+            .Where(policy =>
+                RoleMatches(policy.Role, role)
+                && string.Equals(policy.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(policy => policy.Priority)
+            .ToList();
+        if (policies.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            return map.Paragraphs
+                .Where(paragraph => policies.Any(policy => RolePolicyMatches(paragraph, policy)))
+                .GroupBy(paragraph => paragraph.Index)
+                .Select(group => group.First())
+                .ToList();
+        }
+        catch (ArgumentException)
+        {
+            return [];
+        }
+    }
+
+    private static List<DocumentParagraph> ResolveEvidenceParagraphs(
+        DocumentMap map,
+        TemplateProfile profile,
+        ProfileStyleRole role)
+    {
+        var sameSourceDocument = SamePathOrEmpty(profile.SourceDocument, map.Path);
+        return role.Evidence
+            .Select(evidence => map.Paragraphs.FirstOrDefault(candidate => candidate.Index == evidence.ParagraphIndex))
+            .Where(paragraph => paragraph is not null)
+            .Select(paragraph => paragraph!)
+            .Where(paragraph => sameSourceDocument
+                || role.Evidence.Any(evidence =>
+                    evidence.ParagraphIndex == paragraph.Index && EvidenceMatches(paragraph, evidence)))
+            .GroupBy(paragraph => paragraph.Index)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static List<DocumentParagraph> ResolveSemanticRoleParagraphs(DocumentMap map, string role)
+    {
+        var predicate = ThesisTextHeuristics.SemanticRolePredicate(role);
+        if (predicate is null)
+        {
+            return [];
+        }
+
+        return map.Paragraphs
+            .Where(paragraph => !ThesisTextHeuristics.IsLikelyTocLine(paragraph.Text))
+            .Where(paragraph => predicate(paragraph.Text))
+            .ToList();
+    }
+
+    private static bool RolePolicyMatches(DocumentParagraph paragraph, ProfileRolePolicy policy)
+    {
+        var match = policy.Match;
+        return StyleMatches(paragraph, match.StyleIds)
+            && TextPatternMatches(paragraph, match.TextPatterns)
+            && OutlineLevelMatches(paragraph, match.OutlineLevels)
+            && RoleFormatMatches(paragraph.Format, match.Format);
+    }
+
+    private static bool StyleMatches(DocumentParagraph paragraph, List<string> styleIds)
+    {
+        return styleIds.Count == 0
+            || (paragraph.StyleId is not null
+                && styleIds.Any(styleId => string.Equals(styleId, paragraph.StyleId, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool TextPatternMatches(DocumentParagraph paragraph, List<string> textPatterns)
+    {
+        return textPatterns.Count == 0
+            || textPatterns.Any(pattern => Regex.IsMatch(paragraph.Text, pattern, RegexOptions.CultureInvariant));
+    }
+
+    private static bool OutlineLevelMatches(DocumentParagraph paragraph, List<int> outlineLevels)
+    {
+        return outlineLevels.Count == 0
+            || (paragraph.OutlineLevel is not null && outlineLevels.Contains(paragraph.OutlineLevel.Value));
+    }
+
+    private static bool RoleFormatMatches(ParagraphFormatSample actual, ProfileRoleFormatMatch? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        return StringMatches(actual.StyleId, expected.StyleId)
+            && StringMatches(actual.Alignment, expected.Alignment)
+            && StringMatches(actual.RunFormat?.FontSizeHalfPoints, expected.FontSizeHalfPoints)
+            && BoolMatches(actual.RunFormat?.Bold, expected.Bold)
+            && BoolMatches(actual.RunFormat?.Italic, expected.Italic)
+            && StringMatches(actual.LineSpacing, expected.LineSpacing)
+            && StringMatches(actual.LineSpacingRule, expected.LineSpacingRule)
+            && RangeMatches(actual.FirstLineIndentTwips, expected.FirstLineIndentTwips)
+            && RangeMatches(actual.LeftIndentTwips, expected.LeftIndentTwips)
+            && RangeMatches(actual.RightIndentTwips, expected.RightIndentTwips);
+    }
+
+    private static bool RangeMatches(int? actual, IntRangeMatch? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        if (actual is null)
+        {
+            return false;
+        }
+
+        if (expected.Exact is not null)
+        {
+            return actual.Value == expected.Exact.Value;
+        }
+
+        if (expected.Min is not null && actual.Value < expected.Min.Value)
+        {
+            return false;
+        }
+
+        return expected.Max is null || actual.Value <= expected.Max.Value;
+    }
+
+    private static bool EvidenceMatches(DocumentParagraph paragraph, ProfileParagraphEvidence evidence)
+    {
+        if (!string.IsNullOrWhiteSpace(evidence.StyleId)
+            && !string.Equals(paragraph.StyleId, evidence.StyleId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.IsNullOrWhiteSpace(evidence.TextPreview)
+            || paragraph.Text.StartsWith(evidence.TextPreview, StringComparison.Ordinal);
+    }
+
+    private static bool RoleMatches(string candidate, string requested)
+    {
+        return string.Equals(candidate, requested, StringComparison.OrdinalIgnoreCase)
+            || IsTocAlias(candidate, requested);
+    }
+
+    private static bool IsTocAlias(string left, string right)
+    {
+        return string.Equals(NormalizeTocRole(left), NormalizeTocRole(right), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeTocRole(string role)
+    {
+        return ThesisTextHeuristics.NormalizeTocRole(role);
+    }
+
+    private static bool SamePathOrEmpty(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
         }
     }
 

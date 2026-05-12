@@ -1,3 +1,4 @@
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.Profile;
@@ -8,7 +9,7 @@ internal static class ProfileFormatClusterBuilder
     {
         return [.. map.Paragraphs
             .Where(paragraph => !string.IsNullOrWhiteSpace(paragraph.Text))
-            .Where(paragraph => !ProfileTextHeuristics.IsSpecialSemanticHeading(paragraph.Text))
+            .Where(paragraph => !ThesisTextHeuristics.IsSpecialSemanticHeading(paragraph.Text))
             .GroupBy(FormatKey, StringComparer.Ordinal)
             .Select((group, index) => BuildCluster(group.ToList(), index + 1))
             .Where(cluster => cluster.Count >= 2)
@@ -48,22 +49,22 @@ internal static class ProfileFormatClusterBuilder
 
     private static string InferRoleHint(IReadOnlyList<DocumentParagraph> paragraphs)
     {
-        if (paragraphs.Any(ProfileTextHeuristics.IsDirectHeading1))
+        if (paragraphs.Any(ThesisTextHeuristics.IsDirectHeading1))
         {
             return "heading1";
         }
 
-        if (paragraphs.Any(ProfileTextHeuristics.IsDirectHeading2))
+        if (paragraphs.Any(ThesisTextHeuristics.IsDirectHeading2))
         {
             return "heading2";
         }
 
-        if (paragraphs.Any(ProfileTextHeuristics.IsDirectHeading3))
+        if (paragraphs.Any(ThesisTextHeuristics.IsDirectHeading3))
         {
             return "heading3";
         }
 
-        if (paragraphs.Any(ProfileTextHeuristics.IsDirectBody))
+        if (paragraphs.Any(ThesisTextHeuristics.IsDirectBody))
         {
             return "body";
         }

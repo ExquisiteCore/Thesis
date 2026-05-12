@@ -24,7 +24,7 @@ internal static partial class Program
         AssertContains(profileJson, "\"role\":\"heading1\"");
         AssertContains(profileJson, "\"role\":\"body\"");
         AssertContains(profileJson, "\"role\":\"abstract.zh\"");
-        AssertContains(profileJson, "\"role\":\"toc\"");
+        AssertContains(profileJson, "\"role\":\"toc.title\"");
         AssertContains(profileJson, "\"role\":\"references\"");
         AssertContains(profileJson, "\"styleId\":\"Heading1\"");
         AssertContains(profileJson, "\"rolePolicies\"");

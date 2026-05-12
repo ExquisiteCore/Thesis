@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.OpenXml;
@@ -362,18 +363,48 @@ internal sealed class OpenXmlTargetResolver
             return TargetResolutionResult.Error(aliasError);
         }
 
-        var profileRoles = _profile?.StyleRoles
-            .Where(candidate => string.Equals(candidate.Role, resolvedRole, StringComparison.Ordinal))
-            .ToList();
-        if (profileRoles is null || profileRoles.Count == 0)
+        var policyResolution = ResolveRolePolicyAnchors(resolvedRole, out var policyError);
+        if (policyError is not null)
         {
-            return ResolveRolePolicyOrError(resolvedRole, position, offset.Value, options, "role_not_found");
+            return TargetResolutionResult.Error(policyError);
         }
 
-        var anchorIndices = GetRoleAnchorIndices(profileRoles);
-        if (anchorIndices.Count == 0)
+        var anchorIndices = policyResolution is { Count: > 0 } ? policyResolution : null;
+        var profileRoles = _profile?.StyleRoles
+            .Where(candidate => ProfileRoleResolver.RoleNameMatches(candidate.Role, resolvedRole))
+            .ToList()
+            ?? [];
+        if (anchorIndices is null)
         {
-            return ResolveRolePolicyOrError(resolvedRole, position, offset.Value, options, "target_not_found");
+            var evidenceAnchors = GetTrustedRoleEvidenceIndices(profileRoles);
+            if (evidenceAnchors.Count > 0)
+            {
+                anchorIndices = evidenceAnchors;
+            }
+        }
+
+        if (anchorIndices is null)
+        {
+            anchorIndices = ResolveSemanticRoleAnchorIndices(resolvedRole);
+        }
+
+        if (anchorIndices is null && profileRoles.Count > 0 && ThesisTextHeuristics.SemanticRolePredicate(resolvedRole) is null)
+        {
+            var styleAnchors = GetRoleStyleAnchorIndices(profileRoles);
+            if (styleAnchors.Count > 0)
+            {
+                anchorIndices = styleAnchors;
+            }
+        }
+
+        if (anchorIndices is null)
+        {
+            if (profileRoles.Count == 0)
+            {
+                return ResolveFormatClusterOrError(resolvedRole, position, offset.Value, options, "role_not_found");
+            }
+
+            return ResolveFormatClusterOrError(resolvedRole, position, offset.Value, options, "target_not_found");
         }
 
         var matches = anchorIndices
@@ -386,36 +417,42 @@ internal sealed class OpenXmlTargetResolver
         return ValidateMatchCount(matches, options);
     }
 
-    private TargetResolutionResult ResolveRolePolicyOrError(
+    private List<int>? ResolveSemanticRoleAnchorIndices(string role)
+    {
+        var predicate = ThesisTextHeuristics.SemanticRolePredicate(role);
+        if (predicate is null)
+        {
+            return null;
+        }
+
+        var matches = Paragraphs
+            .Select((paragraph, index) => (Paragraph: paragraph, Index: index))
+            .Where(candidate => !ThesisTextHeuristics.IsLikelyTocLine(candidate.Paragraph.InnerText))
+            .Where(candidate => predicate(candidate.Paragraph.InnerText))
+            .Select(candidate => candidate.Index)
+            .ToList();
+        return matches.Count == 0 ? null : matches;
+    }
+
+    private TargetResolutionResult ResolveFormatClusterOrError(
         string role,
         string position,
         int offset,
         RunOptions options,
         string fallbackError)
     {
-        var policyAnchorIndices = ResolveRolePolicyAnchorIndices(role, out var policyError);
-        if (policyError is not null)
+        var clusterAnchorIndices = ResolveFormatClusterAnchorIndices(role, out var clusterError);
+        if (clusterError is not null)
         {
-            return TargetResolutionResult.Error(policyError);
+            return TargetResolutionResult.Error(clusterError);
         }
 
-        if (policyAnchorIndices is null)
+        if (clusterAnchorIndices is null)
         {
-            var clusterAnchorIndices = ResolveFormatClusterAnchorIndices(role, out var clusterError);
-            if (clusterError is not null)
-            {
-                return TargetResolutionResult.Error(clusterError);
-            }
-
-            if (clusterAnchorIndices is null)
-            {
-                return TargetResolutionResult.Error(fallbackError);
-            }
-
-            policyAnchorIndices = clusterAnchorIndices;
+            return TargetResolutionResult.Error(fallbackError);
         }
 
-        var matches = policyAnchorIndices
+        var matches = clusterAnchorIndices
             .Select(index => ApplyRolePosition(index, position, offset))
             .Where(index => index >= 0 && index < Paragraphs.Count)
             .Distinct()
@@ -425,12 +462,12 @@ internal sealed class OpenXmlTargetResolver
         return ValidateMatchCount(matches, options);
     }
 
-    private List<int>? ResolveRolePolicyAnchorIndices(string role, out string? error)
+    private List<int>? ResolveRolePolicyAnchors(string role, out string? error)
     {
         error = null;
         var policies = _profile?.RolePolicies
             .Where(policy =>
-                string.Equals(policy.Role, role, StringComparison.Ordinal)
+                ProfileRoleResolver.RoleNameMatches(policy.Role, role)
                 && string.Equals(policy.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(policy => policy.Priority)
             .ToList();
@@ -459,7 +496,7 @@ internal sealed class OpenXmlTargetResolver
         error = null;
         var clusters = _profile?.FormatClusters
             .Where(cluster =>
-                string.Equals(cluster.RoleHint, role, StringComparison.OrdinalIgnoreCase)
+                ProfileRoleResolver.RoleNameMatches(cluster.RoleHint, role)
                 && !string.Equals(cluster.RoleHint, "unknown", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase)
                 && cluster.Match.Format is not null)
@@ -560,20 +597,18 @@ internal sealed class OpenXmlTargetResolver
         return true;
     }
 
-    private List<int> GetRoleAnchorIndices(List<ProfileStyleRole> profileRoles)
+    private List<int> GetTrustedRoleEvidenceIndices(List<ProfileStyleRole> profileRoles)
     {
-        var evidenceIndices = profileRoles
+        return [.. profileRoles
             .SelectMany(role => role.Evidence)
+            .Where(evidence => evidence.ParagraphIndex >= 0 && evidence.ParagraphIndex < Paragraphs.Count)
+            .Where(evidence => EvidenceMatches(Paragraphs[evidence.ParagraphIndex], evidence))
             .Select(evidence => evidence.ParagraphIndex)
-            .Distinct()
-            .ToList();
-        if (evidenceIndices.Count > 0)
-        {
-            return evidenceIndices
-                .Where(index => index >= 0 && index < Paragraphs.Count)
-                .ToList();
-        }
+            .Distinct()];
+    }
 
+    private List<int> GetRoleStyleAnchorIndices(List<ProfileStyleRole> profileRoles)
+    {
         var styleIds = profileRoles
             .Select(role => role.StyleId)
             .Where(styleId => !string.IsNullOrWhiteSpace(styleId))
@@ -592,6 +627,18 @@ internal sealed class OpenXmlTargetResolver
             })
             .Select(candidate => candidate.Index)
             .ToList();
+    }
+
+    private static bool EvidenceMatches(Paragraph paragraph, ProfileParagraphEvidence evidence)
+    {
+        if (!string.IsNullOrWhiteSpace(evidence.StyleId)
+            && !string.Equals(GetParagraphStyleId(paragraph), evidence.StyleId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.IsNullOrWhiteSpace(evidence.TextPreview)
+            || paragraph.InnerText.StartsWith(evidence.TextPreview, StringComparison.Ordinal);
     }
 
     private TargetResolutionResult ValidateMatchCount(List<ResolvedTarget> matches, RunOptions options)
