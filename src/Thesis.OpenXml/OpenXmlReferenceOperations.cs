@@ -68,15 +68,17 @@ public static partial class OpenXmlMicroEditor
             return OperationError(operation, reason);
         }
 
-        var nextNumber = NextReferenceNumber(context.Body);
         var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
         foreach (var target in targets.Cast<ResolvedParagraphTarget>())
         {
             if (writeChanges)
             {
-                var paragraph = CreateReferenceParagraph(nextNumber++, operation.Text);
+                var referenceBlock = GetReferenceBlock(target.Paragraph);
+                var nextNumber = referenceBlock.Count + 1;
+                var paragraph = CreateReferenceParagraph(nextNumber, operation.Text);
                 InsertRelativeTo(target.Paragraph, paragraph, position);
-                RenumberReferences(context.Body);
+                referenceBlock = GetReferenceBlock(paragraph);
+                RenumberReferences(referenceBlock);
                 context.RefreshResolver();
             }
 
@@ -146,20 +148,33 @@ public static partial class OpenXmlMicroEditor
         }
     }
 
-    private static int NextReferenceNumber(Body body)
+    private static List<Paragraph> GetReferenceBlock(Paragraph paragraph)
     {
-        return body.Descendants<Paragraph>()
-            .Select(paragraph => ReferenceNumberRegex().Match(paragraph.InnerText))
-            .Where(match => match.Success)
-            .Select(match => int.Parse(match.Groups[1].Value))
-            .DefaultIfEmpty(0)
-            .Max() + 1;
+        if (!IsReferenceParagraphText(paragraph.InnerText))
+        {
+            return [];
+        }
+
+        var block = new List<Paragraph>();
+        var current = paragraph;
+        while (current.PreviousSibling<Paragraph>() is { } previous && IsReferenceParagraphText(previous.InnerText))
+        {
+            current = previous;
+        }
+
+        while (current is not null && IsReferenceParagraphText(current.InnerText))
+        {
+            block.Add(current);
+            current = current.NextSibling<Paragraph>();
+        }
+
+        return block;
     }
 
-    private static void RenumberReferences(Body body)
+    private static void RenumberReferences(List<Paragraph> referenceBlock)
     {
         var number = 1;
-        foreach (var paragraph in body.Descendants<Paragraph>().Where(paragraph => IsReferenceParagraphText(paragraph.InnerText)))
+        foreach (var paragraph in referenceBlock)
         {
             ReplaceParagraphRuns(paragraph, $"[{number++}] {StripReferenceNumber(paragraph.InnerText)}");
         }

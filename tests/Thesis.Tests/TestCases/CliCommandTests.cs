@@ -44,6 +44,37 @@ internal static partial class Program
         AssertEqual("unknown_command", result.Diagnostics[0].Code);
     }
 
+    static void CliHelpCommandsReturnUsageJson()
+    {
+        var top = RunCli(["--help"]);
+        AssertEqual(0, top.ExitCode);
+        AssertEqual("success", top.Result.Status);
+        AssertEqual("help", top.Result.Diagnostics[0].Code);
+        AssertContains(top.Result.Diagnostics[0].Message, "profile extract");
+        AssertContains(top.Result.Diagnostics[0].Message, "finalize apply");
+
+        var operations = RunCli(["operations", "--help"]);
+        AssertEqual(0, operations.ExitCode);
+        AssertEqual("success", operations.Result.Status);
+        AssertEqual("help", operations.Result.Diagnostics[0].Code);
+        AssertContains(operations.Result.Diagnostics[0].Message, "operations sample --op");
+    }
+
+    static void CliRunReportsInvalidRequestJson()
+    {
+        using var temp = new TempDirectory();
+        var context = CreateInitializedDocxWorkspace(temp.Path);
+        var requestPath = Path.Combine(temp.Path, "bad-request.json");
+        File.WriteAllText(requestPath, "{ not json");
+
+        var (exitCode, result) = RunCli(["run", "--workspace", context.Workspace, "--request", requestPath]);
+
+        AssertEqual(1, exitCode);
+        AssertEqual("error", result.Status);
+        AssertEqual("request_invalid", result.Diagnostics[0].Code);
+        AssertEqual(Path.GetFullPath(requestPath), result.Diagnostics[0].Path);
+    }
+
     static void CliOperationsListReturnsOperationMetadata()
     {
         var output = new StringWriter();
@@ -61,7 +92,13 @@ internal static partial class Program
             && operation.ProfileRequired));
         AssertEqual(true, result.OperationsCatalog.Any(operation =>
             operation.Op == "insertImage"
-            && operation.RequiredFormat.Contains("imagePath")));
+            && operation.RequiredFormat.Contains("imagePath")
+            && operation.RequiredFormat.Contains("widthEmu")
+            && operation.RequiredFormat.Contains("heightEmu")));
+        AssertEqual(true, result.OperationsCatalog.Any(operation =>
+            operation.Op == "setTableCellFormat"
+            && operation.OptionalFormat.Contains("alignment")
+            && !operation.OptionalFormat.Contains("shadingFill")));
     }
 
     static void CliOperationsSampleReturnsExecutableRequestJson()
@@ -76,6 +113,17 @@ internal static partial class Program
         AssertEqual("example-insertParagraph", result.OperationSample.RequestId);
         AssertEqual(RequestMode.DryRun, result.OperationSample.Mode);
         AssertEqual("新增段落", result.OperationSample.Operations[0].Text);
+    }
+
+    static void CliOperationsSamplesMatchCatalogShapes()
+    {
+        var setTableBorders = RunCli(["operations", "sample", "--op", "setTableBorders"]).Result.OperationSample!;
+        AssertEqual(true, setTableBorders.Operations[0].Format?["borders"] is not null);
+        AssertEqual(true, setTableBorders.Operations[0].Format?["top"] is null);
+
+        var setTableCellFormat = RunCli(["operations", "sample", "--op", "setTableCellFormat"]).Result.OperationSample!;
+        AssertEqual(true, setTableCellFormat.Operations[0].Format?["alignment"] is not null);
+        AssertEqual(true, setTableCellFormat.Operations[0].Format?["shadingFill"] is null);
     }
 
     static void CliOperationsSampleRejectsUnknownOperation()

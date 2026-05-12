@@ -1122,6 +1122,12 @@ public static partial class OpenXmlMicroEditor
         return paragraph.ChildElements.Any(child => child is not ParagraphProperties and not Run);
     }
 
+    private static bool HasUnsupportedTextRewriteContent(Paragraph paragraph)
+    {
+        return HasUnsupportedParagraphContent(paragraph)
+            || paragraph.Elements<Run>().Any(run => run.ChildElements.Any(child => child is not RunProperties and not Text));
+    }
+
     private static bool NeedsPreservedSpace(string text)
     {
         return text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));

@@ -136,7 +136,8 @@ public static partial class OpenXmlMicroEditor
             options,
             operation,
             writeChanges,
-            text => Regex.Replace(text, @"[ \t\u3000]{2,}", " ", RegexOptions.CultureInvariant));
+            text => Regex.Replace(text, @"[ \t\u3000]{2,}", " ", RegexOptions.CultureInvariant),
+            allowNoOp: true);
     }
 
     private static OperationResult NormalizeChinesePunctuationSpacing(
@@ -154,7 +155,8 @@ public static partial class OpenXmlMicroEditor
             {
                 var noSpaceBefore = Regex.Replace(text, @"\s+([，。；：！？、])", "$1", RegexOptions.CultureInvariant);
                 return Regex.Replace(noSpaceBefore, @"([，。；：！？、])\s+", "$1", RegexOptions.CultureInvariant);
-            });
+            },
+            allowNoOp: true);
     }
 
     private static OperationResult RemoveDuplicatePageBreaks(

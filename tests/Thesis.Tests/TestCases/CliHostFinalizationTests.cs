@@ -20,6 +20,11 @@ internal static partial class Program
         AssertEqual(1, ambiguousExitCode);
         AssertEqual("error", ambiguous.Status);
         AssertEqual("finalize_source_ambiguous", ambiguous.Diagnostics[0].Code);
+
+        var unsafeDirect = RunCli(["finalize", "apply", "--doc", docx]);
+        AssertEqual(1, unsafeDirect.ExitCode);
+        AssertEqual("error", unsafeDirect.Result.Status);
+        AssertEqual("finalize_output_missing", unsafeDirect.Result.Diagnostics[0].Code);
     }
 
     static void CliFinalizeApplyReportsUnavailableComHost()
@@ -33,6 +38,7 @@ internal static partial class Program
             "apply",
             "--doc",
             docx,
+            "--in-place",
             "--host",
             "wps",
             "--prog-id",

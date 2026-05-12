@@ -79,6 +79,41 @@ internal static partial class Program
         AssertEqual(true, result.Validation.CheckedTables > 0);
     }
 
+    static void CliDirectCommandsRejectInvalidProfileShape()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        var request = Path.Combine(temp.Path, "request.json");
+        var output = Path.Combine(temp.Path, "out.docx");
+        WriteFixtureDocx(docx);
+        File.WriteAllText(
+            profilePath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "profileKind": "templateProfile",
+              "rolePolicies": [
+                {
+                  "role": "heading1",
+                  "match": null
+                }
+              ]
+            }
+            """);
+        File.WriteAllText(request, """{"operations":[]}""");
+
+        var validate = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+        AssertEqual(1, validate.ExitCode);
+        AssertEqual("error", validate.Result.Status);
+        AssertEqual("profile_invalid", validate.Result.Diagnostics[0].Code);
+
+        var apply = RunCli(["apply", "--doc", docx, "--profile", profilePath, "--request", request, "--out", output]);
+        AssertEqual(1, apply.ExitCode);
+        AssertEqual("error", apply.Result.Status);
+        AssertEqual("profile_invalid", apply.Result.Diagnostics[0].Code);
+    }
+
     static void CliProfileExtractReturnsExplanationSummary()
     {
         using var temp = new TempDirectory();

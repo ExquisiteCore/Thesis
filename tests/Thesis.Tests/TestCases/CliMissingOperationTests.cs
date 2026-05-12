@@ -96,6 +96,46 @@ internal static partial class Program
         AssertEqual("第1章 绪论与背景", map.Paragraphs[1].Text);
     }
 
+    static void CliRunTextOperationsRefuseParagraphsWithFields()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profile = Path.Combine(temp.Path, "profile.json");
+        var workspace = Path.Combine(temp.Path, ".thesis");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:t>第 </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t> 页</w:t></w:r></w:p>
+            """);
+        File.WriteAllText(profile, "{}");
+        AssertEqual("success", SessionInitializer.Initialize(docx, profile, workspace).Status);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "requestId": "req-field-text",
+              "mode": "execute",
+              "operations": [
+                {
+                  "id": "replace-field-text",
+                  "op": "replaceText",
+                  "target": { "type": "paragraphIndex", "index": 0 },
+                  "text": "页码",
+                  "format": { "find": "页" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", workspace, "--request", requestPath]);
+
+        AssertEqual(1, exitCode);
+        AssertEqual("error", result.Status);
+        AssertEqual("paragraph_structure_unsupported", result.Operations[0].Reason);
+    }
+
     static void CliRunExecutesTableStructureOperations()
     {
         using var temp = new TempDirectory();
@@ -230,6 +270,57 @@ internal static partial class Program
         AssertEqual("第二章", chapterTexts[1]);
     }
 
+    static void CliRunCleanupOperationsAreIdempotent()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profile = Path.Combine(temp.Path, "profile.json");
+        var workspace = Path.Combine(temp.Path, ".thesis");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:t>正文，已清理文本</w:t></w:r></w:p>
+            """);
+        File.WriteAllText(profile, "{}");
+        AssertEqual("success", SessionInitializer.Initialize(docx, profile, workspace).Status);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "requestId": "req-cleanup-idempotent",
+              "mode": "execute",
+              "options": { "createSnapshot": false },
+              "operations": [
+                {
+                  "id": "normalize-runs",
+                  "op": "normalizeRuns",
+                  "target": { "type": "paragraphIndex", "index": 0 }
+                },
+                {
+                  "id": "normalize-spaces",
+                  "op": "removeExtraSpaces",
+                  "target": { "type": "paragraphIndex", "index": 0 }
+                },
+                {
+                  "id": "punctuation",
+                  "op": "normalizeChinesePunctuationSpacing",
+                  "target": { "type": "paragraphIndex", "index": 0 }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, result.Operations.All(operation => operation.Status == "applied"));
+        var map = OpenXmlDocumentInspector.Inspect(SessionPaths.FromWorkspace(workspace).WorkingDocument);
+        AssertEqual("正文，已清理文本", map.Paragraphs[0].Text);
+    }
+
     static void CliRunExecutesReferenceOperations()
     {
         using var temp = new TempDirectory();
@@ -277,5 +368,50 @@ internal static partial class Program
         AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text.StartsWith("[3] 作者C", StringComparison.Ordinal)));
         var reference = map.Paragraphs.First(paragraph => paragraph.Text.StartsWith("[1]", StringComparison.Ordinal));
         AssertEqual(420, reference.Format.FirstLineIndentTwips);
+    }
+
+    static void CliRunInsertReferenceItemRenumbersOnlyReferenceBlock()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profile = Path.Combine(temp.Path, "profile.json");
+        var workspace = Path.Combine(temp.Path, ".thesis");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:t>[1] 章节编号示例</w:t></w:r></w:p>
+            <w:p><w:r><w:t>参考文献</w:t></w:r></w:p>
+            <w:p><w:r><w:t>[1] 作者A. 题名A[J]. 期刊, 2024.</w:t></w:r></w:p>
+            """);
+        File.WriteAllText(profile, "{}");
+        AssertEqual("success", SessionInitializer.Initialize(docx, profile, workspace).Status);
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "requestId": "req-reference-block",
+              "mode": "execute",
+              "options": { "createSnapshot": false },
+              "operations": [
+                {
+                  "id": "insert-ref",
+                  "op": "insertReferenceItem",
+                  "target": { "type": "paragraphText", "text": "作者A", "match": "contains" },
+                  "text": "作者B. 题名B[M]. 北京: 出版社, 2025.",
+                  "format": { "position": "after" }
+                }
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["run", "--workspace", workspace, "--request", requestPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        var map = OpenXmlDocumentInspector.Inspect(SessionPaths.FromWorkspace(workspace).WorkingDocument);
+        AssertEqual("[1] 章节编号示例", map.Paragraphs[0].Text);
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text.StartsWith("[2] 作者B", StringComparison.Ordinal)));
     }
 }

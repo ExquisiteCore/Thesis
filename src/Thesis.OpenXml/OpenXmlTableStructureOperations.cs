@@ -170,7 +170,7 @@ public static partial class OpenXmlMicroEditor
         var columnCount = rows.Max(row => row.Count);
         table.AppendChild(new TableProperties(
             new TableWidth { Width = "0", Type = TableWidthUnitValues.Auto }));
-        table.AppendChild(new TableGrid(rows[0].Select(_ => new GridColumn()).Cast<OpenXmlElement>()));
+        table.AppendChild(new TableGrid(Enumerable.Range(0, columnCount).Select(_ => new GridColumn()).Cast<OpenXmlElement>()));
 
         foreach (var row in rows)
         {

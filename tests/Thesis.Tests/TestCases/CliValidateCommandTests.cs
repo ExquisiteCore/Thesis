@@ -79,6 +79,26 @@ internal static partial class Program
         AssertEqual(true, result.Validation.SuggestedOperations.Any(operation => operation.Op == "applyProfilePageSetup"));
     }
 
+    static void CliValidateWarnsWhenFinalizationIsStillRequired()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            """);
+        File.WriteAllText(profilePath, "{}");
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, result.Validation!.Compliant);
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "finalization_required"));
+    }
+
     static void CliValidateResolvesProfileRolesAgainstTargetDocument()
     {
         using var temp = new TempDirectory();

@@ -38,6 +38,16 @@ public static class ThesisCli
 
     private static CliResult Dispatch(string[] args)
     {
+        if (args.Length == 0 || args is ["--help"] or ["-h"] or ["help"])
+        {
+            return Help(GeneralUsage());
+        }
+
+        if (args is ["operations", "--help"] or ["operations", "-h"] or ["operations", "help"])
+        {
+            return Help(OperationsUsage());
+        }
+
         if (args is ["session", "init", .. var initArgs])
         {
             var doc = RequiredOption(initArgs, "--doc");
@@ -50,7 +60,11 @@ public static class ThesisCli
         {
             var workspace = RequiredOption(runArgs, "--workspace");
             var requestPath = RequiredOption(runArgs, "--request");
-            var request = ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(requestPath));
+            if (!TryReadRequest(requestPath, out var request, out var requestError))
+            {
+                return requestError!;
+            }
+
             request.Options ??= new RunOptions();
             request.Operations ??= [];
             return SessionLifecycle.Run(workspace, request, OpenXmlMicroEditor.Apply);
@@ -349,6 +363,8 @@ public static class ThesisCli
             Validation = ProfileComplianceValidator.Validate(map, profile!)
         };
 
+        AddFinalizationDiagnostic(map, result.Diagnostics);
+
         if (hostOption is not null || progId is not null || HasFlag(args, "--host-layout"))
         {
             var hostOptions = ParseHostOptions(args, action: "validate", defaultHost: hostOption ?? "wps");
@@ -418,15 +434,82 @@ public static class ThesisCli
             return SessionLifecycle.RunWithWorkingDocumentLock(
                 workspace,
                 "before-finalize-apply",
-                workingDocument => ApplyFinalizationToDocument(args, workingDocument));
+                workingDocument => ApplyFinalizationToDocument(args, workingDocument, allowInPlace: true));
         }
 
-        return ApplyFinalizationToDocument(args, doc!);
+        return ApplyFinalizationToDirectDocument(args, doc!);
     }
 
-    private static CliResult ApplyFinalizationToDocument(string[] args, string doc)
+    private static CliResult ApplyFinalizationToDirectDocument(string[] args, string doc)
+    {
+        var output = OptionalOption(args, "--out");
+        var inPlace = HasFlag(args, "--in-place");
+        if (output is not null && inPlace)
+        {
+            return Error("finalize_output_ambiguous", "Specify either --out or --in-place, not both.");
+        }
+
+        if (output is null && !inPlace)
+        {
+            return Error("finalize_output_missing", "Direct finalize --doc requires --out or explicit --in-place.");
+        }
+
+        var sourcePath = Path.GetFullPath(doc);
+        if (output is null)
+        {
+            return ApplyFinalizationToDocument(args, sourcePath, allowInPlace: true);
+        }
+
+        var outputPath = Path.GetFullPath(output);
+        if (SamePath(outputPath, sourcePath))
+        {
+            return Error("finalize_output_refused", "Finalize output path must not overwrite the source document unless --in-place is used.");
+        }
+
+        var parent = Path.GetDirectoryName(outputPath);
+        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+        {
+            return Error("finalize_output_directory_missing", $"Finalize output directory not found: {parent}");
+        }
+
+        try
+        {
+            File.Copy(sourcePath, outputPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = sourcePath,
+                OutputPath = outputPath,
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "finalize_copy_failed",
+                        Message = $"Finalize source could not be copied: {ex.Message}",
+                        Path = outputPath
+                    }
+                ]
+            };
+        }
+
+        var result = ApplyFinalizationToDocument(args, outputPath, allowInPlace: true);
+        result.Document = sourcePath;
+        result.OutputPath = outputPath;
+        return result;
+    }
+
+    private static CliResult ApplyFinalizationToDocument(string[] args, string doc, bool allowInPlace)
     {
         var fullDocPath = Path.GetFullPath(doc);
+        if (!allowInPlace)
+        {
+            return Error("finalize_output_missing", "Finalize requires --out or explicit --in-place.");
+        }
+
         if (!OpenXmlDocumentInspector.TryInspect(fullDocPath, out var map, out var diagnostic) || map is null)
         {
             return new CliResult
@@ -668,6 +751,12 @@ public static class ThesisCli
         try
         {
             profile = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(fullPath));
+            if (!IsValidProfile(profile))
+            {
+                error = ProfileInvalid(fullPath, "Profile has an invalid structure.");
+                return false;
+            }
+
             error = null;
             return true;
         }
@@ -684,6 +773,136 @@ public static class ThesisCli
                         Severity = "error",
                         Code = "profile_invalid",
                         Message = $"Profile JSON could not be read: {ex.Message}",
+                        Path = fullPath
+                    }
+                ]
+            };
+            return false;
+        }
+    }
+
+    private static bool IsValidProfile(TemplateProfile? profile)
+    {
+        return profile is not null
+            && profile.StyleRoles is not null
+            && profile.RolePolicies is not null
+            && profile.FormatClusters is not null
+            && profile.FinalizationReasons is not null
+            && profile.PageSetup is not null
+            && profile.NumberingPolicy is not null
+            && profile.TablePolicy is not null
+            && profile.TableArchetypes is not null
+            && profile.Diagnostics is not null
+            && profile.SourceEvidence is not null
+            && profile.StyleRoles.All(role => role.Evidence is not null)
+            && profile.RolePolicies.All(policy =>
+                policy.Match is not null
+                && policy.Match.StyleIds is not null
+                && policy.Match.TextPatterns is not null
+                && policy.Match.OutlineLevels is not null
+                && IsValidRoleFormatMatch(policy.Match.Format))
+            && profile.FormatClusters.All(IsValidFormatCluster)
+            && profile.NumberingPolicy.Instances is not null
+            && profile.NumberingPolicy.ParagraphUses is not null
+            && profile.TablePolicy.ObservedColumnCounts is not null
+            && profile.TableArchetypes.All(archetype =>
+                archetype.Match is not null
+                && archetype.Match.ColumnCounts is not null)
+            && profile.Diagnostics.All(diagnostic => diagnostic.Evidence is not null)
+            && profile.SourceEvidence.ParagraphSamples is not null;
+    }
+
+    private static bool IsValidFormatCluster(ProfileFormatCluster cluster)
+    {
+        return !string.IsNullOrWhiteSpace(cluster.Id)
+            && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase)
+            && IsKnownClusterRoleHint(cluster.RoleHint)
+            && cluster.Count >= 0
+            && cluster.Confidence is >= 0 and <= 1
+            && cluster.StyleIds is not null
+            && cluster.Match is not null
+            && cluster.Match.StyleIds is not null
+            && cluster.Match.TextPatterns is not null
+            && cluster.Match.OutlineLevels is not null
+            && IsValidRoleFormatMatch(cluster.Match.Format)
+            && cluster.Format is not null
+            && cluster.Evidence is not null
+            && cluster.Evidence.All(evidence => evidence is not null);
+    }
+
+    private static bool IsKnownClusterRoleHint(string? roleHint)
+    {
+        return roleHint is "unknown" or "title" or "heading1" or "heading2" or "heading3" or "body" or "abstract.zh" or "abstract.en" or "toc" or "toc.title" or "references";
+    }
+
+    private static bool IsValidRoleFormatMatch(ProfileRoleFormatMatch? format)
+    {
+        return format is null
+            || (IsValidRange(format.FirstLineIndentTwips)
+                && IsValidRange(format.LeftIndentTwips)
+                && IsValidRange(format.RightIndentTwips));
+    }
+
+    private static bool IsValidRange(IntRangeMatch? range)
+    {
+        if (range is null)
+        {
+            return true;
+        }
+
+        if (range.Exact is null && range.Min is null && range.Max is null)
+        {
+            return false;
+        }
+
+        if (range.Exact is not null && (range.Min is not null || range.Max is not null))
+        {
+            return false;
+        }
+
+        return range.Min is null || range.Max is null || range.Min <= range.Max;
+    }
+
+    private static CliResult ProfileInvalid(string path, string message)
+    {
+        return new CliResult
+        {
+            Status = "error",
+            Diagnostics =
+            [
+                new Diagnostic
+                {
+                    Severity = "error",
+                    Code = "profile_invalid",
+                    Message = message,
+                    Path = path
+                }
+            ]
+        };
+    }
+
+    private static bool TryReadRequest(string path, out OperationRequest request, out CliResult? error)
+    {
+        var fullPath = Path.GetFullPath(path);
+        try
+        {
+            request = ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(fullPath));
+            error = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            request = new OperationRequest();
+            error = new CliResult
+            {
+                Status = "error",
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "request_invalid",
+                        Message = $"Request JSON could not be read: {ex.Message}",
                         Path = fullPath
                     }
                 ]
@@ -714,6 +933,23 @@ public static class ThesisCli
                 || SamePath(outputPath, workspacePaths.ProfileJson)
                 || SamePath(outputPath, workspacePaths.SessionJson)
                 || IsPathInsideDirectory(workspacePaths.Workspace, outputPath));
+    }
+
+    private static void AddFinalizationDiagnostic(DocumentMap map, List<Diagnostic> diagnostics)
+    {
+        var plan = FinalizationPlanBuilder.Build(map);
+        if (!plan.Required)
+        {
+            return;
+        }
+
+        diagnostics.Add(new Diagnostic
+        {
+            Severity = "warning",
+            Code = "finalization_required",
+            Message = "Document still requires Word/WPS finalization for fields, TOC page numbers, or true pagination.",
+            Path = map.Path
+        });
     }
 
     private static string RequiredOption(string[] args, string name)
@@ -755,6 +991,58 @@ public static class ThesisCli
                 }
             ]
         };
+    }
+
+    private static CliResult Help(string message)
+    {
+        return new CliResult
+        {
+            Status = "success",
+            Diagnostics =
+            [
+                new Diagnostic
+                {
+                    Severity = "info",
+                    Code = "help",
+                    Message = message
+                }
+            ]
+        };
+    }
+
+    private static string GeneralUsage()
+    {
+        return string.Join(
+            Environment.NewLine,
+            "Thesis DOCX CLI usage:",
+            "  session init --doc <source.docx> --profile <profile.json> --workspace <dir>",
+            "  profile extract --doc <template.docx> --out <profile.json>",
+            "  profile explain --profile <profile.json>",
+            "  run --workspace <dir> --request <request.json>",
+            "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",
+            "  validate --doc <docx> --profile <profile.json>",
+            "  validate --workspace <dir> [--host-layout]",
+            "  finalize plan --doc <docx>",
+            "  finalize apply --doc <docx> --out <output.docx>",
+            "  finalize apply --doc <docx> --in-place",
+            "  finalize apply --workspace <dir>",
+            "  operations list",
+            "  operations sample --op <operation>");
+    }
+
+    private static string OperationsUsage()
+    {
+        return string.Join(
+            Environment.NewLine,
+            "Operation catalog usage:",
+            "  operations list",
+            "  operations sample --op <operation>",
+            "Targets commonly use:",
+            "  { \"type\": \"paragraphIndex\", \"index\": 0 }",
+            "  { \"type\": \"paragraphText\", \"text\": \"摘要\", \"match\": \"exact|contains|regex\" }",
+            "  { \"type\": \"tableIndex\", \"index\": 0 }",
+            "  { \"type\": \"tableCell\", \"tableIndex\": 0, \"rowIndex\": 0, \"cellIndex\": 0 }",
+            "  { \"type\": \"sectionRange\", \"start\": <target>, \"end\": <target>, \"includeStart\": false }");
     }
 
     private static bool SamePath(string left, string right)

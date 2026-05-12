@@ -28,7 +28,8 @@ public static partial class OpenXmlMicroEditor
             options,
             operation,
             writeChanges,
-            text => text.Replace(find, operation.Text, StringComparison.Ordinal));
+            text => text.Replace(find, operation.Text, StringComparison.Ordinal),
+            allowNoOp: false);
     }
 
     private static OperationResult ReplaceRegex(
@@ -63,7 +64,8 @@ public static partial class OpenXmlMicroEditor
             options,
             operation,
             writeChanges,
-            text => regex.Replace(text, operation.Text));
+            text => regex.Replace(text, operation.Text),
+            allowNoOp: false);
     }
 
     private static OperationResult InsertTextBefore(
@@ -101,7 +103,8 @@ public static partial class OpenXmlMicroEditor
             options,
             operation,
             writeChanges,
-            text => text.Replace(find, "", StringComparison.Ordinal));
+            text => text.Replace(find, "", StringComparison.Ordinal),
+            allowNoOp: false);
     }
 
     private static OperationResult InsertTextNearMatch(
@@ -133,7 +136,8 @@ public static partial class OpenXmlMicroEditor
                 return index < 0
                     ? text
                     : text.Insert(before ? index : index + find.Length, operation.Text);
-            });
+            },
+            allowNoOp: false);
     }
 
     private static OperationResult ApplyParagraphTextTransform(
@@ -141,7 +145,8 @@ public static partial class OpenXmlMicroEditor
         RunOptions options,
         ThesisOperation operation,
         bool writeChanges,
-        Func<string, string> transform)
+        Func<string, string> transform,
+        bool allowNoOp)
     {
         if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
         {
@@ -154,14 +159,14 @@ public static partial class OpenXmlMicroEditor
             var paragraph = target.Paragraph;
             var before = paragraph.InnerText;
             var after = transform(before);
-            if (after == before)
+            if (after == before && !allowNoOp)
             {
                 return OperationError(operation, "text_not_found");
             }
 
-            if (writeChanges)
+            if (writeChanges && after != before)
             {
-                if (HasUnsupportedParagraphContent(paragraph))
+                if (HasUnsupportedTextRewriteContent(paragraph))
                 {
                     return OperationError(operation, "paragraph_structure_unsupported");
                 }
