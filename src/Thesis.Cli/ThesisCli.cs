@@ -126,6 +126,11 @@ public static class ThesisCli
             return MergeRules(rulesArgs);
         }
 
+        if (args is ["rehearsal", "compare", .. var rehearsalCompareArgs])
+        {
+            return CompareRehearsal(rehearsalCompareArgs);
+        }
+
         if (args is ["generate", .. var generateArgs])
         {
             return GenerateDocument(generateArgs);
@@ -446,6 +451,76 @@ public static class ThesisCli
         {
             DeleteIfExists(tempPath);
         }
+    }
+
+    private static CliResult CompareRehearsal(string[] args)
+    {
+        var candidatePath = Path.GetFullPath(RequiredOption(args, "--candidate"));
+        var referencePath = Path.GetFullPath(RequiredOption(args, "--reference"));
+        var profilePath = RequiredOption(args, "--profile");
+        var outputPath = OptionalOption(args, "--out");
+        if (outputPath is not null)
+        {
+            outputPath = Path.GetFullPath(outputPath);
+            var parent = Path.GetDirectoryName(outputPath);
+            if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+            {
+                return Error("rehearsal_output_directory_missing", $"Rehearsal output directory not found: {parent}");
+            }
+
+            if (SamePath(outputPath, candidatePath)
+                || SamePath(outputPath, referencePath)
+                || SamePath(outputPath, profilePath))
+            {
+                return Error("rehearsal_output_refused", "Rehearsal output path must not overwrite input files.");
+            }
+        }
+
+        if (!OpenXmlDocumentInspector.TryInspect(candidatePath, out var candidateMap, out var candidateDiagnostic)
+            || candidateMap is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = candidatePath,
+                OutputPath = outputPath,
+                Diagnostics = candidateDiagnostic is null ? [] : [candidateDiagnostic]
+            };
+        }
+
+        if (!OpenXmlDocumentInspector.TryInspect(referencePath, out var referenceMap, out var referenceDiagnostic)
+            || referenceMap is null)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = candidatePath,
+                OutputPath = outputPath,
+                Diagnostics = referenceDiagnostic is null ? [] : [referenceDiagnostic]
+            };
+        }
+
+        if (!TryReadProfile(profilePath, out var profile, out var profileError))
+        {
+            return profileError!;
+        }
+
+        NormalizeProfile(profile!);
+        var validation = ProfileComplianceValidator.Validate(candidateMap, profile!);
+        var report = RehearsalComparisonBuilder.Build(candidateMap, referenceMap, validation);
+        if (outputPath is not null)
+        {
+            File.WriteAllText(outputPath, ThesisJson.Serialize(report));
+        }
+
+        return new CliResult
+        {
+            Status = "success",
+            Document = candidatePath,
+            OutputPath = outputPath,
+            RehearsalComparison = report,
+            Diagnostics = report.Diagnostics
+        };
     }
 
     private static CliResult Validate(string[] args)
@@ -1333,6 +1408,7 @@ public static class ThesisCli
             "  profile explain --profile <profile.json>",
             "  inspect --doc <docx>",
             "  rules merge --profile <profile.json> --project <project-rules.json> --out <final-rules.json>",
+            "  rehearsal compare --candidate <docx> --reference <docx> --profile <profile.json> [--out <report.json>]",
             "  generate --content <content.json> --rules <final-rules.json> --out <thesis.docx>",
             "  run --workspace <dir> --request <request.json>",
             "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",

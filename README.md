@@ -173,7 +173,25 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 必须用 Word/WPS 或人工确认：真实分页、目录页码、孤行、跨页表格显示、自动续表标题。
 
-## 6. 结构化草稿路径
+## 6. 和成品论文做实战对比
+
+如果目录里有一份老师认可或人工写好的成品论文，可以用 `rehearsal compare` 检查候选稿是否接近可终审状态：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
+```
+
+报告会输出：
+
+- 候选稿和参考稿的段落数、非空段落数、字符数、表格数、节数。
+- 标题覆盖率 `headingCoverage`，用于发现章节标题缺失或重复编号。
+- 候选稿是否还需要 Word/WPS 最终化。
+- `validate` 的规则校验结果。
+- 段落、表格、节数量不足等诊断。
+
+`readyForFinalReview=true` 只代表离线结构、标题覆盖和 profile 校验没有发现警告；正式交付仍需经过 Word/WPS 打开后的分页、目录页码、跨页表格和续表标题抽查。
+
+## 7. 结构化草稿路径
 
 需要快速从内容 JSON 出一个草稿时，可以使用：
 
@@ -181,9 +199,9 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"
 ```
 
-这条路径不会完整保留模板原有页眉页脚、节、字段和复杂结构，不应作为正式终稿主路径。
+这条路径会自动插入目录字段，生成后仍需执行 `finalize apply` 更新目录和分页。它不会完整保留模板原有页眉页脚、节、字段和复杂结构，不应作为正式终稿主路径。
 
-## 7. 查看规则 JSON
+## 8. 查看规则 JSON
 
 打开：
 

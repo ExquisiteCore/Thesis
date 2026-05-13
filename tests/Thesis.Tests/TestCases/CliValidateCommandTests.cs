@@ -381,6 +381,94 @@ internal static partial class Program
             && operation.Target?["index"]?.GetValue<int>() == 3));
     }
 
+    static void CliValidateAcceptsMissingStyleIdWhenDirectFormattingMatches()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "paper.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p>
+              <w:pPr>
+                <w:jc w:val="center"/>
+                <w:spacing w:line="300" w:lineRule="auto"/>
+                <w:ind w:left="1701"/>
+              </w:pPr>
+              <w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>摘要</w:t></w:r>
+            </w:p>
+            """);
+        var profile = new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "abstract.zh",
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "center",
+                        LineSpacing = "300",
+                        LineSpacingRule = "auto",
+                        LeftIndentTwips = 1701,
+                        RunFormat = new RunFormatSample
+                        {
+                            Bold = true,
+                            FontSizeHalfPoints = "32"
+                        }
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(profilePath, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, result.Validation!.Compliant);
+        AssertEqual(false, result.Validation.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_role_format_mismatch"));
+    }
+
+    static void CliValidateRejectsMissingStyleIdWhenDirectFormattingEvidenceIsWeak()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "paper.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p>
+              <w:pPr><w:jc w:val="center"/></w:pPr>
+              <w:r><w:t>摘要</w:t></w:r>
+            </w:p>
+            """);
+        var profile = new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "abstract.zh",
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "2",
+                        Alignment = "center"
+                    }
+                }
+            ]
+        };
+        File.WriteAllText(profilePath, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(false, result.Validation!.Compliant);
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_role_format_mismatch"));
+    }
+
     static void CliValidateTreatsAppendixRoleAsOptional()
     {
         using var temp = new TempDirectory();

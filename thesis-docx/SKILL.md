@@ -104,6 +104,14 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> apply/w
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis.docx" --out ".analysis\final.docx"
 ```
 
+### 6. 和参考成品做 rehearsal 对比
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
+```
+
+重点看 `headingCoverage`、`readyForFinalReview`、`requiresFinalization`、段落/表格/节数量差异，以及 `validation.compliant`。这个命令适合在正式终审前发现候选稿和参考稿的结构缺口。
+
 ## 常用操作
 
 ```powershell
@@ -122,7 +130,7 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> apply/w
 
 ## 草稿生成路径
 
-`generate --content` 只能作为结构化草稿路径，不作为正式终稿主路径：
+`generate --content` 会插入目录字段，但只能作为结构化草稿路径，不作为正式终稿主路径：
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"

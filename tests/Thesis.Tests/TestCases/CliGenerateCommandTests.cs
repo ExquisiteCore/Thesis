@@ -186,4 +186,80 @@ internal static partial class Program
         AssertEqual(1, missingParent.ExitCode);
         AssertEqual("generate_output_directory_missing", missingParent.Result.Diagnostics[0].Code);
     }
+
+    static void CliGenerateDoesNotDuplicateExistingNumberingAndCreatesTocField()
+    {
+        using var temp = new TempDirectory();
+        var contentPath = Path.Combine(temp.Path, "content.json");
+        var rulesPath = Path.Combine(temp.Path, "final-rules.json");
+        var outputPath = Path.Combine(temp.Path, "thesis.docx");
+
+        var rules = new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "toc.title",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center" }
+                },
+                new ProfileStyleRole
+                {
+                    Role = "heading1",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1" }
+                },
+                new ProfileStyleRole
+                {
+                    Role = "heading2",
+                    Format = new ParagraphFormatSample { StyleId = "Heading2" }
+                }
+            ]
+        };
+        File.WriteAllText(rulesPath, ThesisJson.Serialize(rules));
+        File.WriteAllText(
+            contentPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "documentKind": "thesisContent",
+              "title": "论文题目",
+              "chapters": [
+                {
+                  "title": "第一章 绪论",
+                  "sections": [
+                    {
+                      "title": "1.1 研究背景与意义",
+                      "paragraphs": ["正文。"]
+                    }
+                  ]
+                }
+              ],
+              "references": [
+                "[1] 张三. 论文格式研究[J]. 学术期刊, 2024.",
+                "李四. 写作规范[M]. 北京: 出版社, 2025."
+              ]
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["generate", "--content", contentPath, "--rules", rulesPath, "--out", outputPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, OpenXmlDocumentInspector.TryInspect(outputPath, out var map, out var diagnostic));
+        AssertEqual(null, diagnostic);
+
+        var paragraphs = map!.Paragraphs;
+        AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "目录"));
+        AssertEqual("Normal", paragraphs.First(paragraph => paragraph.Text == "目录").StyleId);
+        AssertEqual(true, map.FinalizationReasons.Contains("fields"));
+        AssertEqual(true, map.FinalizationReasons.Contains("toc"));
+        AssertEqual(true, map.RequiresFinalization);
+        AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "第一章 绪论"));
+        AssertEqual(false, paragraphs.Any(paragraph => paragraph.Text == "第一章 第一章 绪论"));
+        AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "1.1 研究背景与意义"));
+        AssertEqual(false, paragraphs.Any(paragraph => paragraph.Text == "1.1 1.1 研究背景与意义"));
+        AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "[1] 张三. 论文格式研究[J]. 学术期刊, 2024."));
+        AssertEqual(false, paragraphs.Any(paragraph => paragraph.Text == "[1] [1] 张三. 论文格式研究[J]. 学术期刊, 2024."));
+        AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "[2] 李四. 写作规范[M]. 北京: 出版社, 2025."));
+    }
 }

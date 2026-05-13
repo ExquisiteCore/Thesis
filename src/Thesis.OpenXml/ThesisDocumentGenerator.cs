@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -21,9 +22,11 @@ public static class ThesisDocumentGenerator
         AppendParagraph(body, RequiredTitle(content), ResolveParagraphFormat(rules, "title"), "Title");
         AppendOptionalParagraph(body, content.Author, ResolveParagraphFormat(rules, "body"), "Normal");
         AppendAbstracts(body, content, rules);
+        AppendTableOfContents(body, rules);
         AppendChapters(body, content.Chapters, rules);
         AppendReferences(body, content.References, rules);
         AppendAcknowledgements(body, content.Acknowledgements, rules);
+        MarkDocumentFieldsDirty(mainPart);
         body.AppendChild(CreateSectionProperties(rules.PageSetup));
         mainPart.Document.Save();
     }
@@ -62,14 +65,14 @@ public static class ThesisDocumentGenerator
         {
             var chapter = chapters[chapterIndex];
             var chapterNumber = chapterIndex + 1;
-            AppendParagraph(body, $"第{ToChineseOrdinal(chapterNumber)}章 {chapter.Title}", ResolveParagraphFormat(rules, "heading1"), "Heading1");
+            AppendParagraph(body, FormatChapterTitle(chapter.Title, chapterNumber), ResolveParagraphFormat(rules, "heading1"), "Heading1");
             AppendBodyParagraphs(body, chapter.Paragraphs, rules);
             AppendTables(body, chapter.Tables, rules);
 
             for (var sectionIndex = 0; sectionIndex < chapter.Sections.Count; sectionIndex++)
             {
                 var section = chapter.Sections[sectionIndex];
-                AppendParagraph(body, $"{chapterNumber}.{sectionIndex + 1} {section.Title}", ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
+                AppendParagraph(body, FormatSectionTitle(section.Title, chapterNumber, sectionIndex + 1), ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
                 AppendBodyParagraphs(body, section.Paragraphs, rules);
                 AppendTables(body, section.Tables, rules);
             }
@@ -105,8 +108,14 @@ public static class ThesisDocumentGenerator
         var format = ResolveParagraphFormat(rules, "referenceItem", "body");
         for (var index = 0; index < references.Count; index++)
         {
-            AppendParagraph(body, $"[{index + 1}] {references[index]}", format, "Normal");
+            AppendParagraph(body, $"[{index + 1}] {StripReferenceNumber(references[index])}", format, "Normal");
         }
+    }
+
+    private static void AppendTableOfContents(Body body, TemplateProfile rules)
+    {
+        AppendParagraph(body, "目录", ResolveTableOfContentsTitleFormat(rules), "Normal");
+        body.AppendChild(CreateTocParagraph("1-3"));
     }
 
     private static void AppendAcknowledgements(Body body, string? acknowledgements, TemplateProfile rules)
@@ -258,6 +267,25 @@ public static class ThesisDocumentGenerator
         return section;
     }
 
+    private static Paragraph CreateTocParagraph(string levels)
+    {
+        return new Paragraph(
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin, Dirty = true }),
+            new Run(new FieldCode($" TOC \\o \"{levels}\" \\h \\z \\u ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("目录待更新")),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+    }
+
+    private static void MarkDocumentFieldsDirty(MainDocumentPart mainPart)
+    {
+        var settingsPart = mainPart.DocumentSettingsPart ?? mainPart.AddNewPart<DocumentSettingsPart>();
+        settingsPart.Settings ??= new Settings();
+        settingsPart.Settings.RemoveAllChildren<UpdateFieldsOnOpen>();
+        settingsPart.Settings.AppendChild(new UpdateFieldsOnOpen { Val = true });
+        settingsPart.Settings.Save();
+    }
+
     private static ParagraphFormatSample? ResolveParagraphFormat(TemplateProfile rules, string role, string? fallbackRole = null)
     {
         var roleFormat = rules.StyleRoles
@@ -281,6 +309,20 @@ public static class ThesisDocumentGenerator
         }
 
         return fallbackRole is null ? null : ResolveParagraphFormat(rules, fallbackRole);
+    }
+
+    private static ParagraphFormatSample? ResolveTableOfContentsTitleFormat(TemplateProfile rules)
+    {
+        var format = ResolveParagraphFormat(rules, "toc.title")
+            ?? ResolveParagraphFormat(rules, "heading1");
+        if (format is null)
+        {
+            return new ParagraphFormatSample { Alignment = "center" };
+        }
+
+        var clone = OpenXmlFormatMerger.Clone(format);
+        clone.StyleId = null;
+        return clone;
     }
 
     private static TableFormatSample? ResolveTableFormat(TemplateProfile rules)
@@ -318,6 +360,43 @@ public static class ThesisDocumentGenerator
             10 => "十",
             _ => value.ToString()
         };
+    }
+
+    private static string FormatChapterTitle(string title, int chapterNumber)
+    {
+        var trimmed = title.Trim();
+        var spacedMatch = Regex.Match(
+            trimmed,
+            @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章\s+\S.*$",
+            RegexOptions.CultureInvariant);
+        if (spacedMatch.Success)
+        {
+            return trimmed;
+        }
+
+        var compactMatch = Regex.Match(
+            trimmed,
+            @"^(?<prefix>第[一二三四五六七八九十百千万零〇两0-9Xx]+章)(?<title>\S.*)$",
+            RegexOptions.CultureInvariant);
+        if (compactMatch.Success)
+        {
+            return $"{compactMatch.Groups["prefix"].Value} {compactMatch.Groups["title"].Value}";
+        }
+
+        return $"第{ToChineseOrdinal(chapterNumber)}章 {trimmed}";
+    }
+
+    private static string FormatSectionTitle(string title, int chapterNumber, int sectionNumber)
+    {
+        var trimmed = title.Trim();
+        return Regex.IsMatch(trimmed, @"^\d{1,2}[\.．]\d{1,2}(?:[\.．]\d{1,2})?\s+\S+", RegexOptions.CultureInvariant)
+            ? trimmed
+            : $"{chapterNumber}.{sectionNumber} {trimmed}";
+    }
+
+    private static string StripReferenceNumber(string text)
+    {
+        return Regex.Replace(text.Trim(), @"^\s*\[\d+\]\s*", "", RegexOptions.CultureInvariant);
     }
 
     private static bool NeedsPreservedSpace(string text)

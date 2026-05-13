@@ -358,8 +358,7 @@ internal static class ProfileComplianceValidator
 
     private static bool ParagraphFormatMatches(ParagraphFormatSample actual, ParagraphFormatSample expected)
     {
-        return StringMatches(actual.StyleId, expected.StyleId)
-            && StringMatches(actual.Alignment, expected.Alignment)
+        var directFormatMatches = StringMatches(actual.Alignment, expected.Alignment)
             && IntMatches(actual.SpacingBeforeTwips, expected.SpacingBeforeTwips)
             && IntMatches(actual.SpacingAfterTwips, expected.SpacingAfterTwips)
             && StringMatches(actual.LineSpacing, expected.LineSpacing)
@@ -368,6 +367,19 @@ internal static class ProfileComplianceValidator
             && IntMatches(actual.LeftIndentTwips, expected.LeftIndentTwips)
             && IntMatches(actual.RightIndentTwips, expected.RightIndentTwips)
             && RunFormatMatches(actual.RunFormat, expected.RunFormat);
+        if (!directFormatMatches)
+        {
+            return false;
+        }
+
+        if (StringMatches(actual.StyleId, expected.StyleId))
+        {
+            return true;
+        }
+
+        return string.IsNullOrWhiteSpace(actual.StyleId)
+            && !string.IsNullOrWhiteSpace(expected.StyleId)
+            && HasStrongDirectParagraphFormatExpectation(expected);
     }
 
     private static bool RunFormatMatches(RunFormatSample? actual, RunFormatSample? expected)
@@ -384,6 +396,107 @@ internal static class ProfileComplianceValidator
             && StringMatches(actual?.HighAnsiFont, expected.HighAnsiFont)
             && StringMatches(actual?.EastAsiaFont, expected.EastAsiaFont)
             && StringMatches(actual?.ComplexScriptFont, expected.ComplexScriptFont);
+    }
+
+    private static bool HasStrongDirectParagraphFormatExpectation(ParagraphFormatSample expected)
+    {
+        var paragraphEvidenceCount = CountDirectParagraphFormatExpectations(expected);
+        var runEvidenceCount = CountDirectRunFormatExpectations(expected.RunFormat);
+        return paragraphEvidenceCount >= 1
+            && runEvidenceCount >= 1
+            && paragraphEvidenceCount + runEvidenceCount >= 3;
+    }
+
+    private static int CountDirectParagraphFormatExpectations(ParagraphFormatSample expected)
+    {
+        var count = 0;
+        if (expected.Alignment is not null)
+        {
+            count++;
+        }
+
+        if (expected.SpacingBeforeTwips is not null)
+        {
+            count++;
+        }
+
+        if (expected.SpacingAfterTwips is not null)
+        {
+            count++;
+        }
+
+        if (expected.LineSpacing is not null)
+        {
+            count++;
+        }
+
+        if (expected.LineSpacingRule is not null)
+        {
+            count++;
+        }
+
+        if (expected.FirstLineIndentTwips is not null)
+        {
+            count++;
+        }
+
+        if (expected.LeftIndentTwips is not null)
+        {
+            count++;
+        }
+
+        if (expected.RightIndentTwips is not null)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private static int CountDirectRunFormatExpectations(RunFormatSample? expected)
+    {
+        if (expected is null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        if (expected.Bold is not null)
+        {
+            count++;
+        }
+
+        if (expected.Italic is not null)
+        {
+            count++;
+        }
+
+        if (expected.FontSizeHalfPoints is not null)
+        {
+            count++;
+        }
+
+        if (expected.AsciiFont is not null)
+        {
+            count++;
+        }
+
+        if (expected.HighAnsiFont is not null)
+        {
+            count++;
+        }
+
+        if (expected.EastAsiaFont is not null)
+        {
+            count++;
+        }
+
+        if (expected.ComplexScriptFont is not null)
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private static bool TableFormatMatches(TableFormatSample actual, TableFormatSample expected)

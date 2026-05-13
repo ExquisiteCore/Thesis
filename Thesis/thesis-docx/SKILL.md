@@ -36,6 +36,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc "模板.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis.docx"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis.docx" --out ".analysis\final.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
 ```
 
 ## writeBlock
@@ -72,10 +73,10 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 ## 草稿生成
 
-`generate --content` 只适合结构化草稿，不作为正式终稿主路径。
+`generate --content` 会插入目录字段，但只适合结构化草稿，不作为正式终稿主路径。
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"
 ```
 
-正式交付前必须用 Word/WPS 最终化并人工抽查真实分页、目录页码、孤行、跨页表格和续表标题。
+正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格和续表标题。

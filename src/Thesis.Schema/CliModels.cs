@@ -30,6 +30,8 @@ public sealed class CliResult
 
     public ValidationReport? Validation { get; set; }
 
+    public RehearsalComparisonReport? RehearsalComparison { get; set; }
+
     public List<OperationCatalogItem> OperationsCatalog { get; set; } = [];
 
     public OperationRequest? OperationSample { get; set; }
@@ -66,4 +68,3 @@ public sealed class ValidationReport
 
     public List<ThesisOperation> SuggestedOperations { get; set; } = [];
 }
-
