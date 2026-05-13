@@ -245,6 +245,235 @@ internal static partial class Program
             """);
     }
 
+    static void WriteMultiSectionThesisTemplateDocx(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+              <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+              <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+              <Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+              <Override PartName="/word/header3.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+              <Relationship Id="rIdCoverHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+              <Relationship Id="rIdBodyHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/>
+              <Relationship Id="rIdTailHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header3.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/styles.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+              <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+            </w:styles>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header1.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>封面页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header2.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>正文页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header3.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>尾部页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <w:body>
+                <w:p><w:r><w:t>封面保留</w:t></w:r></w:p>
+                <w:p>
+                  <w:pPr>
+                    <w:sectPr>
+                      <w:headerReference w:type="default" r:id="rIdCoverHeader"/>
+                      <w:pgSz w:w="11906" w:h="16838"/>
+                      <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
+                    </w:sectPr>
+                  </w:pPr>
+                </w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>摘要</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板摘要占位</w:t></w:r></w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>目录</w:t></w:r></w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板正文占位</w:t></w:r></w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>
+                <w:p>
+                  <w:pPr>
+                    <w:sectPr>
+                      <w:headerReference w:type="default" r:id="rIdBodyHeader"/>
+                      <w:pgSz w:w="11906" w:h="16838"/>
+                      <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1701" w:header="720" w:footer="720" w:gutter="0"/>
+                    </w:sectPr>
+                  </w:pPr>
+                </w:p>
+                <w:p><w:r><w:t>格式说明保留</w:t></w:r></w:p>
+                <w:sectPr>
+                  <w:headerReference w:type="default" r:id="rIdTailHeader"/>
+                  <w:pgSz w:w="11906" w:h="16838"/>
+                  <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+                </w:sectPr>
+              </w:body>
+            </w:document>
+            """);
+    }
+
+    static void WriteMultiSectionTemplateWithoutTailSectionDocx(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+              <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+              <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+              <Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+              <Override PartName="/word/header3.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+              <Relationship Id="rIdCoverHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+              <Relationship Id="rIdTocHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/>
+              <Relationship Id="rIdBodyHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header3.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/styles.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+              <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+            </w:styles>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header1.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>封面页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header2.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>目录页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/header3.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>正文页眉</w:t></w:r></w:p></w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <w:body>
+                <w:p><w:r><w:t>封面保留</w:t></w:r></w:p>
+                <w:p>
+                  <w:pPr>
+                    <w:sectPr>
+                      <w:headerReference w:type="default" r:id="rIdCoverHeader"/>
+                      <w:pgSz w:w="11906" w:h="16838"/>
+                      <w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
+                    </w:sectPr>
+                  </w:pPr>
+                </w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>摘要</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板摘要占位</w:t></w:r></w:p>
+                <w:p>
+                  <w:pPr>
+                    <w:sectPr>
+                      <w:headerReference w:type="default" r:id="rIdTocHeader"/>
+                      <w:pgSz w:w="11906" w:h="16838"/>
+                      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+                    </w:sectPr>
+                  </w:pPr>
+                </w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>目录</w:t></w:r></w:p>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板正文占位</w:t></w:r></w:p>
+                <w:p>
+                  <w:pPr>
+                    <w:sectPr>
+                      <w:headerReference w:type="default" r:id="rIdBodyHeader"/>
+                      <w:pgSz w:w="11906" w:h="16838"/>
+                      <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1701" w:header="720" w:footer="720" w:gutter="0"/>
+                    </w:sectPr>
+                  </w:pPr>
+                </w:p>
+                <w:p><w:r><w:t>正文格式说明</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """);
+    }
+
     static void WriteCommentedRulesFixtureDocx(string path)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);

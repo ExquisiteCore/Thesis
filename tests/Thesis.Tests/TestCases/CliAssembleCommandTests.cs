@@ -107,6 +107,7 @@ internal static partial class Program
         AssertEqual(1, map!.Sections.Count);
         AssertEqual("rIdHeader1", map.Sections[0].Headers[0].RelationshipId);
         AssertEqual(1800, map.Sections[0].PageMargin!.LeftTwips);
+        AssertEqual(false, map.Paragraphs.Any(paragraph => paragraph.Text == "中文摘要"));
         AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "论文题目"));
         AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "目录"));
         AssertEqual(null, map.Paragraphs.First(paragraph => paragraph.Text == "目录").StyleId);
@@ -121,6 +122,157 @@ internal static partial class Program
         AssertEqual("single", map.Tables[0].Format.Borders!.Top!.Value);
         AssertEqual(true, map.RequiresFinalization);
         AssertEqual(true, map.FinalizationReasons.Contains("toc"));
+    }
+
+    static void CliAssemblePreservesTemplatePrefixReplacesBodyAndDropsTemplateTail()
+    {
+        using var temp = new TempDirectory();
+        var templatePath = Path.Combine(temp.Path, "template.docx");
+        var contentPath = Path.Combine(temp.Path, "content.json");
+        var rulesPath = Path.Combine(temp.Path, "final-rules.json");
+        var outputPath = Path.Combine(temp.Path, "assembled.docx");
+
+        WriteMultiSectionThesisTemplateDocx(templatePath);
+        File.WriteAllText(rulesPath, ThesisJson.Serialize(new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "heading1",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center" }
+                },
+                new ProfileStyleRole
+                {
+                    Role = "body",
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "Normal",
+                        FirstLineIndentTwips = 420,
+                        LineSpacing = "360",
+                        RunFormat = new RunFormatSample { FontSizeHalfPoints = "24", EastAsiaFont = "宋体" }
+                    }
+                }
+            ]
+        }));
+        File.WriteAllText(
+            contentPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "documentKind": "thesisContent",
+              "title": "论文题目",
+              "abstractZh": "正式中文摘要。",
+              "chapters": [
+                {
+                  "title": "第一章 绪论",
+                  "paragraphs": ["正式正文段落。"]
+                }
+              ],
+              "references": ["张三. 模板论文研究[J]. 学术期刊, 2026."]
+            }
+            """);
+
+        var (exitCode, result) = RunCli([
+            "assemble",
+            "--doc",
+            templatePath,
+            "--content",
+            contentPath,
+            "--profile",
+            rulesPath,
+            "--out",
+            outputPath
+        ]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, OpenXmlDocumentInspector.TryInspect(outputPath, out var map, out var diagnostic));
+        AssertEqual(null, diagnostic);
+
+        AssertEqual(true, map!.Paragraphs.Any(paragraph => paragraph.Text == "封面保留"));
+        AssertEqual(false, map.Paragraphs.Any(paragraph => paragraph.Text == "模板摘要占位"));
+        AssertEqual(false, map.Paragraphs.Any(paragraph => paragraph.Text == "模板正文占位"));
+        AssertEqual(false, map.Paragraphs.Any(paragraph => paragraph.Text == "格式说明保留"));
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "正式中文摘要。"));
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "正式正文段落。"));
+        AssertEqual(2, map.Sections.Count);
+        AssertEqual("rIdCoverHeader", map.Sections[0].Headers[0].RelationshipId);
+        AssertEqual("rIdBodyHeader", map.Sections[1].Headers[0].RelationshipId);
+    }
+
+    static void CliAssembleUsesLastBodySectionWhenTemplateHasNoTailSection()
+    {
+        using var temp = new TempDirectory();
+        var templatePath = Path.Combine(temp.Path, "template.docx");
+        var contentPath = Path.Combine(temp.Path, "content.json");
+        var rulesPath = Path.Combine(temp.Path, "final-rules.json");
+        var outputPath = Path.Combine(temp.Path, "assembled.docx");
+
+        WriteMultiSectionTemplateWithoutTailSectionDocx(templatePath);
+        File.WriteAllText(rulesPath, ThesisJson.Serialize(new TemplateProfile
+        {
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "heading1",
+                    Format = new ParagraphFormatSample { StyleId = "Heading1", Alignment = "center" }
+                },
+                new ProfileStyleRole
+                {
+                    Role = "body",
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "Normal",
+                        FirstLineIndentTwips = 420,
+                        LineSpacing = "360",
+                        RunFormat = new RunFormatSample { FontSizeHalfPoints = "24", EastAsiaFont = "宋体" }
+                    }
+                }
+            ]
+        }));
+        File.WriteAllText(
+            contentPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "documentKind": "thesisContent",
+              "title": "论文题目",
+              "abstractZh": "正式中文摘要。",
+              "chapters": [
+                {
+                  "title": "第一章 绪论",
+                  "paragraphs": ["正式正文段落。"]
+                }
+              ],
+              "references": ["张三. 模板论文研究[J]. 学术期刊, 2026."]
+            }
+            """);
+
+        var (exitCode, result) = RunCli([
+            "assemble",
+            "--doc",
+            templatePath,
+            "--content",
+            contentPath,
+            "--profile",
+            rulesPath,
+            "--out",
+            outputPath
+        ]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(true, OpenXmlDocumentInspector.TryInspect(outputPath, out var map, out var diagnostic));
+        AssertEqual(null, diagnostic);
+
+        AssertEqual(2, map!.Sections.Count);
+        AssertEqual("rIdCoverHeader", map.Sections[0].Headers[0].RelationshipId);
+        AssertEqual("rIdBodyHeader", map.Sections[1].Headers[0].RelationshipId);
+        AssertEqual(1701, map.Sections[1].PageMargin!.LeftTwips);
+        AssertEqual(false, map.Paragraphs.Any(paragraph => paragraph.Text == "正文格式说明"));
+        AssertEqual(true, map.Paragraphs.Any(paragraph => paragraph.Text == "正式正文段落。"));
     }
 
     static void CliAssembleRefusesUnsafeOutputPaths()

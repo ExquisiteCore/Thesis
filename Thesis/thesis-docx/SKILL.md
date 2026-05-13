@@ -19,7 +19,7 @@ description: Use when using Thesis DOCX CLI to extract thesis template rules, me
 inspect --doc -> profile extract -> project-rules.json -> rules merge -> assemble -> validate -> finalize -> rehearsal compare -> apply/writeBlock 微调
 ```
 
-正式终稿优先在模板副本上装配或增量写入，避免从空白文档重建时丢失节、页眉页脚、字段和复杂样式。
+正式终稿优先在模板副本上装配或增量写入，避免从空白文档重建时丢失节、页眉页脚、字段和复杂样式。`assemble` 会保留首个论文锚点之前的封面/前置页，从“摘要 / Abstract / 目录 / 第X章”开始替换论文主体，保留选中的正文节设置，并丢弃模板尾部格式说明或示例内容。
 
 ## 规则优先级
 
@@ -42,7 +42,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 ## writeBlock
 
-第一版整篇论文优先用 `assemble` 写入 `content.json`。老师反馈后的局部替换、插入和格式覆盖再用 `writeBlock`。角色格式来自 `final-rules.json`，本次 `format` 覆盖角色默认格式。`position` 支持 `before`、`after` 和 `replace`；替换模板占位段落时使用 `replace`。
+第一版整篇论文优先用 `assemble` 写入 `content.json`。老师反馈后的局部替换、插入和格式覆盖再用 `writeBlock`。角色格式来自 `final-rules.json`，本次 `format` 覆盖角色默认格式。`position` 支持 `before`、`after` 和 `replace`；替换模板占位段落时使用 `replace`。如果模板没有可识别论文锚点或节边界，`assemble` 会回退到整主体重写路径，这类模板要先用 `inspect` 检查结构。
 
 ```json
 {
@@ -80,4 +80,4 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"
 ```
 
-正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格和续表标题。
+正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格、节状态和续表标题。

@@ -156,6 +156,8 @@ internal static partial class Program
         ("CLI rehearsal compare normalizes TOC page numbers and repeated heading prefixes", CliRehearsalCompareNormalizesTocPageNumbersAndRepeatedHeadingPrefixes),
         ("CLI rehearsal compare does not treat chapter sentences as headings", CliRehearsalCompareDoesNotTreatChapterSentencesAsHeadings),
         ("CLI assemble preserves template package and writes content", CliAssemblePreservesTemplatePackageAndWritesContent),
+        ("CLI assemble preserves template prefix replaces body and drops template tail", CliAssemblePreservesTemplatePrefixReplacesBodyAndDropsTemplateTail),
+        ("CLI assemble uses last body section when template has no tail section", CliAssembleUsesLastBodySectionWhenTemplateHasNoTailSection),
         ("CLI assemble refuses unsafe output paths", CliAssembleRefusesUnsafeOutputPaths),
         ("CLI generate creates thesis DOCX from content and final rules", CliGenerateCreatesThesisDocxFromContentAndFinalRules),
         ("CLI generate refuses unsafe output paths", CliGenerateRefusesUnsafeOutputPaths),

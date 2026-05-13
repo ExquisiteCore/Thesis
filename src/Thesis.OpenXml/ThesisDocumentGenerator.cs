@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Thesis.Core;
 using Thesis.Schema;
 
 namespace Thesis.OpenXml;
@@ -39,13 +40,140 @@ public static class ThesisDocumentGenerator
         var body = wordDocument.Body
             ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
-        var sectionProperties = body.Elements<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties
-            ?? CreateSectionProperties(rules.PageSetup);
-        body.RemoveAllChildren();
-        AppendThesisContent(body, content, rules);
+        if (!TryReplaceTemplateThesisRange(body, content, rules))
+        {
+            var sectionProperties = body.Elements<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties
+                ?? CreateSectionProperties(rules.PageSetup);
+            body.RemoveAllChildren();
+            AppendThesisContent(body, content, rules);
+            body.AppendChild(sectionProperties);
+        }
+
         MarkDocumentFieldsDirty(mainPart);
-        body.AppendChild(sectionProperties);
         wordDocument.Save();
+    }
+
+    private static bool TryReplaceTemplateThesisRange(Body body, ThesisContent content, TemplateProfile rules)
+    {
+        var blocks = body.Elements<OpenXmlElement>().ToList();
+        var startIndex = FindThesisRangeStart(blocks);
+        if (startIndex is null)
+        {
+            return false;
+        }
+
+        var sectionBreakIndex = FindThesisRangeSectionBreak(blocks, startIndex.Value);
+        if (sectionBreakIndex is null)
+        {
+            return false;
+        }
+
+        var generatedBody = new Body();
+        AppendThesisContent(generatedBody, content, rules);
+        var generatedBlocks = generatedBody.Elements<OpenXmlElement>()
+            .Select(block => block.CloneNode(deep: true))
+            .ToList();
+        var sectionBreak = CreateSectionBreakBlock(blocks[sectionBreakIndex.Value]);
+        var rewrittenBlocks = blocks
+            .Take(startIndex.Value)
+            .Select(block => block.CloneNode(deep: true))
+            .Concat(generatedBlocks)
+            .Concat([sectionBreak])
+            .ToList();
+
+        body.RemoveAllChildren();
+        foreach (var block in rewrittenBlocks)
+        {
+            body.AppendChild(block);
+        }
+
+        return true;
+    }
+
+    private static int? FindThesisRangeStart(List<OpenXmlElement> blocks)
+    {
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (IsThesisStartAnchor(BlockText(blocks[index])))
+            {
+                return index;
+            }
+        }
+
+        return null;
+    }
+
+    private static int? FindThesisRangeSectionBreak(List<OpenXmlElement> blocks, int startIndex)
+    {
+        var sectionBreakIndices = blocks
+            .Select((block, index) => new { Block = block, Index = index })
+            .Where(item => item.Index >= startIndex && HasSectionProperties(item.Block))
+            .Select(item => item.Index)
+            .ToList();
+        if (sectionBreakIndices.Count == 0)
+        {
+            return null;
+        }
+
+        if (sectionBreakIndices.Count == 1)
+        {
+            return sectionBreakIndices[0];
+        }
+
+        var lastSectionBreakIndex = sectionBreakIndices[^1];
+        var previousSectionBreakIndex = sectionBreakIndices[^2];
+        return LooksLikeTemplateTailSection(blocks, previousSectionBreakIndex, lastSectionBreakIndex)
+            ? previousSectionBreakIndex
+            : lastSectionBreakIndex;
+    }
+
+    private static bool IsThesisStartAnchor(string text)
+    {
+        return ThesisTextHeuristics.IsChineseAbstractHeading(text)
+            || ThesisTextHeuristics.IsEnglishAbstractHeading(text)
+            || ThesisTextHeuristics.IsTocHeading(text)
+            || IsChapterHeading(text);
+    }
+
+    private static bool IsChapterHeading(string text)
+    {
+        var normalized = Regex.Replace(text, @"\s+", "", RegexOptions.CultureInvariant);
+        return Regex.IsMatch(normalized, @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章", RegexOptions.CultureInvariant);
+    }
+
+    private static bool LooksLikeTemplateTailSection(List<OpenXmlElement> blocks, int previousSectionBreakIndex, int lastSectionBreakIndex)
+    {
+        var tailTexts = blocks
+            .Skip(previousSectionBreakIndex + 1)
+            .Take(lastSectionBreakIndex - previousSectionBreakIndex - 1)
+            .Select(BlockText)
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .ToList();
+
+        return tailTexts.Count > 0 && !tailTexts.Any(IsThesisStartAnchor);
+    }
+
+    private static bool HasSectionProperties(OpenXmlElement block)
+    {
+        return block is SectionProperties || block.Descendants<SectionProperties>().Any();
+    }
+
+    private static OpenXmlElement CreateSectionBreakBlock(OpenXmlElement block)
+    {
+        if (block is SectionProperties sectionProperties)
+        {
+            return sectionProperties.CloneNode(deep: true);
+        }
+
+        var clonedSection = block.Descendants<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties;
+        return clonedSection is null
+            ? block.CloneNode(deep: true)
+            : new Paragraph(new ParagraphProperties(clonedSection));
+    }
+
+    private static string BlockText(OpenXmlElement block)
+    {
+        return string.Concat(block.Descendants<Text>().Select(text => text.Text));
     }
 
     private static void AppendThesisContent(Body body, ThesisContent content, TemplateProfile rules)

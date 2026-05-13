@@ -29,7 +29,7 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
   -> profile extract               提取 profile.json 基础格式画像
   -> project-rules.json            AI/人工补充模板里没有显式体现的要求
   -> rules merge                   合并为 final-rules.json
-  -> assemble                      把结构化正文写入模板副本，保留模板包结构和末节页面设置
+  -> assemble                      把结构化正文写入模板副本，保留前置页和正文节设置
   -> apply + writeBlock/request    老师反馈后的局部微调
   -> validate                      检查可离线验证的格式
   -> finalize plan/apply           用 Word/WPS 更新字段、目录、分页
@@ -42,7 +42,7 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
 request.json 单次操作参数 > project-rules.json / final-rules.json > profile.json > 工具默认规则
 ```
 
-正式终稿优先用 `assemble --doc 模板.docx --content content.json --profile final-rules.json --out 输出.docx` 做第一版整篇装配；它复制模板后重写正文主体，保留模板里的样式、页眉页脚关系和最后一个节的页面设置。老师后续反馈、个别段落覆盖、局部格式调整再用 `apply --request request.json`。`generate --content` 仍然存在，但只适合作为空白文档草稿路径。
+正式终稿优先用 `assemble --doc 模板.docx --content content.json --profile final-rules.json --out 输出.docx` 做第一版整篇装配；它复制模板后保留首个论文锚点之前的封面/前置页，从“摘要 / Abstract / 目录 / 第X章”这类锚点开始替换论文主体，并保留选中的正文节页面设置和页眉页脚关系。模板尾部的格式说明、示例参考文献等说明性内容会被丢弃。老师后续反馈、个别段落覆盖、局部格式调整再用 `apply --request request.json`。`generate --content` 仍然存在，但只适合作为空白文档草稿路径。
 
 ## 1. 检查模板正文和批注
 
@@ -118,7 +118,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
 ```
 
-这条路径是当前最接近“正式工具”的整篇写作入口：它不是从空白文件开始，而是在模板副本上写入内容。当前版本会清空并重写正文主体，所以能保留模板包结构和末节页面设置，但还不能原样保留模板内部多节前置页、复杂占位符和已有正文中的局部结构；这些属于下一阶段要补的终稿级能力。
+这条路径是当前最接近“正式工具”的整篇写作入口：它不是从空白文件开始，而是在模板副本上写入内容。当前版本会保留首个论文锚点之前的模板前置内容，替换论文主体范围，保留正文节设置，并丢弃模板尾部的格式说明/示例内容；如果模板里找不到可识别的论文锚点或节边界，工具会回退到旧的整主体重写路径。它还不是完整的终稿排版引擎：目录、字段、分页、节状态归一化仍必须经过 Word/WPS `finalize apply`。
 
 ## 5. 用 writeBlock 微调正文
 
