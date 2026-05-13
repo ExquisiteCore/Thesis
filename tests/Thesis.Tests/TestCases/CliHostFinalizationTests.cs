@@ -53,6 +53,34 @@ internal static partial class Program
         AssertEqual(null, result.HostApplication);
     }
 
+    static void CliFinalizeApplyRemovesCopiedOutputWhenComHostFails()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var output = Path.Combine(temp.Path, "finalized.docx");
+        WriteFixtureDocx(docx);
+
+        var (exitCode, result) = RunCli([
+            "finalize",
+            "apply",
+            "--doc",
+            docx,
+            "--out",
+            output,
+            "--host",
+            "wps",
+            "--prog-id",
+            "Thesis.Tests.MissingComHost"
+        ]);
+
+        AssertEqual(1, exitCode);
+        AssertEqual("error", result.Status);
+        AssertEqual(Path.GetFullPath(docx), result.Document);
+        AssertEqual(Path.GetFullPath(output), result.OutputPath);
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "host_application_unavailable"));
+        AssertEqual(false, File.Exists(output));
+    }
+
     static void CliFinalizeApplyWorkspaceRespectsSessionLock()
     {
         using var temp = new TempDirectory();

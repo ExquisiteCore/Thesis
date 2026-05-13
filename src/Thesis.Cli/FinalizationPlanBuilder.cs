@@ -11,7 +11,7 @@ internal static class FinalizationPlanBuilder
             .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var required = map.RequiresFinalization || reasons.Count > 0;
+        var required = map.RequiresFinalization || (reasons.Count > 0 && map.HostFinalization?.IsCurrent != true);
         var steps = new List<FinalizationStep>();
         if (reasons.Contains("fields", StringComparer.OrdinalIgnoreCase))
         {
@@ -20,7 +20,7 @@ internal static class FinalizationPlanBuilder
                 Id = "updateFields",
                 Capability = "hostApplication",
                 Description = "Update DOCX fields with Word/WPS automation or an opened Word-compatible application.",
-                Required = true
+                Required = required
             });
         }
 
@@ -31,7 +31,7 @@ internal static class FinalizationPlanBuilder
                 Id = "updateTableOfContents",
                 Capability = "hostApplication",
                 Description = "Update table of contents entries and page numbers after all content edits are complete.",
-                Required = true
+                Required = required
             });
         }
 

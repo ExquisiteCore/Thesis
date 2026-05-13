@@ -10,6 +10,8 @@ public sealed class DocumentMap
 
     public List<string> FinalizationReasons { get; set; } = [];
 
+    public HostFinalizationState? HostFinalization { get; set; }
+
     public List<DocumentParagraph> Paragraphs { get; set; } = [];
 
     public List<DocumentStyle> Styles { get; set; } = [];
@@ -23,6 +25,23 @@ public sealed class DocumentMap
     public List<DocumentComment> Comments { get; set; } = [];
 
     public List<DocumentRequirementHint> RequirementHints { get; set; } = [];
+}
+
+public sealed class HostFinalizationState
+{
+    public string SchemaVersion { get; set; } = "1.0";
+
+    public bool IsCurrent { get; set; }
+
+    public string? Host { get; set; }
+
+    public string? ProgId { get; set; }
+
+    public string? CompletedAtUtc { get; set; }
+
+    public string? Fingerprint { get; set; }
+
+    public List<string> Reasons { get; set; } = [];
 }
 
 public sealed class DocumentParagraph

@@ -47,13 +47,17 @@ public static class OpenXmlDocumentInspector
             ?? throw new InvalidDataException("DOCX does not contain a document body.");
 
         var finalizationReasons = GetFinalizationReasons(body);
+        var hostFinalization = OpenXmlFinalizationMetadata.Read(fullPath);
+        var requiresFinalization = finalizationReasons.Count > 0
+            && hostFinalization?.IsCurrent != true;
         var styleOutlineLevels = ReadStyleOutlineLevels(mainPart);
 
         return new DocumentMap
         {
             Path = fullPath,
-            RequiresFinalization = finalizationReasons.Count > 0,
+            RequiresFinalization = requiresFinalization,
             FinalizationReasons = finalizationReasons,
+            HostFinalization = hostFinalization,
             Paragraphs = ReadParagraphs(body, styleOutlineLevels),
             Styles = ReadStyles(mainPart, body),
             Numbering = ReadNumbering(mainPart),

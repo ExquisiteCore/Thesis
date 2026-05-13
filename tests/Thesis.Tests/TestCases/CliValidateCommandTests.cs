@@ -99,6 +99,100 @@ internal static partial class Program
         AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "finalization_required"));
     }
 
+    static void CliValidateDoesNotWarnAfterRecordedHostFinalization()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            """);
+        File.WriteAllText(profilePath, "{}");
+        OpenXmlFinalizationMetadata.MarkHostFinalized(
+            docx,
+            new HostApplicationReport
+            {
+                RequestedHost = "wps",
+                ProgId = "KWps.Application",
+                Steps =
+                [
+                    new HostApplicationStep { Id = "updateFields", Status = "applied" },
+                    new HostApplicationStep { Id = "repaginate", Status = "applied" },
+                    new HostApplicationStep { Id = "save", Status = "applied" }
+                ]
+            },
+            ["fields"]);
+
+        var plan = RunCli(["finalize", "plan", "--doc", docx]);
+        var validate = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, plan.ExitCode);
+        AssertEqual("success", plan.Result.Status);
+        AssertEqual(false, plan.Result.FinalizationPlan!.Required);
+        AssertEqual(false, plan.Result.FinalizationPlan.Steps.Any(step => step.Required));
+        AssertEqual(false, plan.Result.Diagnostics.Any(diagnostic => diagnostic.Code == "finalization_requires_host_application"));
+        AssertEqual(0, validate.ExitCode);
+        AssertEqual("success", validate.Result.Status);
+        AssertEqual(true, validate.Result.Validation!.Compliant);
+        AssertEqual(false, validate.Result.Diagnostics.Any(diagnostic => diagnostic.Code == "finalization_required"));
+    }
+
+    static void CliValidateWarnsWhenRecordedHostFinalizationIsStale()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "source.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        var requestPath = Path.Combine(temp.Path, "request.json");
+        var outputPath = Path.Combine(temp.Path, "edited.docx");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:t>中文摘要</w:t></w:r></w:p>
+            <w:p><w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+            """);
+        File.WriteAllText(profilePath, "{}");
+        File.WriteAllText(
+            requestPath,
+            """
+            {
+              "operations": [
+                {
+                  "id": "edit-body",
+                  "op": "replaceParagraphText",
+                  "target": { "type": "paragraphText", "text": "中文摘要", "match": "exact" },
+                  "text": "中文摘要（修改后）"
+                }
+              ]
+            }
+            """);
+        OpenXmlFinalizationMetadata.MarkHostFinalized(
+            docx,
+            new HostApplicationReport
+            {
+                RequestedHost = "wps",
+                ProgId = "KWps.Application",
+                Steps =
+                [
+                    new HostApplicationStep { Id = "updateFields", Status = "applied" },
+                    new HostApplicationStep { Id = "repaginate", Status = "applied" },
+                    new HostApplicationStep { Id = "save", Status = "applied" }
+                ]
+            },
+            ["fields"]);
+
+        var apply = RunCli(["apply", "--doc", docx, "--profile", profilePath, "--request", requestPath, "--out", outputPath]);
+        var validate = RunCli(["validate", "--doc", outputPath, "--profile", profilePath]);
+
+        AssertEqual(0, apply.ExitCode);
+        AssertEqual("success", apply.Result.Status);
+        AssertEqual(0, validate.ExitCode);
+        AssertEqual("success", validate.Result.Status);
+        AssertEqual(true, validate.Result.Validation!.Compliant);
+        AssertEqual(true, validate.Result.Diagnostics.Any(diagnostic => diagnostic.Code == "finalization_required"));
+    }
+
     static void CliValidateResolvesProfileRolesAgainstTargetDocument()
     {
         using var temp = new TempDirectory();

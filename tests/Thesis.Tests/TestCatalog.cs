@@ -31,6 +31,8 @@ internal static partial class Program
         ("CLI validate suggests profile role fixes", CliValidateSuggestsProfileRoleFixes),
         ("CLI validate suggests page setup fixes", CliValidateSuggestsPageSetupFixes),
         ("CLI validate warns when finalization is still required", CliValidateWarnsWhenFinalizationIsStillRequired),
+        ("CLI validate does not warn after recorded host finalization", CliValidateDoesNotWarnAfterRecordedHostFinalization),
+        ("CLI validate warns when recorded host finalization is stale", CliValidateWarnsWhenRecordedHostFinalizationIsStale),
         ("CLI validate resolves profile roles against target document", CliValidateResolvesProfileRolesAgainstTargetDocument),
         ("CLI validate uses semantic fallback for template placeholders", CliValidateUsesSemanticFallbackForTemplatePlaceholders),
         ("CLI validate treats appendix role as optional", CliValidateTreatsAppendixRoleAsOptional),
@@ -175,6 +177,7 @@ internal static partial class Program
         ("CLI finalize plan is quiet for clean documents", CliFinalizePlanIsQuietForCleanDocuments),
         ("CLI finalize apply validates source options", CliFinalizeApplyValidatesSourceOptions),
         ("CLI finalize apply reports unavailable COM host", CliFinalizeApplyReportsUnavailableComHost),
+        ("CLI finalize apply removes copied output when COM host fails", CliFinalizeApplyRemovesCopiedOutputWhenComHostFails),
         ("CLI finalize apply workspace respects session lock", CliFinalizeApplyWorkspaceRespectsSessionLock),
         ("CLI validate host layout reports unavailable COM host", CliValidateHostLayoutReportsUnavailableComHost)
     ];

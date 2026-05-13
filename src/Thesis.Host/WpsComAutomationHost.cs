@@ -99,10 +99,14 @@ public sealed class WpsComAutomationHost
         }
         finally
         {
-            CloseDocument(document, saveChanges: false, keepOpen: options.KeepOpen);
+            AddCloseDocumentStep(report, document, saveChanges: false, keepOpen: options.KeepOpen);
             if (!options.KeepOpen)
             {
-                QuitApplication(application);
+                AddQuitApplicationStep(report, application);
+            }
+            else
+            {
+                report.Steps.Add(Step("quitApplication", "skipped", "Host application was left open because keepOpen was enabled."));
             }
 
             ReleaseComObject(document);
@@ -152,10 +156,14 @@ public sealed class WpsComAutomationHost
         }
         finally
         {
-            CloseDocument(document, saveChanges: false, keepOpen: options.KeepOpen);
+            AddCloseDocumentStep(report, document, saveChanges: false, keepOpen: options.KeepOpen);
             if (!options.KeepOpen)
             {
-                QuitApplication(application);
+                AddQuitApplicationStep(report, application);
+            }
+            else
+            {
+                report.Steps.Add(Step("quitApplication", "skipped", "Host application was left open because keepOpen was enabled."));
             }
 
             ReleaseComObject(document);
@@ -397,35 +405,47 @@ public sealed class WpsComAutomationHost
         }
     }
 
-    private static void CloseDocument(dynamic? document, bool saveChanges, bool keepOpen)
+    private static void AddCloseDocumentStep(HostApplicationReport report, dynamic? document, bool saveChanges, bool keepOpen)
     {
-        if (document is null || keepOpen)
+        if (document is null)
         {
+            report.Steps.Add(Step("closeDocument", "skipped", "No COM document was opened."));
+            return;
+        }
+
+        if (keepOpen)
+        {
+            report.Steps.Add(Step("closeDocument", "skipped", "Document was left open because keepOpen was enabled."));
             return;
         }
 
         try
         {
             document.Close(SaveChanges: saveChanges);
+            report.Steps.Add(Step("closeDocument", "applied", "The COM document was closed."));
         }
         catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         {
+            report.Steps.Add(Step("closeDocument", "warning", $"The COM document could not be closed: {ex.Message}"));
         }
     }
 
-    private static void QuitApplication(dynamic? application)
+    private static void AddQuitApplicationStep(HostApplicationReport report, dynamic? application)
     {
         if (application is null)
         {
+            report.Steps.Add(Step("quitApplication", "skipped", "No COM application was created."));
             return;
         }
 
         try
         {
             application.Quit();
+            report.Steps.Add(Step("quitApplication", "applied", "The COM application was asked to quit."));
         }
         catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         {
+            report.Steps.Add(Step("quitApplication", "warning", $"The COM application could not be quit: {ex.Message}"));
         }
     }
 

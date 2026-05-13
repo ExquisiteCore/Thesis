@@ -664,6 +664,11 @@ public static class ThesisCli
         var result = ApplyFinalizationToDocument(args, outputPath, allowInPlace: true);
         result.Document = sourcePath;
         result.OutputPath = outputPath;
+        if (!string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase))
+        {
+            DeleteIfExists(outputPath);
+        }
+
         return result;
     }
 
@@ -701,6 +706,10 @@ public static class ThesisCli
         else
         {
             result.HostApplication = report;
+            OpenXmlFinalizationMetadata.MarkHostFinalized(
+                fullDocPath,
+                report,
+                result.FinalizationPlan.Reasons);
         }
 
         return result;

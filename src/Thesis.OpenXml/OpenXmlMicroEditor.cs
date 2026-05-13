@@ -62,6 +62,7 @@ public static partial class OpenXmlMicroEditor
             }
 
             File.Move(tempPath, fullPath, overwrite: true);
+            OpenXmlFinalizationMetadata.Clear(fullPath);
             return result;
         }
         catch (Exception ex) when (IsExpectedEditFailure(ex))
