@@ -81,6 +81,44 @@ internal static partial class Program
         File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
     }
 
+    static void WriteProfileWithBodyFormat(WorkspaceContext context)
+    {
+        var profile = new TemplateProfile
+        {
+            SourceType = "test",
+            SourceDocument = context.SourceDoc,
+            StyleRoles =
+            [
+                new ProfileStyleRole
+                {
+                    Role = "body",
+                    StyleId = "Normal",
+                    Evidence =
+                    [
+                        new ProfileParagraphEvidence { ParagraphIndex = 2, StyleId = "Normal", TextPreview = "列表项" }
+                    ],
+                    Format = new ParagraphFormatSample
+                    {
+                        StyleId = "Normal",
+                        Alignment = "both",
+                        LineSpacing = "360",
+                        LineSpacingRule = "auto",
+                        FirstLineIndentTwips = 480,
+                        SpacingBeforeTwips = 0,
+                        SpacingAfterTwips = 0,
+                        RunFormat = new RunFormatSample
+                        {
+                            FontSizeHalfPoints = "24",
+                            EastAsiaFont = "宋体"
+                        }
+                    }
+                }
+            ]
+        };
+
+        File.WriteAllText(context.Paths.ProfileJson, ThesisJson.Serialize(profile));
+    }
+
     static void WriteProfileWithTableFormat(WorkspaceContext context)
     {
         var profile = new TemplateProfile

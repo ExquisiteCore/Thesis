@@ -20,6 +20,7 @@ internal static class OperationCatalog
         Item("insertTextBefore", "Insert text before a matched substring inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["find"]),
         Item("insertTextAfter", "Insert text after a matched substring inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target", "text"], requiredFormat: ["find"]),
         Item("deleteText", "Delete text inside matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"], requiredFormat: ["find"]),
+        Item("writeBlock", "Insert or replace text as a semantic thesis block using profile role formatting; operation format overrides profile defaults.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "role", "text"], optionalFormat: ["position(before|after|replace)", "styleId", "alignment", "spacingBeforeTwips", "spacingAfterTwips", "lineSpacing", "lineSpacingRule", "firstLineIndentTwips", "leftIndentTwips", "rightIndentTwips", "bold", "italic", "fontSizeHalfPoints", "asciiFont", "highAnsiFont", "eastAsiaFont", "complexScriptFont"], profileRequired: true),
         Item("insertParagraph", "Insert a paragraph before or after a matched paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target", "text"], optionalFormat: ["position", "styleId", "alignment", "runFormat", "spacing"]),
         Item("deleteParagraph", "Delete matched paragraphs.", ["paragraphIndex", "paragraphText", "styleId", "role", "sectionRange"], ["target"]),
         Item("moveParagraph", "Move matched paragraphs before or after an anchor paragraph.", ["paragraphIndex", "paragraphText", "styleId", "role"], ["target"], requiredFormat: ["anchor"], optionalFormat: ["position"]),
@@ -83,6 +84,14 @@ internal static class OperationCatalog
             "insertTextBefore" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "前缀", format: Obj(("find", "标题")))),
             "insertTextAfter" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "后缀", format: Obj(("find", "标题")))),
             "deleteText" => Request(op, Operation(op, target: ParagraphIndexTarget(0), format: Obj(("find", "多余文本")))),
+            "writeBlock" => Request(
+                op,
+                Operation(
+                    op,
+                    target: Obj(("type", "paragraphText"), ("text", "第一章 绪论"), ("match", "exact")),
+                    text: "工业控制系统是关键基础设施中的重要组成部分。",
+                    format: Obj(("position", "after"), ("fontSizeHalfPoints", "24"), ("eastAsiaFont", "宋体")),
+                    role: "body")),
             "insertParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(0), text: "新增段落", format: Obj(("position", "after")))),
             "deleteParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(1))),
             "moveParagraph" => Request(op, Operation(op, target: ParagraphIndexTarget(2), format: Obj(("position", "after"), ("anchor", ParagraphIndexTarget(0))))),

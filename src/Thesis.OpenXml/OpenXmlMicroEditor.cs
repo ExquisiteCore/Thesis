@@ -153,6 +153,7 @@ public static partial class OpenXmlMicroEditor
             "insertTextBefore" => InsertTextBefore(context, options, operation, writeChanges),
             "insertTextAfter" => InsertTextAfter(context, options, operation, writeChanges),
             "deleteText" => DeleteText(context, options, operation, writeChanges),
+            "writeBlock" => WriteBlock(context, options, operation, writeChanges),
             "insertParagraph" => InsertParagraph(context, options, operation, writeChanges),
             "deleteParagraph" => DeleteParagraph(context, options, operation, writeChanges),
             "moveParagraph" => MoveParagraph(context, options, operation, writeChanges),
@@ -394,6 +395,58 @@ public static partial class OpenXmlMicroEditor
         return result;
     }
 
+    private static OperationResult WriteBlock(
+        OpenXmlEditContext context,
+        RunOptions options,
+        ThesisOperation operation,
+        bool writeChanges)
+    {
+        if (operation.Text is null)
+        {
+            return OperationError(operation, "text_missing");
+        }
+
+        var position = GetWriteBlockPosition(operation.Format, out var positionError);
+        if (positionError is not null)
+        {
+            return OperationError(operation, positionError);
+        }
+
+        if (!TryCreateRoleParagraphFormat(context, operation, out var format, out var formatError))
+        {
+            return OperationError(operation, formatError);
+        }
+
+        if (!TryResolveTargets(context, options, operation, ResolvedTargetKind.Paragraph, out var targets, out var reason))
+        {
+            return OperationError(operation, reason);
+        }
+
+        var result = OperationSuccess(operation, writeChanges ? "applied" : "preview");
+        foreach (var target in targets.Cast<ResolvedParagraphTarget>())
+        {
+            if (writeChanges)
+            {
+                var paragraph = CreateTextParagraph(operation.Text, format);
+                if (position == "replace")
+                {
+                    target.Paragraph.InsertAfterSelf(paragraph);
+                    target.Paragraph.Remove();
+                }
+                else
+                {
+                    InsertRelativeTo(target.Paragraph, paragraph, position);
+                }
+
+                context.RefreshResolver();
+            }
+
+            result.Matches.Add(target.ToMatchInfo(target.Paragraph.InnerText, operation.Text));
+        }
+
+        return result;
+    }
+
     private static OperationResult DeleteParagraph(
         OpenXmlEditContext context,
         RunOptions options,
@@ -589,22 +642,7 @@ public static partial class OpenXmlMicroEditor
         ThesisOperation operation,
         bool writeChanges)
     {
-        var profileFormat = ProfileRoleResolver.FindRoleFormat(
-            context.Profile,
-            context.ProfileOverrides,
-            operation.Role,
-            out var roleError);
-        if (roleError is not null)
-        {
-            return OperationError(operation, roleError);
-        }
-
-        if (profileFormat is null)
-        {
-            return OperationError(operation, "profile_role_format_missing");
-        }
-
-        if (!OpenXmlOperationFormatBuilder.TryCreateEffectiveFormat(context.ParagraphStyleIds, profileFormat, operation.Format, out var format, out var formatError))
+        if (!TryCreateRoleParagraphFormat(context, operation, out var format, out var formatError))
         {
             return OperationError(operation, formatError);
         }
@@ -741,6 +779,57 @@ public static partial class OpenXmlMicroEditor
             context.ParagraphStyleIds,
             new ParagraphFormatSample(),
             operationFormat,
+            out format,
+            out error);
+    }
+
+    private static string GetWriteBlockPosition(JsonNode? format, out string? error)
+    {
+        var position = OpenXmlOperationJson.GetString(format, "position", out error) ?? "after";
+        if (error is not null)
+        {
+            return "after";
+        }
+
+        if (position is not "before" and not "after" and not "replace")
+        {
+            error = "target_value_invalid";
+            return "after";
+        }
+
+        return position;
+    }
+
+    private static bool TryCreateRoleParagraphFormat(
+        OpenXmlEditContext context,
+        ThesisOperation operation,
+        out ParagraphFormatSample format,
+        out string error)
+    {
+        format = new ParagraphFormatSample();
+        error = "";
+
+        var profileFormat = ProfileRoleResolver.FindRoleFormat(
+            context.Profile,
+            context.ProfileOverrides,
+            operation.Role,
+            out var roleError);
+        if (roleError is not null)
+        {
+            error = roleError;
+            return false;
+        }
+
+        if (profileFormat is null)
+        {
+            error = "profile_role_format_missing";
+            return false;
+        }
+
+        return OpenXmlOperationFormatBuilder.TryCreateEffectiveFormat(
+            context.ParagraphStyleIds,
+            profileFormat,
+            operation.Format,
             out format,
             out error);
     }
