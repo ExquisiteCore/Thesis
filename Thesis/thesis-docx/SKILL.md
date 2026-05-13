@@ -80,4 +80,4 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"
 ```
 
-正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格、节状态和续表标题。
+正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。重点看 `contentCoverage.gaps`，它会列出参考稿中候选稿没有覆盖的正文段落和表格，包含章节上下文和内容预览；该列表从摘要或第一章等正文起点之后开始比较，会过滤封面/任务书/授权页等前置表单、目录行和 Word/WPS 域代码。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格、节状态和续表标题。

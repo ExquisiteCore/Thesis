@@ -77,6 +77,7 @@ public static class OpenXmlDocumentInspector
             .Select((paragraph, index) => new DocumentParagraph
             {
                 Index = index,
+                BodyElementIndex = GetBodyElementIndex(paragraph),
                 Text = paragraph.InnerText,
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
                 OutlineLevel = ReadParagraphOutlineLevel(paragraph, styleOutlineLevels),
@@ -402,6 +403,7 @@ public static class OpenXmlDocumentInspector
                 return new DocumentTable
                 {
                     Index = index,
+                    BodyElementIndex = GetBodyElementIndex(table),
                     RowCount = rows.Count,
                     CellCounts = rows
                         .Select(row => row.Elements<TableCell>().Count())
@@ -412,6 +414,12 @@ public static class OpenXmlDocumentInspector
                 };
             })
             .ToList();
+    }
+
+    private static int GetBodyElementIndex(OpenXmlElement element)
+    {
+        var bodyChild = element.Ancestors().FirstOrDefault(ancestor => ancestor.Parent is Body) ?? element;
+        return bodyChild.Parent?.ChildElements.ToList().IndexOf(bodyChild) ?? -1;
     }
 
     private static List<DocumentComment> ReadComments(MainDocumentPart mainPart)

@@ -48,6 +48,8 @@ public sealed class DocumentParagraph
 {
     public int Index { get; set; }
 
+    public int BodyElementIndex { get; set; }
+
     public string Text { get; set; } = "";
 
     public string? StyleId { get; set; }
@@ -209,6 +211,8 @@ public sealed class HeaderFooterReference
 public sealed class DocumentTable
 {
     public int Index { get; set; }
+
+    public int BodyElementIndex { get; set; }
 
     public int RowCount { get; set; }
 

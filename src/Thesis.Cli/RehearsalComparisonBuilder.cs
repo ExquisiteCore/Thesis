@@ -6,6 +6,8 @@ namespace Thesis.Cli;
 
 internal static class RehearsalComparisonBuilder
 {
+    private const int MaxReportedContentGaps = 20;
+
     public static RehearsalComparisonReport Build(
         DocumentMap candidate,
         DocumentMap reference,
@@ -22,6 +24,7 @@ internal static class RehearsalComparisonBuilder
 
         AddStructureDiagnostics(candidate, reference, report);
         AddHeadingCoverage(candidate, reference, report);
+        AddContentGaps(candidate, reference, report);
         AddHeadingQualityDiagnostics(candidate, report);
         AddFinalizationDiagnostics(candidate, report);
         AddValidationDiagnostics(validation, report);
@@ -135,6 +138,293 @@ internal static class RehearsalComparisonBuilder
             Message = "Candidate still requires Word/WPS finalization for fields, TOC page numbers, or true pagination.",
             Path = candidate.Path
         });
+    }
+
+    private static void AddContentGaps(
+        DocumentMap candidate,
+        DocumentMap reference,
+        RehearsalComparisonReport report)
+    {
+        AddMissingParagraphGaps(candidate, reference, report);
+        AddMissingTableGaps(candidate, reference, report);
+    }
+
+    private static void AddMissingParagraphGaps(
+        DocumentMap candidate,
+        DocumentMap reference,
+        RehearsalComparisonReport report)
+    {
+        var candidateBodyStart = FindContentBodyStart(candidate);
+        var referenceBodyStart = FindContentBodyStart(reference);
+        var candidateParagraphs = candidate.Paragraphs
+            .Where(paragraph => IsAtOrAfterBodyStart(paragraph.BodyElementIndex, candidateBodyStart))
+            .Where(IsComparableBodyParagraph)
+            .Select(paragraph => NormalizeContentText(paragraph.Text))
+            .Where(text => text.Length > 0)
+            .ToList();
+
+        foreach (var paragraph in reference.Paragraphs
+            .Where(paragraph => IsAtOrAfterBodyStart(paragraph.BodyElementIndex, referenceBodyStart))
+            .Where(IsComparableBodyParagraph))
+        {
+            var normalized = NormalizeContentText(paragraph.Text);
+            if (normalized.Length == 0 || HasComparableText(candidateParagraphs, normalized))
+            {
+                continue;
+            }
+
+            report.ContentCoverage.MissingReferenceParagraphCount++;
+            AddGap(
+                report,
+                new RehearsalContentGap
+                {
+                    GapType = "paragraph",
+                    ReferenceIndex = paragraph.Index,
+                    ReferenceContext = FindNearestHeading(reference, paragraph.Index),
+                    ReferenceTextPreview = PreviewText(paragraph.Text),
+                    Message = $"Reference paragraph {paragraph.Index} is not represented in the candidate document."
+                });
+        }
+    }
+
+    private static void AddMissingTableGaps(
+        DocumentMap candidate,
+        DocumentMap reference,
+        RehearsalComparisonReport report)
+    {
+        var candidateBodyStart = FindContentBodyStart(candidate);
+        var referenceBodyStart = FindContentBodyStart(reference);
+        var candidateTables = candidate.Tables
+            .Where(table => IsAtOrAfterBodyStart(table.BodyElementIndex, candidateBodyStart))
+            .Select(table => NormalizeContentText(table.TextPreview))
+            .Where(text => text.Length > 0)
+            .ToList();
+
+        foreach (var table in reference.Tables
+            .Where(table => IsAtOrAfterBodyStart(table.BodyElementIndex, referenceBodyStart)))
+        {
+            var normalized = NormalizeContentText(table.TextPreview);
+            if (normalized.Length == 0 || HasComparableText(candidateTables, normalized))
+            {
+                continue;
+            }
+
+            report.ContentCoverage.MissingReferenceTableCount++;
+            AddGap(
+                report,
+                new RehearsalContentGap
+                {
+                    GapType = "table",
+                    ReferenceIndex = table.Index,
+                    ReferenceContext = FindNearestHeadingBeforeBodyElement(reference, table.BodyElementIndex),
+                    ReferenceTextPreview = PreviewText(table.TextPreview),
+                    Message = $"Reference table {table.Index} is not represented in the candidate document."
+                });
+        }
+    }
+
+    private static int FindContentBodyStart(DocumentMap map)
+    {
+        var firstContentHeading = map.Paragraphs
+            .Where(paragraph => IsContentStartHeading(paragraph.Text) || IsLikelyChapterHeading(paragraph.Text))
+            .OrderBy(paragraph => paragraph.BodyElementIndex)
+            .FirstOrDefault();
+
+        return firstContentHeading?.BodyElementIndex ?? 0;
+    }
+
+    private static bool IsAtOrAfterBodyStart(int bodyElementIndex, int bodyStart)
+    {
+        return bodyElementIndex < 0 || bodyElementIndex >= bodyStart;
+    }
+
+    private static bool IsContentStartHeading(string text)
+    {
+        return ThesisTextHeuristics.IsChineseAbstractHeading(text)
+            || ThesisTextHeuristics.IsEnglishAbstractHeading(text)
+            || IsLikelyChapterHeading(text);
+    }
+
+    private static bool IsLikelyChapterHeading(string text)
+    {
+        return Regex.IsMatch(
+            text.Trim(),
+            @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章(?:\s+\S.*)?$",
+            RegexOptions.CultureInvariant);
+    }
+
+    private static void AddGap(RehearsalComparisonReport report, RehearsalContentGap gap)
+    {
+        if (report.ContentCoverage.Gaps.Count < MaxReportedContentGaps)
+        {
+            report.ContentCoverage.Gaps.Add(gap);
+        }
+    }
+
+    private static bool IsComparableBodyParagraph(DocumentParagraph paragraph)
+    {
+        var text = paragraph.Text.Trim();
+        var comparableText = NormalizeContentText(text);
+        if (comparableText.Length < 8
+            || IsLikelyHeading(paragraph)
+            || IsLikelyTocEntry(text)
+            || ThesisTextHeuristics.IsFigureCaption(text)
+            || ThesisTextHeuristics.IsTableCaption(text))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasComparableText(List<string> candidates, string reference)
+    {
+        return candidates.Any(candidate => IsComparableText(candidate, reference));
+    }
+
+    private static bool IsComparableText(string candidate, string reference)
+    {
+        if (candidate.Length == 0 || reference.Length == 0)
+        {
+            return false;
+        }
+
+        if (candidate.Contains(reference, StringComparison.Ordinal)
+            || reference.Contains(candidate, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return TextSimilarity(candidate, reference) >= 0.82;
+    }
+
+    private static double TextSimilarity(string left, string right)
+    {
+        var leftGrams = CharacterGrams(left).ToHashSet(StringComparer.Ordinal);
+        var rightGrams = CharacterGrams(right).ToHashSet(StringComparer.Ordinal);
+        if (leftGrams.Count == 0 || rightGrams.Count == 0)
+        {
+            return 0;
+        }
+
+        var intersection = leftGrams.Count(gram => rightGrams.Contains(gram));
+        var union = leftGrams.Count + rightGrams.Count - intersection;
+        return union == 0 ? 0 : (double)intersection / union;
+    }
+
+    private static IEnumerable<string> CharacterGrams(string text)
+    {
+        if (text.Length <= 4)
+        {
+            yield return text;
+            yield break;
+        }
+
+        for (var index = 0; index <= text.Length - 4; index++)
+        {
+            yield return text.Substring(index, 4);
+        }
+    }
+
+    private static string FindNearestHeading(DocumentMap map, int referenceParagraphIndex)
+    {
+        for (var index = referenceParagraphIndex; index >= 0; index--)
+        {
+            var paragraph = map.Paragraphs.FirstOrDefault(item => item.Index == index);
+            if (paragraph is not null && IsLikelyHeading(paragraph))
+            {
+                return paragraph.Text.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private static string FindNearestHeadingBeforeBodyElement(DocumentMap map, int bodyElementIndex)
+    {
+        foreach (var paragraph in map.Paragraphs
+            .Where(paragraph => paragraph.BodyElementIndex <= bodyElementIndex)
+            .OrderByDescending(paragraph => paragraph.BodyElementIndex)
+            .ThenByDescending(paragraph => paragraph.Index))
+        {
+            if (IsLikelyHeading(paragraph))
+            {
+                return paragraph.Text.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private static string NormalizeContentText(string text)
+    {
+        var withoutFields = RemoveWordFieldInstructions(text);
+        return Regex.Replace(withoutFields.Trim(), @"\s+", "", RegexOptions.CultureInvariant)
+            .Replace("，", ",", StringComparison.Ordinal)
+            .Replace("。", ".", StringComparison.Ordinal)
+            .Replace("；", ";", StringComparison.Ordinal)
+            .Replace("：", ":", StringComparison.Ordinal)
+            .Replace("（", "(", StringComparison.Ordinal)
+            .Replace("）", ")", StringComparison.Ordinal)
+            .Replace("．", ".", StringComparison.Ordinal);
+    }
+
+    private static string RemoveWordFieldInstructions(string text)
+    {
+        var withoutToc = Regex.Replace(
+            text,
+            @"\bTOC(?:\s+\\[A-Za-z]+(?:\s+""[^""]*"")?)*",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return Regex.Replace(
+            withoutToc,
+            @"\b(?:REF|PAGEREF|NOTEREF)\s+\S+(?:\s+\\[A-Za-z]+|\s+\\\*\s*[A-Za-z]+|\s+MERGEFORMAT)*",
+            "",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsLikelyTocEntry(string text)
+    {
+        var withoutFields = RemoveWordFieldInstructions(text).Trim();
+        if (withoutFields.Length == 0
+            || withoutFields.Contains('\t')
+            || withoutFields.Contains("……", StringComparison.Ordinal)
+            || withoutFields.Contains("......", StringComparison.Ordinal)
+            || Regex.IsMatch(withoutFields, @"\.{3,}", RegexOptions.CultureInvariant))
+        {
+            return true;
+        }
+
+        var compact = Regex.Replace(withoutFields, @"\s+", "", RegexOptions.CultureInvariant);
+        return IsSpecialTocEntry(compact) || IsNumberedHeadingTocEntry(withoutFields);
+    }
+
+    private static bool IsSpecialTocEntry(string compactText)
+    {
+        return Regex.IsMatch(
+            compactText,
+            @"^(?:摘要|中文摘要|Abstract|目录|Contents|参考文献|References|Bibliography|致谢|谢辞|Acknowledgements|Acknowledgments|附录.+|Appendix.+)(?:[IVXLCDM]+|\d+)$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsNumberedHeadingTocEntry(string text)
+    {
+        var trimmed = text.Trim();
+        return Regex.IsMatch(
+                trimmed,
+                @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章\s+\S.+?\d+\s*$",
+                RegexOptions.CultureInvariant)
+            || Regex.IsMatch(
+                trimmed,
+                @"^\d{1,2}[\.．]\d{1,2}(?:[\.．]\d{1,2})?\s+\S.+?\d+\s*$",
+                RegexOptions.CultureInvariant);
+    }
+
+    private static string PreviewText(string text)
+    {
+        var normalized = Regex.Replace(RemoveWordFieldInstructions(text).Trim(), @"\s+", " ", RegexOptions.CultureInvariant);
+        return normalized.Length <= 120 ? normalized : normalized[..120];
     }
 
     private static void AddValidationDiagnostics(ValidationReport? validation, RehearsalComparisonReport report)

@@ -45,4 +45,25 @@ public sealed class RehearsalContentCoverage
     public int MatchedHeadingCount { get; set; }
 
     public double HeadingCoverage { get; set; }
+
+    public int MissingReferenceParagraphCount { get; set; }
+
+    public int MissingReferenceTableCount { get; set; }
+
+    public List<RehearsalContentGap> Gaps { get; set; } = [];
+}
+
+public sealed class RehearsalContentGap
+{
+    public string GapType { get; set; } = "";
+
+    public string Severity { get; set; } = "warning";
+
+    public int ReferenceIndex { get; set; }
+
+    public string ReferenceContext { get; set; } = "";
+
+    public string ReferenceTextPreview { get; set; } = "";
+
+    public string Message { get; set; } = "";
 }

@@ -199,6 +199,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 - 候选稿和参考稿的段落数、非空段落数、字符数、表格数、节数。
 - 标题覆盖率 `headingCoverage`，用于发现章节标题缺失或重复编号。
+- `contentCoverage.gaps`，用于定位参考稿中候选稿没有覆盖的正文段落和表格，包含缺口类型、参考索引、章节上下文和内容预览。该列表从摘要或第一章等正文起点之后开始比较，会过滤封面/任务书/授权页等前置表单、目录行和 Word/WPS 域代码。
 - 候选稿是否还需要 Word/WPS 最终化。
 - `validate` 的规则校验结果。
 - 段落、表格、节数量不足等诊断。
