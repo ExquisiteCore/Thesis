@@ -131,6 +131,11 @@ public static class ThesisCli
             return CompareRehearsal(rehearsalCompareArgs);
         }
 
+        if (args is ["assemble", .. var assembleArgs])
+        {
+            return AssembleDocument(assembleArgs);
+        }
+
         if (args is ["generate", .. var generateArgs])
         {
             return GenerateDocument(generateArgs);
@@ -443,6 +448,88 @@ public static class ThesisCli
                         Code = "generate_failed",
                         Message = $"Generate failed: {ex.Message}",
                         Path = fullOutputPath
+                    }
+                ]
+            };
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+    }
+
+    private static CliResult AssembleDocument(string[] args)
+    {
+        var docPath = RequiredOption(args, "--doc");
+        var contentPath = RequiredOption(args, "--content");
+        var profilePath = RequiredOption(args, "--profile");
+        var outputPath = RequiredOption(args, "--out");
+        var fullDocPath = Path.GetFullPath(docPath);
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        var parent = Path.GetDirectoryName(fullOutputPath);
+        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+        {
+            return Error("assemble_output_directory_missing", $"Assemble output directory not found: {parent}");
+        }
+
+        if (SamePath(fullOutputPath, fullDocPath)
+            || SamePath(fullOutputPath, contentPath)
+            || SamePath(fullOutputPath, profilePath))
+        {
+            return Error("assemble_output_refused", "Assemble output path must not overwrite input files.");
+        }
+
+        if (!TryReadContent(contentPath, out var content, out var contentError))
+        {
+            return contentError!;
+        }
+
+        if (!TryReadProfile(profilePath, out var profile, out var profileError))
+        {
+            return profileError!;
+        }
+
+        NormalizeContent(content!);
+        NormalizeProfile(profile!);
+
+        var tempPath = Path.Combine(parent, Path.GetFileName(fullOutputPath) + "." + Guid.NewGuid().ToString("N") + ".tmp.docx");
+        try
+        {
+            File.Copy(fullDocPath, tempPath, overwrite: true);
+            ThesisDocumentGenerator.AssembleIntoTemplate(content!, profile!, tempPath);
+            File.Move(tempPath, fullOutputPath, overwrite: true);
+            return new CliResult
+            {
+                Status = "success",
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "info",
+                        Code = "thesis_assembled",
+                        Message = "Thesis content JSON was assembled into a template DOCX copy.",
+                        Path = fullOutputPath
+                    }
+                ]
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new CliResult
+            {
+                Status = "error",
+                Document = fullDocPath,
+                OutputPath = fullOutputPath,
+                Diagnostics =
+                [
+                    new Diagnostic
+                    {
+                        Severity = "error",
+                        Code = "assemble_failed",
+                        Message = $"Assemble failed: {ex.Message}",
+                        Path = fullDocPath
                     }
                 ]
             };
@@ -1409,6 +1496,7 @@ public static class ThesisCli
             "  inspect --doc <docx>",
             "  rules merge --profile <profile.json> --project <project-rules.json> --out <final-rules.json>",
             "  rehearsal compare --candidate <docx> --reference <docx> --profile <profile.json> [--out <report.json>]",
+            "  assemble --doc <template.docx> --content <content.json> --profile <final-rules.json> --out <thesis.docx>",
             "  generate --content <content.json> --rules <final-rules.json> --out <thesis.docx>",
             "  run --workspace <dir> --request <request.json>",
             "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",

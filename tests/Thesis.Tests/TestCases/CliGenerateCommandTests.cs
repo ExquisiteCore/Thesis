@@ -250,7 +250,7 @@ internal static partial class Program
 
         var paragraphs = map!.Paragraphs;
         AssertEqual(true, paragraphs.Any(paragraph => paragraph.Text == "目录"));
-        AssertEqual("Normal", paragraphs.First(paragraph => paragraph.Text == "目录").StyleId);
+        AssertEqual(null, paragraphs.First(paragraph => paragraph.Text == "目录").StyleId);
         AssertEqual(true, map.FinalizationReasons.Contains("fields"));
         AssertEqual(true, map.FinalizationReasons.Contains("toc"));
         AssertEqual(true, map.RequiresFinalization);

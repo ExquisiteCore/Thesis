@@ -19,6 +19,37 @@ public static class ThesisDocumentGenerator
         mainPart.Document = new Document();
         var body = mainPart.Document.AppendChild(new Body());
 
+        AppendThesisContent(body, content, rules);
+        MarkDocumentFieldsDirty(mainPart);
+        body.AppendChild(CreateSectionProperties(rules.PageSetup));
+        mainPart.Document.Save();
+    }
+
+    public static void AssembleIntoTemplate(ThesisContent content, TemplateProfile rules, string templateCopyPath)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentException.ThrowIfNullOrWhiteSpace(templateCopyPath);
+
+        using var document = WordprocessingDocument.Open(templateCopyPath, isEditable: true);
+        var mainPart = document.MainDocumentPart
+            ?? throw new InvalidDataException("DOCX does not contain a main document part.");
+        var wordDocument = mainPart.Document
+            ?? throw new InvalidDataException("DOCX does not contain a document.");
+        var body = wordDocument.Body
+            ?? throw new InvalidDataException("DOCX does not contain a document body.");
+
+        var sectionProperties = body.Elements<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties
+            ?? CreateSectionProperties(rules.PageSetup);
+        body.RemoveAllChildren();
+        AppendThesisContent(body, content, rules);
+        MarkDocumentFieldsDirty(mainPart);
+        body.AppendChild(sectionProperties);
+        wordDocument.Save();
+    }
+
+    private static void AppendThesisContent(Body body, ThesisContent content, TemplateProfile rules)
+    {
         AppendParagraph(body, RequiredTitle(content), ResolveParagraphFormat(rules, "title"), "Title");
         AppendOptionalParagraph(body, content.Author, ResolveParagraphFormat(rules, "body"), "Normal");
         AppendAbstracts(body, content, rules);
@@ -26,9 +57,6 @@ public static class ThesisDocumentGenerator
         AppendChapters(body, content.Chapters, rules);
         AppendReferences(body, content.References, rules);
         AppendAcknowledgements(body, content.Acknowledgements, rules);
-        MarkDocumentFieldsDirty(mainPart);
-        body.AppendChild(CreateSectionProperties(rules.PageSetup));
-        mainPart.Document.Save();
     }
 
     private static void AppendAbstracts(Body body, ThesisContent content, TemplateProfile rules)
@@ -114,7 +142,7 @@ public static class ThesisDocumentGenerator
 
     private static void AppendTableOfContents(Body body, TemplateProfile rules)
     {
-        AppendParagraph(body, "目录", ResolveTableOfContentsTitleFormat(rules), "Normal");
+        AppendParagraph(body, "目录", ResolveTableOfContentsTitleFormat(rules), "");
         body.AppendChild(CreateTocParagraph("1-3"));
     }
 

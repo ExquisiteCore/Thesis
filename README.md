@@ -29,9 +29,11 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
   -> profile extract               提取 profile.json 基础格式画像
   -> project-rules.json            AI/人工补充模板里没有显式体现的要求
   -> rules merge                   合并为 final-rules.json
-  -> apply + writeBlock/request    在模板副本上按语义写入正文和微调格式
+  -> assemble                      把结构化正文写入模板副本，保留模板包结构和末节页面设置
+  -> apply + writeBlock/request    老师反馈后的局部微调
   -> validate                      检查可离线验证的格式
   -> finalize plan/apply           用 Word/WPS 更新字段、目录、分页
+  -> rehearsal compare             和参考成品做结构对比
 ```
 
 优先级：
@@ -40,7 +42,7 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
 request.json 单次操作参数 > project-rules.json / final-rules.json > profile.json > 工具默认规则
 ```
 
-`generate --content` 仍然存在，但它只适合作为结构化草稿路径。正式终稿优先用 `apply --doc 模板.docx --profile final-rules.json --request request.json --out 输出.docx`，因为这样可以保留模板里的节、页眉页脚、字段、样式和隐藏结构。
+正式终稿优先用 `assemble --doc 模板.docx --content content.json --profile final-rules.json --out 输出.docx` 做第一版整篇装配；它复制模板后重写正文主体，保留模板里的样式、页眉页脚关系和最后一个节的页面设置。老师后续反馈、个别段落覆盖、局部格式调整再用 `apply --request request.json`。`generate --content` 仍然存在，但只适合作为空白文档草稿路径。
 
 ## 1. 检查模板正文和批注
 
@@ -108,9 +110,19 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rules merge --profile ".analysis\profile.json" --project ".analysis\project-rules.json" --out ".analysis\final-rules.json"
 ```
 
-## 4. 用 writeBlock 写入正文
+## 4. 用 assemble 装配整篇正文
 
-`writeBlock` 是当前推荐的主写入操作：给 CLI 一段文字、一个语义角色和一个写入方式。工具从 `final-rules.json` 找该角色的默认格式，再用本次 `format` 覆盖默认值。`position` 支持 `before`、`after` 和 `replace`；模板占位段落改成正式内容时用 `replace`。
+`content.json` 用来表达论文内容结构：标题、作者、中英文摘要、关键词、章节、段落、表格、参考文献和致谢。格式来自 `final-rules.json`，表格默认使用规则里的 `tableDefault`，参考文献会避免重复 `[1]` 编号。
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
+```
+
+这条路径是当前最接近“正式工具”的整篇写作入口：它不是从空白文件开始，而是在模板副本上写入内容。当前版本会清空并重写正文主体，所以能保留模板包结构和末节页面设置，但还不能原样保留模板内部多节前置页、复杂占位符和已有正文中的局部结构；这些属于下一阶段要补的终稿级能力。
+
+## 5. 用 writeBlock 微调正文
+
+`writeBlock` 是局部微调操作：给 CLI 一段文字、一个语义角色和一个写入方式。工具从 `final-rules.json` 找该角色的默认格式，再用本次 `format` 覆盖默认值。`position` 支持 `before`、`after` 和 `replace`；模板占位段落改成正式内容时用 `replace`。
 
 ```json
 {
@@ -147,10 +159,10 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 }
 ```
 
-执行：
+执行。这里以已经装配出的 `.analysis\thesis.docx` 为输入，输出微调后的 `.analysis\thesis-revised.docx`：
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc "模板.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis-revised.docx"
 ```
 
 查看更多操作和样例：
@@ -161,19 +173,21 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations sample --op applyThreeLineTable
 ```
 
-## 5. 校验和最终化
+## 6. 校验和最终化
 
 ```powershell
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize plan --doc ".analysis\thesis.docx"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis.docx" --out ".analysis\final.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis-revised.docx" --profile ".analysis\final-rules.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize plan --doc ".analysis\thesis-revised.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis-revised.docx" --out ".analysis\final.docx"
 ```
+
+如果没有执行微调步骤，就把上面的 `.analysis\thesis-revised.docx` 换成 `assemble` 生成的 `.analysis\thesis.docx`。
 
 离线能检查和处理：DOCX 结构、段落格式、角色格式、三线表边框、重复表头、参考文献编号、目录字段标记。
 
 必须用 Word/WPS 或人工确认：真实分页、目录页码、孤行、跨页表格显示、自动续表标题。
 
-## 6. 和成品论文做实战对比
+## 7. 和成品论文做实战对比
 
 如果目录里有一份老师认可或人工写好的成品论文，可以用 `rehearsal compare` 检查候选稿是否接近可终审状态：
 
@@ -191,7 +205,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 `readyForFinalReview=true` 只代表离线结构、标题覆盖和 profile 校验没有发现警告；正式交付仍需经过 Word/WPS 打开后的分页、目录页码、跨页表格和续表标题抽查。
 
-## 7. 结构化草稿路径
+## 8. 结构化草稿路径
 
 需要快速从内容 JSON 出一个草稿时，可以使用：
 
@@ -201,7 +215,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 这条路径会自动插入目录字段，生成后仍需执行 `finalize apply` 更新目录和分页。它不会完整保留模板原有页眉页脚、节、字段和复杂结构，不应作为正式终稿主路径。
 
-## 8. 查看规则 JSON
+## 9. 查看规则 JSON
 
 打开：
 
