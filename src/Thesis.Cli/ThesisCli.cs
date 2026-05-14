@@ -48,6 +48,11 @@ public static class ThesisCli
             return Help(OperationsUsage());
         }
 
+        if (args is ["finalize-all", "--help"] or ["finalize-all", "-h"] or ["finalize-all", "help"])
+        {
+            return Help(FinalizeAllUsage());
+        }
+
         if (args is ["session", "init", .. var initArgs])
         {
             var doc = RequiredOption(initArgs, "--doc");
@@ -101,6 +106,11 @@ public static class ThesisCli
             return Inspect(inspectArgs);
         }
 
+        if (args is ["finalize-all", .. var finalizeAllArgs])
+        {
+            return FinalizeAll(finalizeAllArgs);
+        }
+
         if (args is ["validate", .. var validateArgs])
         {
             return Validate(validateArgs);
@@ -119,6 +129,11 @@ public static class ThesisCli
         if (args is ["profile", "diff", .. var diffArgs])
         {
             return DiffProfiles(diffArgs);
+        }
+
+        if (args is ["content", "extract", .. var contentExtractArgs])
+        {
+            return ContentExtractCommand.Execute(contentExtractArgs);
         }
 
         if (args is ["rules", "merge", .. var rulesArgs])
@@ -177,6 +192,24 @@ public static class ThesisCli
         }
 
         throw new CliException("unknown_command", "Unknown command.");
+    }
+
+    private static CliResult FinalizeAll(string[] args)
+    {
+        try
+        {
+            var parseError = FinalizeAllCommand.TryParse(args, out var options);
+            if (parseError is not null)
+            {
+                return parseError;
+            }
+
+            return FinalizeAllCommand.Execute(options);
+        }
+        catch (ArgumentException ex)
+        {
+            return FinalizeAllCommand.Error(ex.Message, $"Missing value for {ex.Message}.");
+        }
     }
 
     private static CliResult ApplyOneShot(string[] args)
@@ -1494,7 +1527,9 @@ public static class ThesisCli
             "  profile extract --doc <template.docx> --out <profile.json>",
             "  profile explain --profile <profile.json>",
             "  inspect --doc <docx>",
+            "  content extract --doc <source.docx> --out <content.json> [--report <report.json>]",
             "  rules merge --profile <profile.json> --project <project-rules.json> --out <final-rules.json>",
+            "  finalize-all --template <template.docx> --content <content.json> --project-rules <project-rules.json> --out <final.docx> --workdir <dir> [--reference <reference.docx>] [--skip-host-finalize]",
             "  rehearsal compare --candidate <docx> --reference <docx> --profile <profile.json> [--out <report.json>]",
             "  assemble --doc <template.docx> --content <content.json> --profile <final-rules.json> --out <thesis.docx>",
             "  generate --content <content.json> --rules <final-rules.json> --out <thesis.docx>",
@@ -1508,6 +1543,19 @@ public static class ThesisCli
             "  finalize apply --workspace <dir>",
             "  operations list",
             "  operations sample --op <operation>");
+    }
+
+    private static string FinalizeAllUsage()
+    {
+        return string.Join(
+            Environment.NewLine,
+            "Finalize-all usage:",
+            "  finalize-all --template <template.docx> --content <content.json> --project-rules <project-rules.json> --out <final.docx> --workdir <dir> [--reference <reference.docx>] [--skip-host-finalize] [--host wps|word|auto] [--prog-id <com.prog.id>]",
+            "Artifacts written to --workdir:",
+            "  profile.json, final-rules.json, assembled.docx, candidate.docx, validate-before-finalize.json, host-finalization.json, validate-after-finalize.json, rehearsal-report.json, final-audit.json, repair-plan.json, manual-checklist.md",
+            "Readiness:",
+            "  final-audit.ready=true only when validation passes, WPS/Word finalization is current, and reference rehearsal approves the candidate.",
+            "  --out is written only when final-audit.ready=true; otherwise inspect workdir candidate.docx and audit artifacts.");
     }
 
     private static string OperationsUsage()

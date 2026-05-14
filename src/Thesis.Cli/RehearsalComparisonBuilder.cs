@@ -58,7 +58,7 @@ internal static class RehearsalComparisonBuilder
         {
             report.Diagnostics.Add(new Diagnostic
             {
-                Severity = "warning",
+                Severity = "info",
                 Code = "paragraph_count_gap",
                 Message = $"Candidate has {candidate.Paragraphs.Count} paragraphs; reference has {reference.Paragraphs.Count}.",
                 Path = candidate.Path
@@ -69,7 +69,7 @@ internal static class RehearsalComparisonBuilder
         {
             report.Diagnostics.Add(new Diagnostic
             {
-                Severity = "warning",
+                Severity = "info",
                 Code = "table_count_gap",
                 Message = $"Candidate has {candidate.Tables.Count} tables; reference has {reference.Tables.Count}.",
                 Path = candidate.Path
@@ -80,7 +80,7 @@ internal static class RehearsalComparisonBuilder
         {
             report.Diagnostics.Add(new Diagnostic
             {
-                Severity = "warning",
+                Severity = "info",
                 Code = "section_count_gap",
                 Message = $"Candidate has {candidate.Sections.Count} sections; reference has {reference.Sections.Count}.",
                 Path = candidate.Path

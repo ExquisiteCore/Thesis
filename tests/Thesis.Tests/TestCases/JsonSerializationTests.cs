@@ -112,4 +112,71 @@ internal static partial class Program
         AssertEqual(360, roundtrip.RolePolicies[0].Match.Format!.FirstLineIndentTwips!.Min);
     }
 
+    static void FinalAuditModelsSerializeAsCamelCaseJson()
+    {
+        var result = new CliResult
+        {
+            FinalAudit = new FinalAuditReport
+            {
+                Ready = false,
+                Readiness = "blocked",
+                Summary = "Candidate has blocking findings.",
+                Inputs = new Dictionary<string, string>
+                {
+                    ["template"] = "template.docx"
+                },
+                Outputs = new Dictionary<string, string>
+                {
+                    ["final"] = "final.docx"
+                },
+                Steps =
+                [
+                    new FinalAuditStep
+                    {
+                        Id = "assemble",
+                        Status = "success",
+                        Artifact = "assembled.docx"
+                    }
+                ],
+                Blocking =
+                [
+                    new FinalAuditFinding
+                    {
+                        Id = "missing_reference_content",
+                        Severity = "error",
+                        Source = "rehearsal",
+                        Message = "Reference content is missing.",
+                        DiagnosticCode = "missing_reference_content"
+                    }
+                ]
+            },
+            RepairPlan = new RepairPlan
+            {
+                Ready = false,
+                Items =
+                [
+                    new RepairPlanItem
+                    {
+                        IssueId = "missing_reference_content",
+                        Severity = "error",
+                        Source = "rehearsal",
+                        TargetArtifact = "content.json",
+                        SuggestedCommand = "Add the missing content to content.json and rerun finalize-all.",
+                        Automatic = false,
+                        RequiresWps = false,
+                        Explanation = "The reference thesis contains content not present in the candidate."
+                    }
+                ]
+            }
+        };
+
+        var json = ThesisJson.Serialize(result);
+
+        AssertContains(json, "\"finalAudit\"");
+        AssertContains(json, "\"repairPlan\"");
+        AssertContains(json, "\"ready\":false");
+        AssertContains(json, "\"blocking\"");
+        AssertContains(json, "\"issueId\":\"missing_reference_content\"");
+    }
+
 }

@@ -218,6 +218,8 @@ public sealed class DocumentTable
 
     public List<int> CellCounts { get; set; } = [];
 
+    public List<List<string>> Rows { get; set; } = [];
+
     public string TextPreview { get; set; } = "";
 
     public TableFormatSample Format { get; set; } = new();

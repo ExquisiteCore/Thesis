@@ -306,6 +306,61 @@ internal static partial class Program
         AssertEqual(0, result.RehearsalComparison.ContentCoverage.Gaps.Count);
     }
 
+    static void CliRehearsalCompareDoesNotBlockOnFrontMatterCountGaps()
+    {
+        using var temp = new TempDirectory();
+        var candidate = Path.Combine(temp.Path, "candidate.docx");
+        var reference = Path.Combine(temp.Path, "reference.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+
+        WriteSimpleDocx(
+            candidate,
+            """
+            <w:p><w:r><w:t>摘要</w:t></w:r></w:p>
+            <w:p><w:r><w:t>本文研究工业控制系统安全防护。</w:t></w:r></w:p>
+            <w:p><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:r><w:t>绪论正文内容完整。</w:t></w:r></w:p>
+            """);
+        WriteSimpleDocx(
+            reference,
+            """
+            <w:p><w:r><w:t>题 目：工业控制系统安全防护方案</w:t></w:r></w:p>
+            <w:tbl>
+              <w:tr><w:tc><w:p><w:r><w:t>学生情况</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            <w:p><w:r><w:t>学院：计算机学院</w:t></w:r></w:p>
+            <w:p><w:r><w:t>摘要</w:t></w:r></w:p>
+            <w:p><w:r><w:t>本文研究工业控制系统安全防护。</w:t></w:r></w:p>
+            <w:p><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:r><w:t>绪论正文内容完整。</w:t></w:r></w:p>
+            """);
+        File.WriteAllText(profilePath, "{}");
+
+        var (exitCode, result) = RunCli([
+            "rehearsal",
+            "compare",
+            "--candidate",
+            candidate,
+            "--reference",
+            reference,
+            "--profile",
+            profilePath
+        ]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual(true, result.RehearsalComparison is not null);
+        AssertEqual(true, result.RehearsalComparison!.ReadyForFinalReview);
+        AssertEqual(0, result.RehearsalComparison.ContentCoverage.MissingReferenceParagraphCount);
+        AssertEqual(0, result.RehearsalComparison.ContentCoverage.MissingReferenceTableCount);
+        AssertEqual(0, result.RehearsalComparison.ContentCoverage.Gaps.Count);
+        AssertEqual(true, result.RehearsalComparison.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "paragraph_count_gap"
+            && diagnostic.Severity == "info"));
+        AssertEqual(true, result.RehearsalComparison.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "table_count_gap"
+            && diagnostic.Severity == "info"));
+    }
+
     static void CliRehearsalCompareKeepsEnglishBodyParagraphsEndingWithDigits()
     {
         using var temp = new TempDirectory();

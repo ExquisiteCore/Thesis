@@ -51,6 +51,7 @@ internal static partial class Program
         AssertEqual("success", top.Result.Status);
         AssertEqual("help", top.Result.Diagnostics[0].Code);
         AssertContains(top.Result.Diagnostics[0].Message, "profile extract");
+        AssertContains(top.Result.Diagnostics[0].Message, "content extract");
         AssertContains(top.Result.Diagnostics[0].Message, "finalize apply");
 
         var operations = RunCli(["operations", "--help"]);

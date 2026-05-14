@@ -1,6 +1,7 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Text.RegularExpressions;
 using Thesis.Schema;
 
 namespace Thesis.OpenXml;
@@ -78,7 +79,7 @@ public static class OpenXmlDocumentInspector
             {
                 Index = index,
                 BodyElementIndex = GetBodyElementIndex(paragraph),
-                Text = paragraph.InnerText,
+                Text = CleanParagraphText(paragraph.InnerText),
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
                 OutlineLevel = ReadParagraphOutlineLevel(paragraph, styleOutlineLevels),
                 Format = ReadParagraphFormat(paragraph),
@@ -146,7 +147,7 @@ public static class OpenXmlDocumentInspector
                 return new DocumentRun
                 {
                     Index = index,
-                    Text = run.InnerText,
+                    Text = CleanParagraphText(run.InnerText),
                     Bold = format.Bold == true,
                     Italic = format.Italic == true,
                     FontSizeHalfPoints = format.FontSizeHalfPoints,
@@ -399,21 +400,51 @@ public static class OpenXmlDocumentInspector
             .Select((table, index) =>
             {
                 var rows = table.Elements<TableRow>().ToList();
+                var rowTexts = rows
+                    .Select(row => row.Elements<TableCell>()
+                        .Select(cell => CleanCellText(cell.InnerText))
+                        .ToList())
+                    .ToList();
 
                 return new DocumentTable
                 {
                     Index = index,
                     BodyElementIndex = GetBodyElementIndex(table),
                     RowCount = rows.Count,
-                    CellCounts = rows
-                        .Select(row => row.Elements<TableCell>().Count())
+                    CellCounts = rowTexts
+                        .Select(row => row.Count)
                         .ToList(),
-                    TextPreview = Preview(string.Join(" ", rows.SelectMany(row =>
-                        row.Elements<TableCell>().Select(cell => cell.InnerText)))),
+                    Rows = rowTexts,
+                    TextPreview = Preview(string.Join(" ", rowTexts.SelectMany(row => row))),
                     Format = ReadTableFormat(table, rows)
                 };
             })
             .ToList();
+    }
+
+    private static string CleanCellText(string text)
+    {
+        return Regex.Replace(CleanFieldArtifacts(text).Trim(), @"\s+", " ", RegexOptions.CultureInvariant);
+    }
+
+    private static string CleanParagraphText(string text)
+    {
+        return CleanFieldArtifacts(text);
+    }
+
+    private static string CleanFieldArtifacts(string text)
+    {
+        var cleaned = Regex.Replace(
+            text,
+            @"\s+(?:REF|PAGEREF)\s+\S+(?:\s+\\[A-Za-z*]+)*(?:\s+MERGEFORMAT)?(?:\s+\[[0-9,\-\s]+\])?",
+            " ",
+            RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(
+            cleaned,
+            @"\s*TOC\s+\\o\s+""[^""]*""(?:\s+\\[A-Za-z]+)*\s*",
+            " ",
+            RegexOptions.CultureInvariant);
+        return Regex.Replace(cleaned, @"\s+([。．，,.;；:：!?！？])", "$1", RegexOptions.CultureInvariant);
     }
 
     private static int GetBodyElementIndex(OpenXmlElement element)

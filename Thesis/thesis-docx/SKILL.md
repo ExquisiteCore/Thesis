@@ -16,10 +16,11 @@ description: Use when using Thesis DOCX CLI to extract thesis template rules, me
 ## 推荐终稿链路
 
 ```text
-inspect --doc -> profile extract -> project-rules.json -> rules merge -> assemble -> validate -> finalize -> rehearsal compare -> apply/writeBlock 微调
+finalize-all
+  = profile extract -> rules merge -> assemble -> validate -> finalize -> validate -> rehearsal compare -> final audit
 ```
 
-正式终稿优先在模板副本上装配或增量写入，避免从空白文档重建时丢失节、页眉页脚、字段和复杂样式。`assemble` 会保留首个论文锚点之前的封面/前置页，从“摘要 / Abstract / 目录 / 第X章”开始替换论文主体，保留选中的正文节设置，并丢弃模板尾部格式说明或示例内容。
+正式终稿优先先用 `content extract` 把成品论文或已有正文稿抽成 `content.json`，审核后再用 `finalize-all` 生成终稿候选和审计报告。`assemble`、`validate`、`finalize apply`、`rehearsal compare` 仍可单独使用，但主要作为拆解调试路径。
 
 ## 规则优先级
 
@@ -32,13 +33,17 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe inspect --doc "模板.docx"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile extract --doc "模板.docx" --out ".analysis\profile.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe content extract --doc "成品论文.docx" --out ".analysis\content.json" --report ".analysis\content-extract-report.json" --profile ".analysis\profile.json" --project-rules ".analysis\project-rules.json"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rules merge --profile ".analysis\profile.json" --project ".analysis\project-rules.json" --out ".analysis\final-rules.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis-revised.docx"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis-revised.docx" --profile ".analysis\final-rules.json"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis-revised.docx" --out ".analysis\final.docx"
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
 ```
+
+`finalize-all` 的 `--workdir` 会产出 `profile.json`、`final-rules.json`、`assembled.docx`、`candidate.docx`、`validate-before-finalize.json`、`host-finalization.json`、`validate-after-finalize.json`、`rehearsal-report.json`、`final-audit.json`、`repair-plan.json` 和 `manual-checklist.md`。只有 `final-audit.ready=true` 才会写入 `--out` 并进入终审；不 ready 时命令返回 error，保留既有 `--out`，候选稿留在 `--workdir\candidate.docx`。`--skip-host-finalize` 只能用于离线试跑。
 
 ## writeBlock
 

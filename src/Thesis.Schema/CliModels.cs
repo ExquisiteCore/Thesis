@@ -32,6 +32,10 @@ public sealed class CliResult
 
     public RehearsalComparisonReport? RehearsalComparison { get; set; }
 
+    public FinalAuditReport? FinalAudit { get; set; }
+
+    public RepairPlan? RepairPlan { get; set; }
+
     public List<OperationCatalogItem> OperationsCatalog { get; set; } = [];
 
     public OperationRequest? OperationSample { get; set; }

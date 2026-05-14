@@ -37,8 +37,11 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 ## 推荐终稿流程
 
 ```text
-inspect --doc -> profile extract -> project-rules.json -> rules merge -> assemble -> validate -> finalize -> rehearsal compare -> apply/writeBlock 微调
+finalize-all
+  = profile extract -> rules merge -> assemble -> validate -> finalize -> validate -> rehearsal compare -> final audit
 ```
+
+正式终稿默认用 `finalize-all`。散命令仍保留给规则调试、内容抽取、局部微调和失败排查。
 
 ### 1. 检查模板正文和批注
 
@@ -55,13 +58,21 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> assembl
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile explain --profile ".analysis\profile.json"
 ```
 
-### 3. 合并 project-rules.json
+### 3. 提取 content.json
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe content extract --doc "成品论文.docx" --out ".analysis\content.json" --report ".analysis\content-extract-report.json" --profile ".analysis\profile.json" --project-rules ".analysis\project-rules.json"
+```
+
+抽取后必须审核 `content.json` 和 `content-extract-report.json`，重点看章节层级、表格行列、参考文献和 `ready`。
+
+### 4. 合并 project-rules.json
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rules merge --profile ".analysis\profile.json" --project ".analysis\project-rules.json" --out ".analysis\final-rules.json"
 ```
 
-### 4. 用 assemble 装配整篇正文
+### 5. 用 assemble 装配整篇正文
 
 `assemble` 是整篇论文第一版主入口。它把 `content.json` 里的标题、摘要、关键词、章节、段落、表格、参考文献和致谢写入模板副本，格式来自 `final-rules.json`。
 
@@ -71,7 +82,15 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> assembl
 
 当前 `assemble` 会清空并重写正文主体，保留模板包结构、样式、页眉页脚关系和末节页面设置；如果模板有复杂多节前置页或必须原位替换的占位符，需要后续用 `apply/writeBlock` 补齐或微调。
 
-### 5. 用 writeBlock 微调正文
+### 6. 用 finalize-all 生成终稿候选
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+```
+
+`--workdir` 会产出 `profile.json`、`final-rules.json`、`assembled.docx`、`candidate.docx`、`validate-before-finalize.json`、`host-finalization.json`、`validate-after-finalize.json`、`rehearsal-report.json`、`final-audit.json`、`repair-plan.json` 和 `manual-checklist.md`。只有 `final-audit.ready=true` 才会写入 `--out` 并进入终审；不 ready 时命令返回 error，保留既有 `--out`，候选稿留在 `--workdir\candidate.docx`。`--skip-host-finalize` 只适合离线试跑，不能作为正式终稿绿灯。
+
+### 7. 用 writeBlock 微调正文
 
 `writeBlock` 接收 `text + role + target + format`，用于老师反馈后的局部替换、插入和格式覆盖。角色格式来自 `final-rules.json`，本次 `format` 覆盖角色默认格式。`position` 支持 `before`、`after` 和 `replace`；替换模板占位段落时使用 `replace`。
 
@@ -106,7 +125,7 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> assembl
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis-revised.docx"
 ```
 
-### 6. 校验和最终化
+### 8. 校验和最终化
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis-revised.docx" --profile ".analysis\final-rules.json"
@@ -116,7 +135,7 @@ inspect --doc -> profile extract -> project-rules.json -> rules merge -> assembl
 
 如果没有微调步骤，直接对 `assemble` 生成的 `.analysis\thesis.docx` 执行校验和最终化。
 
-### 7. 和参考成品做 rehearsal 对比
+### 9. 和参考成品做 rehearsal 对比
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
