@@ -1,0 +1,120 @@
+name: build-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  PROJECT: src/Thesis.Cli/Thesis.Cli.csproj
+  SOLUTION: ThesisTool.slnx
+  TEST_PROJECT: tests/Thesis.Tests/Thesis.Tests.csproj
+
+jobs:
+  build-and-test:
+    name: build and test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore $env:SOLUTION
+
+      - name: Build
+        run: dotnet build $env:SOLUTION --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet run --project $env:TEST_PROJECT --configuration Release --no-build
+
+  publish:
+    name: publish ${{ matrix.rid }}
+    needs: build-and-test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            archive: zip
+          - rid: linux-x64
+            archive: tar.gz
+          - rid: osx-x64
+            archive: tar.gz
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish
+        run: >
+          dotnet publish $env:PROJECT
+          --configuration Release
+          --runtime ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output "artifacts/thesis-docx-${{ matrix.rid }}"
+
+      - name: Add README and skill
+        shell: pwsh
+        run: |
+          Copy-Item README.md "artifacts/thesis-docx-${{ matrix.rid }}/README.md"
+          Copy-Item LICENSE "artifacts/thesis-docx-${{ matrix.rid }}/LICENSE"
+          Copy-Item profile-viewer "artifacts/thesis-docx-${{ matrix.rid }}/profile-viewer" -Recurse
+          New-Item -ItemType Directory -Force -Path "artifacts/thesis-docx-${{ matrix.rid }}/Thesis/thesis-docx" | Out-Null
+          Copy-Item Thesis/thesis-docx/SKILL.md "artifacts/thesis-docx-${{ matrix.rid }}/Thesis/thesis-docx/SKILL.md"
+
+      - name: Compress zip
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "artifacts/thesis-docx-${{ matrix.rid }}/*" -DestinationPath "artifacts/thesis-docx-${{ matrix.rid }}.zip" -Force
+
+      - name: Compress tar.gz
+        if: matrix.archive == 'tar.gz'
+        shell: pwsh
+        run: |
+          tar -czf "artifacts/thesis-docx-${{ matrix.rid }}.tar.gz" -C "artifacts/thesis-docx-${{ matrix.rid }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: thesis-docx-${{ matrix.rid }}
+          path: artifacts/thesis-docx-${{ matrix.rid }}.${{ matrix.archive }}
+
+  github-release:
+    name: github release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*

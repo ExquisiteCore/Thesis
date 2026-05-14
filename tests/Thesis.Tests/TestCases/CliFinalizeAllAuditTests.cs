@@ -385,6 +385,7 @@ internal static partial class Program
         AssertEqual(0, exitCode);
         AssertEqual("success", result.Status);
         AssertContains(result.Diagnostics[0].Message, "--skip-host-finalize");
+        AssertContains(result.Diagnostics[0].Message, "--front-matter-doc");
     }
 
     static void CliFinalizeAllWritesArtifactsWithoutHostWhenSkipped()

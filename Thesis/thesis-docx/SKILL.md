@@ -15,6 +15,12 @@ description: Use when using Thesis DOCX CLI to extract thesis template rules, me
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe
 ```
 
+如果是在 GitHub Release 二进制包里使用，入口通常是解压目录下的：
+
+```powershell
+.\Thesis.Cli.exe
+```
+
 如果 exe 不存在：
 
 ```powershell
@@ -22,6 +28,8 @@ dotnet build ThesisTool.slnx
 ```
 
 命令写法始终是 exe 后面直接跟参数。
+
+下方示例使用源码构建路径；在发布包内执行时，把 `.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe` 替换为 `.\Thesis.Cli.exe`。
 
 ## 规则优先级
 
@@ -33,6 +41,21 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 - `project-rules.json`：从模板正文、批注、学校要求或 AI 分析补充出的项目级规则。
 - `final-rules.json`：`profile.json` 和 `project-rules.json` 合并后的最终规则，可作为 `--profile` 输入。
 - `request.json`：本次写入或微调操作，参数可覆盖最终规则。
+
+## 输入职责
+
+- `--template`：模板结构来源，也是 `profile.json` 的提取来源。
+- `--project-rules`：只传项目覆盖规则；不要把合并后的 `final-rules.json` 传给 `finalize-all --project-rules`。
+- `--content`：正文结构，包含摘要、章节、段落、图片、表格、参考文献和致谢。
+- `--front-matter-doc`：任务书、开题报告、承诺书等额外前置 DOCX；可重复传参，顺序即插入顺序。
+- `--reference`：参考成品用于 rehearsal/audit，不会被复制进候选稿；正式终稿生产线必须带。
+
+禁止事项：
+
+- 不要用 `generate --content` 作为正式终稿主路径。
+- 不要把 `--skip-host-finalize` 的输出当正式终稿。
+- 不要把 `content-extract-report.ready=true` 当成终稿 ready。
+- 不要交付 `--workdir\candidate.docx`，除非 `final-audit.ready=true` 后它已经被提升到 `--out`。
 
 ## 推荐终稿流程
 
@@ -66,6 +89,41 @@ finalize-all
 
 抽取后必须审核 `content.json` 和 `content-extract-report.json`，重点看章节层级、表格行列、参考文献和 `ready`。
 
+最小 `content.json`：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "documentKind": "thesisContent",
+  "title": "论文题目",
+  "abstractZh": "中文摘要。",
+  "keywordsZh": ["关键词一", "关键词二"],
+  "abstractEn": "English abstract.",
+  "keywordsEn": ["keyword"],
+  "chapters": [
+    {
+      "title": "第一章 绪论",
+      "blocks": [
+        { "type": "paragraph", "text": "正文段落。" },
+        { "type": "image", "path": "figures/result.png", "caption": "图1-1 实验结果", "altText": "实验结果" },
+        {
+          "type": "table",
+          "table": {
+            "caption": "表1-1 指标对比",
+            "headers": ["指标", "值"],
+            "rows": [["平均时延", "14.89 s"]]
+          }
+        }
+      ]
+    }
+  ],
+  "references": ["张三. 论文题名[J]. 期刊, 2025, 1(1): 1-10."],
+  "acknowledgements": "致谢正文。"
+}
+```
+
+图片路径按 CLI 当前工作目录或绝对路径解析。`widthEmu`、`heightEmu` 可选，单位是 EMU。表格格式来自 `final-rules.json`，尤其是 `tableDefault` 和表格角色规则。
+
 ### 4. 合并 project-rules.json
 
 ```powershell
@@ -80,7 +138,13 @@ finalize-all
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
 ```
 
-如果模板没有可识别论文锚点或节边界，`assemble` 会回退到整主体重写路径。复杂多节前置页或必须原位替换的模板，要先用 `inspect` 检查结构，再用 `apply/writeBlock` 补齐或微调。
+带任务书/开题报告：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --front-matter-doc "任务书.docx" --front-matter-doc "开题报告.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
+```
+
+如果模板没有可识别论文锚点或节边界，`assemble` 会回退到整主体重写路径。复杂多节前置页或必须原位替换的模板，要先用 `inspect` 检查结构，再用 `apply/writeBlock` 补齐或微调。`--front-matter-doc` 会复制常见段落、表格和图片关系；真实分页、节边界和页眉页脚仍要通过 WPS/Word 最终化确认。
 
 ### 6. 用 finalize-all 生成终稿候选
 
@@ -88,7 +152,21 @@ finalize-all
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
 
+带任务书/开题报告：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --front-matter-doc "任务书.docx" --front-matter-doc "开题报告.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+```
+
 `finalize-all` 的 `--workdir` 会产出 `profile.json`、`final-rules.json`、`assembled.docx`、`candidate.docx`、`validate-before-finalize.json`、`host-finalization.json`、`validate-after-finalize.json`、`rehearsal-report.json`、`final-audit.json`、`repair-plan.json` 和 `manual-checklist.md`。只有 `final-audit.ready=true` 才会写入 `--out` 并进入终审；不 ready 时命令返回 error，保留既有 `--out`，候选稿留在 `--workdir\candidate.docx`。`--skip-host-finalize` 只能用于离线试跑。
+
+`final-audit.ready=false` 处理顺序：
+
+1. 读 `final-audit.json` 的 `blocking`、`requiresWps`、`requiresHuman`。
+2. 读 `repair-plan.json`，先修 `automatic=true` 或明确指向 `content.json`、`project-rules.json` 的项。
+3. 打开 `candidate.docx` 只做检查，不作为交付件。
+4. 按 `manual-checklist.md` 检查目录页码、真实分页、跨页表格、续表标题、孤行标题。
+5. 修完后重跑同一条 `finalize-all`，直到 `final-audit.ready=true`。
 
 ### 7. 用 writeBlock 微调正文
 

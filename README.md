@@ -15,10 +15,36 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe
 ```
 
+如果使用 GitHub Release 里的二进制包，解压目录下的入口是：
+
+```powershell
+.\Thesis.Cli.exe
+```
+
 后续命令都是 **exe 后面直接跟参数**，例如：
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations list
+```
+
+## 下载二进制
+
+GitHub Actions 会在两种情况下自动编译二进制包：
+
+- 推送 `v*` tag 时：构建、测试、发布 GitHub Release。
+- 手动运行 `build-release` workflow 时：构建、测试、上传 artifacts。
+
+产物名：
+
+- `thesis-docx-win-x64.zip`
+- `thesis-docx-linux-x64.tar.gz`
+- `thesis-docx-osx-x64.tar.gz`
+
+发布包包含 CLI、`README.md`、`LICENSE`、`profile-viewer/` 和 `Thesis/thesis-docx/SKILL.md`。Windows 下解压后直接用 exe 后面跟参数：
+
+```powershell
+.\Thesis.Cli.exe operations list
+.\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
 
 ## 推荐终稿链路
@@ -43,6 +69,12 @@ dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
 
+如果有任务书、开题报告等需要放在摘要/正文前面的额外 DOCX，用 `--front-matter-doc`，可重复传参，顺序就是合入顺序：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --front-matter-doc "任务书.docx" --front-matter-doc "开题报告.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+```
+
 `finalize-all` 会在 `--workdir` 输出 `profile.json`、`final-rules.json`、`assembled.docx`、`candidate.docx`、`validate-before-finalize.json`、`host-finalization.json`、`validate-after-finalize.json`、`rehearsal-report.json`、`final-audit.json`、`repair-plan.json` 和 `manual-checklist.md`。只有 `final-audit.ready=true` 才会写入 `--out`；如果审计不通过，命令返回 error，保留既有 `--out`，候选稿留在 `--workdir\candidate.docx`。`--skip-host-finalize` 只适合离线试跑，不能作为正式终稿绿灯。
 
 优先级：
@@ -52,6 +84,14 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 ```
 
 正式终稿优先用 `content extract` 把成品论文或已有正文稿转成 `content.json`，人工/AI 审核后再用 `assemble --doc 模板.docx --content content.json --profile final-rules.json --out 输出.docx` 做第一版整篇装配；它复制模板后保留首个论文锚点之前的封面/前置页，从“摘要 / Abstract / 目录 / 第X章”这类锚点开始替换论文主体，并保留选中的正文节页面设置和页眉页脚关系。模板尾部的格式说明、示例参考文献等说明性内容会被丢弃。老师后续反馈、个别段落覆盖、局部格式调整再用 `apply --request request.json`。`generate --content` 仍然存在，但只适合作为空白文档草稿路径。
+
+输入文件职责不要混用：
+
+- `--template`：模板结构来源，也是 `profile.json` 的提取来源。
+- `--project-rules`：只传人工/AI 补充的项目覆盖规则，不要传已经合并后的 `final-rules.json`。
+- `--content`：论文正文结构，包括摘要、章节、段落、图片、表格、参考文献和致谢。
+- `--front-matter-doc`：任务书、开题报告等额外前置 DOCX；它是内容来源，不是规则来源。
+- `--reference`：老师认可的成品或人工终稿，用于 rehearsal/audit 对比；它不会被复制进候选稿。
 
 ## 1. 检查模板正文和批注
 
@@ -129,6 +169,47 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 `content-extract-report.json` 里的 `ready=true` 只代表结构化抽取没有发现关键缺口。正式装配前仍应人工/AI 看一遍 `content.json`，重点检查章节层级、表格标题、参考文献和模板中无法体现的特殊要求。
 
+最小 `content.json` 示例：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "documentKind": "thesisContent",
+  "title": "基于深度强化学习的星地协同任务卸载研究与实现",
+  "author": "李同林",
+  "abstractZh": "本文围绕星地协同任务卸载问题展开研究。",
+  "keywordsZh": ["星地协同", "任务卸载", "深度强化学习"],
+  "abstractEn": "This thesis studies task offloading in satellite-terrestrial collaborative networks.",
+  "keywordsEn": ["satellite-terrestrial collaboration", "task offloading"],
+  "chapters": [
+    {
+      "title": "第一章 绪论",
+      "blocks": [
+        { "type": "paragraph", "text": "本章介绍研究背景、研究意义和论文结构。" },
+        {
+          "type": "image",
+          "path": "lizi/out/reward_curve.png",
+          "caption": "图1-1 奖励收敛曲线",
+          "altText": "奖励收敛曲线"
+        },
+        {
+          "type": "table",
+          "table": {
+            "caption": "表1-1 算法性能对比",
+            "headers": ["算法", "平均时延", "任务成功率"],
+            "rows": [["MADDPG", "14.89 s", "49.21%"]]
+          }
+        }
+      ]
+    }
+  ],
+  "references": ["张三. 星地协同任务卸载研究[J]. 通信学报, 2025, 46(1): 1-10."],
+  "acknowledgements": "感谢导师和同学的帮助。"
+}
+```
+
+图片路径按运行命令时的当前目录或绝对路径解析；`widthEmu`、`heightEmu` 可选，单位是 EMU，不写时工具使用默认尺寸。表格格式不在 `content.json` 里硬编码，优先来自 `final-rules.json` 的 `tableDefault` 和表格角色规则。
+
 ## 5. 用 assemble 装配整篇正文
 
 `content.json` 用来表达论文内容结构：标题、作者、中英文摘要、关键词、章节、段落、表格、参考文献和致谢。格式来自 `final-rules.json`，表格默认使用规则里的 `tableDefault`，参考文献会避免重复 `[1]` 编号。
@@ -136,6 +217,14 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
 ```
+
+带前置材料的装配：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --front-matter-doc "任务书.docx" --front-matter-doc "开题报告.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
+```
+
+`--front-matter-doc` 会把外部 DOCX 的正文块插到论文主体前，适合任务书、开题报告、承诺书等额外材料；可重复传参，顺序即插入顺序。它会复制常见段落、表格和图片关系，但真实分页、节边界和页眉页脚仍要经过 WPS/Word 最终化和抽查。
 
 这条路径是当前最接近“正式工具”的整篇写作入口：它不是从空白文件开始，而是在模板副本上写入内容。当前版本会保留首个论文锚点之前的模板前置内容，替换论文主体范围，保留正文节设置，并丢弃模板尾部的格式说明/示例内容；如果模板里找不到可识别的论文锚点或节边界，工具会回退到旧的整主体重写路径。它还不是完整的终稿排版引擎：目录、字段、分页、节状态归一化仍必须经过 Word/WPS `finalize apply`。
 
@@ -147,6 +236,12 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
 
+带任务书/开题报告的正式候选：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --front-matter-doc "任务书.docx" --front-matter-doc "开题报告.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+```
+
 如果本机暂时不能启动 WPS/Word，可以加 `--skip-host-finalize` 做离线试跑：
 
 ```powershell
@@ -154,6 +249,14 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 ```
 
 离线试跑会生成 `candidate.docx` 和完整审计文件，但 `final-audit.json` 会把 `host_finalization_missing` 放入 `requiresWps`，不会写入正式 `--out`。正式生产线必须保留 `--reference`，否则审计会降级为 reduced confidence。
+
+`final-audit.ready=false` 时按这个顺序处理：
+
+1. 先读 `--workdir\final-audit.json`，看 `blocking`、`requiresWps`、`requiresHuman`。
+2. 再读 `--workdir\repair-plan.json`，优先修复 `automatic=true` 或明确指向 `content.json`、`project-rules.json` 的项。
+3. 打开 `--workdir\candidate.docx` 做人工/WPS 检查，但不要把它当正式终稿交付。
+4. 按 `manual-checklist.md` 检查目录页码、真实分页、跨页表格、续表标题、孤行标题。
+5. 修完后重跑同一条 `finalize-all` 命令，直到 `final-audit.ready=true`，再使用 `--out`。
 
 ## 7. 用 writeBlock 微调正文
 
@@ -260,6 +363,30 @@ profile-viewer/index.html
 ```
 
 可拖入 `profile.json`、`project-rules.json` 或 `final-rules.json`，本地查看规则概览和原始 JSON。
+
+## 当前能力和精细检查结论
+
+当前项目已经不是只能写样例的玩具，能作为论文 DOCX 自动化的工程核心使用：
+
+- 能从模板/成品论文提取 `profile.json`，包括页面、段落格式、表格、节、页眉页脚、图片关系、目录/字段和结构门禁。
+- 能用 `project-rules.json` 覆盖或扩展 profile，单次 `request.json` 的优先级最高。
+- 能在模板副本上装配 `content.json`，支持段落、图片 block、表格 block、参考文献、致谢和 `--front-matter-doc` 前置材料。
+- 能用 `finalize-all` 串起提取、合并、装配、WPS/Word 最终化、二次校验、参考稿对比和最终审计。
+- 能在审计不通过时保留 `candidate.docx` 和修复计划，避免覆盖旧终稿。
+
+对 `lizi/` 的精细检查结果：
+
+- `lizi/out/论文合并版.md` 可作为正文结构来源，包含中英文摘要、5 章正文、30 条参考文献、1 个 Markdown 表格和 4 张 PNG 图；但需要转成带 `image` block 的 `content.json` 才能无损带图装配。
+- `lizi/out/李同林任务书.docx` 和 `lizi/out/开题报告1修改版(2).docx` 适合通过 `--front-matter-doc` 合入。检查产物显示关键任务书文字、开题报告标题/章节、正文五章和 5 张预期图片可以进入候选稿。
+- 早期候选稿和正确稿高精度对比发现过阻塞差异：分节 2 vs 11、页眉页脚数量不一致、候选稿误用 `Heading1/Heading2`、图片关系路径不一致、TC 字段策略不同。后续已把这些改成通用 profile gate，不再硬编码“开题报告”或默认禁止 Heading/TC。
+- 最新验证能提取真实成品 profile，并能用通用门禁挡住结构明显不合格的候选稿，例如节数、页眉页脚拓扑、数字样式、图片关系、TOC/TC 字段策略等。
+
+仍然不能宣称“全自动终稿机”：
+
+- 内容质量、论证质量和学术表达不由 CLI 保证。
+- 真实分页、目录页码、跨页表格、续表标题、孤行标题仍必须经过 WPS/Word 和人工抽查。
+- 前置材料 DOCX 的复杂节、页眉页脚、OLE/公式、异常图片关系仍是 P1 风险区；`final-audit.ready=true` 是交付门槛，不是省略人工终审的理由。
+- 图片关系归一化已有测试覆盖常见路径，但对重复 basename、跨 part 共享图片、非标准相对路径和特殊 `[Content_Types].xml` 的边界还需要继续加压测。
 
 ## Skill 目录
 
