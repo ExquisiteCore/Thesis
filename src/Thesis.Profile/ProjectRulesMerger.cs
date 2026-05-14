@@ -14,6 +14,11 @@ public static class ProjectRulesMerger
         ApplyPageSetup(merged, rules.PageSetup);
         ApplyRoleFormats(merged, rules.RoleFormats);
         ApplyRolePolicies(merged, rules.RolePolicies);
+        ApplyStructurePolicy(merged, rules.StructurePolicy);
+        ApplyStylePolicy(merged, rules.StylePolicy);
+        ApplyPackagePolicy(merged, rules.PackagePolicy);
+        ApplyFieldPolicy(merged, rules.FieldPolicy);
+        ApplyZonePolicy(merged, rules.ZonePolicy);
         ApplyTableRules(merged, rules);
         ApplyDiagnostics(merged, rules.Diagnostics);
         return merged;
@@ -235,6 +240,141 @@ public static class ProjectRulesMerger
                 profile.RolePolicies.Add(policy);
             }
         }
+    }
+
+    private static void ApplyStructurePolicy(TemplateProfile profile, ProjectStructurePolicyRules? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        profile.StructurePolicy ??= new ProfileStructurePolicy();
+        profile.StructurePolicy.SectionCount = rules.SectionCount ?? profile.StructurePolicy.SectionCount;
+        if (rules.Sections is not null)
+        {
+            profile.StructurePolicy.Sections = [.. rules.Sections.Select(CloneSectionSignature)];
+        }
+    }
+
+    private static ProfileSectionSignature CloneSectionSignature(ProfileSectionSignature source)
+    {
+        return new ProfileSectionSignature
+        {
+            Index = source.Index,
+            HeaderSignature = source.HeaderSignature,
+            FooterSignature = source.FooterSignature,
+            PageSize = source.PageSize is null ? null : ClonePageSize(source.PageSize),
+            Margins = source.Margins is null ? null : CloneMargins(source.Margins)
+        };
+    }
+
+    private static PageSizeInfo ClonePageSize(PageSizeInfo source)
+    {
+        return new PageSizeInfo
+        {
+            WidthTwips = source.WidthTwips,
+            HeightTwips = source.HeightTwips,
+            Orientation = source.Orientation
+        };
+    }
+
+    private static PageMarginInfo CloneMargins(PageMarginInfo source)
+    {
+        return new PageMarginInfo
+        {
+            TopTwips = source.TopTwips,
+            RightTwips = source.RightTwips,
+            BottomTwips = source.BottomTwips,
+            LeftTwips = source.LeftTwips,
+            HeaderTwips = source.HeaderTwips,
+            FooterTwips = source.FooterTwips,
+            GutterTwips = source.GutterTwips
+        };
+    }
+
+    private static void ApplyStylePolicy(TemplateProfile profile, ProjectStylePolicyRules? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        profile.StylePolicy ??= new ProfileStylePolicy();
+        profile.StylePolicy.PreserveNumericStyleIds = rules.PreserveNumericStyleIds ?? profile.StylePolicy.PreserveNumericStyleIds;
+        if (rules.NumericStyleIds is not null)
+        {
+            profile.StylePolicy.NumericStyleIds = DistinctNonEmpty(rules.NumericStyleIds);
+        }
+
+        if (rules.DisallowedGeneratedStyleIds is not null)
+        {
+            profile.StylePolicy.DisallowedGeneratedStyleIds = DistinctNonEmpty(rules.DisallowedGeneratedStyleIds);
+        }
+    }
+
+    private static void ApplyPackagePolicy(TemplateProfile profile, ProjectPackagePolicyRules? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        profile.PackagePolicy ??= new ProfilePackagePolicy();
+        profile.PackagePolicy.ImagePartRoot = rules.ImagePartRoot ?? profile.PackagePolicy.ImagePartRoot;
+        profile.PackagePolicy.ImageRelationshipTargetMode = rules.ImageRelationshipTargetMode ?? profile.PackagePolicy.ImageRelationshipTargetMode;
+        profile.PackagePolicy.ImageCount = rules.ImageCount ?? profile.PackagePolicy.ImageCount;
+        profile.PackagePolicy.AllowUnresolvedImageReferences = rules.AllowUnresolvedImageReferences ?? profile.PackagePolicy.AllowUnresolvedImageReferences;
+    }
+
+    private static void ApplyFieldPolicy(TemplateProfile profile, ProjectFieldPolicyRules? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        profile.FieldPolicy ??= new ProfileFieldPolicy();
+        profile.FieldPolicy.RequiresToc = rules.RequiresToc ?? profile.FieldPolicy.RequiresToc;
+        profile.FieldPolicy.AllowTcFields = rules.AllowTcFields ?? profile.FieldPolicy.AllowTcFields;
+    }
+
+    private static void ApplyZonePolicy(TemplateProfile profile, ProjectZonePolicyRules? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        profile.ZonePolicy ??= new ProfileZonePolicy();
+        if (rules.Landmarks is not null)
+        {
+            profile.ZonePolicy.Landmarks = [.. rules.Landmarks.Select(CloneZoneLandmark)];
+        }
+
+        if (rules.ForbiddenFrontMatterHeadings is not null)
+        {
+            profile.ZonePolicy.ForbiddenFrontMatterHeadings = DistinctNonEmpty(rules.ForbiddenFrontMatterHeadings);
+        }
+    }
+
+    private static ProfileZoneLandmark CloneZoneLandmark(ProfileZoneLandmark source)
+    {
+        return new ProfileZoneLandmark
+        {
+            Role = source.Role,
+            ParagraphIndex = source.ParagraphIndex,
+            BodyElementIndex = source.BodyElementIndex,
+            TextPreview = source.TextPreview
+        };
+    }
+
+    private static List<string> DistinctNonEmpty(List<string> values)
+    {
+        return values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static void ApplyTableRules(TemplateProfile profile, ProjectRules rules)

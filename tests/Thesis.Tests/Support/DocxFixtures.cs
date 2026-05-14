@@ -474,6 +474,67 @@ internal static partial class Program
             """);
     }
 
+    static void WriteFrontMatterDocx(string path, string title, string paragraphText, string tableValue)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+              <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/styles.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+              <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+            </w:styles>
+            """);
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            $$"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{{SecurityElement.Escape(title)}}</w:t></w:r></w:p>
+                <w:p><w:r><w:t>{{SecurityElement.Escape(paragraphText)}}</w:t></w:r></w:p>
+                <w:tbl>
+                  <w:tr><w:tc><w:p><w:r><w:t>字段</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>{{SecurityElement.Escape(tableValue)}}</w:t></w:r></w:p></w:tc></w:tr>
+                </w:tbl>
+                <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>
+              </w:body>
+            </w:document>
+            """);
+    }
+
     static void WriteCommentedRulesFixtureDocx(string path)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -707,6 +768,307 @@ internal static partial class Program
         var entry = archive.CreateEntry(entryName);
         using var writer = new StreamWriter(entry.Open());
         writer.Write(text);
+    }
+
+    static void WriteSinglePixelPng(string path)
+    {
+        File.WriteAllBytes(
+            path,
+            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="));
+    }
+
+    static void WriteDocxWithImageRelationshipIssues(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Default Extension="png" ContentType="image/png"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdImageRoot" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/media/image1.png"/>
+            </Relationships>
+            """);
+        var image = archive.CreateEntry("media/image1.png");
+        using (var stream = image.Open())
+        {
+            var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                        xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <w:body>
+                <w:p>
+                  <w:r>
+                    <w:drawing>
+                      <wp:inline>
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="1" name="bad-root-image"/>
+                        <a:graphic>
+                          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                            <pic:pic>
+                              <pic:nvPicPr><pic:cNvPr id="0" name="bad-root-image"/><pic:cNvPicPr/></pic:nvPicPr>
+                              <pic:blipFill><a:blip r:embed="rIdImageRoot"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+                              <pic:spPr/>
+                            </pic:pic>
+                          </a:graphicData>
+                        </a:graphic>
+                      </wp:inline>
+                    </w:drawing>
+                  </w:r>
+                </w:p>
+                <w:p>
+                  <w:r>
+                    <w:drawing>
+                      <wp:inline>
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="2" name="missing-image"/>
+                        <a:graphic>
+                          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                            <pic:pic>
+                              <pic:nvPicPr><pic:cNvPr id="0" name="missing-image"/><pic:cNvPicPr/></pic:nvPicPr>
+                              <pic:blipFill><a:blip r:embed="rIdMissing"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+                              <pic:spPr/>
+                            </pic:pic>
+                          </a:graphicData>
+                        </a:graphic>
+                      </wp:inline>
+                    </w:drawing>
+                  </w:r>
+                </w:p>
+                <w:sectPr/>
+              </w:body>
+            </w:document>
+            """);
+    }
+
+    static void WriteTemplateDocxWithExistingMediaImage(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Default Extension="png" ContentType="image/png"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdExistingImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+            </Relationships>
+            """);
+        var image = archive.CreateEntry("word/media/image1.png");
+        using (var stream = image.Open())
+        {
+            var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=");
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                        xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <w:body>
+                <w:p><w:r><w:t>封面</w:t></w:r></w:p>
+                <w:p>
+                  <w:r>
+                    <w:drawing>
+                      <wp:inline>
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="1" name="existing-image"/>
+                        <a:graphic>
+                          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                            <pic:pic>
+                              <pic:nvPicPr><pic:cNvPr id="0" name="existing-image"/><pic:cNvPicPr/></pic:nvPicPr>
+                              <pic:blipFill><a:blip r:embed="rIdExistingImage"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+                              <pic:spPr/>
+                            </pic:pic>
+                          </a:graphicData>
+                        </a:graphic>
+                      </wp:inline>
+                    </w:drawing>
+                  </w:r>
+                </w:p>
+                <w:p><w:r><w:t>摘要</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板正文占位</w:t></w:r></w:p>
+                <w:p><w:r><w:t>格式说明</w:t></w:r><w:pPr><w:sectPr/></w:pPr></w:p>
+              </w:body>
+            </w:document>
+            """);
+    }
+
+    static void WriteTemplateDocxWithSharedRootImageRelationships(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddZipEntry(
+            archive,
+            "[Content_Types].xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Default Extension="png" ContentType="image/png"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+              <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+            </Types>
+            """);
+        AddZipEntry(
+            archive,
+            "_rels/.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/document.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+              <Relationship Id="rIdSharedA" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/media/shared.png"/>
+              <Relationship Id="rIdSharedB" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/media/shared.png"/>
+            </Relationships>
+            """);
+        AddZipEntry(
+            archive,
+            "word/_rels/header1.xml.rels",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdHeaderImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/header.png"/>
+            </Relationships>
+            """);
+        AddImageEntry(archive, "media/shared.png");
+        AddImageEntry(archive, "media/header.png");
+        AddZipEntry(
+            archive,
+            "word/header1.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                   xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                   xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                   xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <w:p>
+                <w:r>
+                  <w:drawing>
+                    <wp:inline>
+                      <wp:extent cx="914400" cy="914400"/>
+                      <wp:docPr id="3" name="header-image"/>
+                      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="header-image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdHeaderImage"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic>
+                    </wp:inline>
+                  </w:drawing>
+                </w:r>
+              </w:p>
+            </w:hdr>
+            """);
+        AddZipEntry(
+            archive,
+            "word/document.xml",
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                        xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <w:body>
+                <w:p><w:r><w:t>封面</w:t></w:r></w:p>
+                <w:p>
+                  <w:r>
+                    <w:drawing>
+                      <wp:inline>
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="1" name="shared-a"/>
+                        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="shared-a"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdSharedA"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic>
+                      </wp:inline>
+                    </w:drawing>
+                  </w:r>
+                </w:p>
+                <w:p>
+                  <w:r>
+                    <w:drawing>
+                      <wp:inline>
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="2" name="shared-b"/>
+                        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="shared-b"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdSharedB"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic>
+                      </wp:inline>
+                    </w:drawing>
+                  </w:r>
+                </w:p>
+                <w:p><w:r><w:t>摘要</w:t></w:r></w:p>
+                <w:p><w:r><w:t>模板正文占位</w:t></w:r></w:p>
+                <w:p><w:r><w:t>格式说明</w:t></w:r><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/></w:sectPr></w:pPr></w:p>
+              </w:body>
+            </w:document>
+            """);
+    }
+
+    static void AddImageEntry(ZipArchive archive, string entryName)
+    {
+        var image = archive.CreateEntry(entryName);
+        using var stream = image.Open();
+        var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+        stream.Write(bytes, 0, bytes.Length);
     }
 
     static void InjectHyperlinkIntoFirstParagraph(string docxPath)

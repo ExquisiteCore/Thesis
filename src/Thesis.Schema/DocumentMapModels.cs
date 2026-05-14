@@ -25,6 +25,8 @@ public sealed class DocumentMap
     public List<DocumentComment> Comments { get; set; } = [];
 
     public List<DocumentRequirementHint> RequirementHints { get; set; } = [];
+
+    public DocumentPackageFacts Package { get; set; } = new();
 }
 
 public sealed class HostFinalizationState
@@ -206,6 +208,37 @@ public sealed class HeaderFooterReference
     public string? Type { get; set; }
 
     public string? RelationshipId { get; set; }
+}
+
+public sealed class DocumentPackageFacts
+{
+    public int ImageCount { get; set; }
+
+    public int DrawingCount { get; set; }
+
+    public int UnresolvedImageReferenceCount { get; set; }
+
+    public List<DocumentRelationship> Relationships { get; set; } = [];
+
+    public List<DocumentFieldCode> FieldCodes { get; set; } = [];
+}
+
+public sealed class DocumentRelationship
+{
+    public string Id { get; set; } = "";
+
+    public string Type { get; set; } = "";
+
+    public string Target { get; set; } = "";
+
+    public string TargetMode { get; set; } = "";
+}
+
+public sealed class DocumentFieldCode
+{
+    public string Kind { get; set; } = "";
+
+    public string Instruction { get; set; } = "";
 }
 
 public sealed class DocumentTable

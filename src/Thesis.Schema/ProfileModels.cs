@@ -16,6 +16,16 @@ public sealed class TemplateProfile
 
     public ProfilePageSetup PageSetup { get; set; } = new();
 
+    public ProfileStructurePolicy StructurePolicy { get; set; } = new();
+
+    public ProfileStylePolicy StylePolicy { get; set; } = new();
+
+    public ProfilePackagePolicy PackagePolicy { get; set; } = new();
+
+    public ProfileFieldPolicy FieldPolicy { get; set; } = new();
+
+    public ProfileZonePolicy ZonePolicy { get; set; } = new();
+
     public List<ProfileStyleRole> StyleRoles { get; set; } = [];
 
     public List<ProfileRoleAlias> RoleAliases { get; set; } = [];
@@ -44,6 +54,71 @@ public sealed class ProfilePageSetup
     public List<HeaderFooterReference> Headers { get; set; } = [];
 
     public List<HeaderFooterReference> Footers { get; set; } = [];
+}
+
+public sealed class ProfileStructurePolicy
+{
+    public int SectionCount { get; set; }
+
+    public List<ProfileSectionSignature> Sections { get; set; } = [];
+}
+
+public sealed class ProfileSectionSignature
+{
+    public int Index { get; set; }
+
+    public string HeaderSignature { get; set; } = "";
+
+    public string FooterSignature { get; set; } = "";
+
+    public PageSizeInfo? PageSize { get; set; }
+
+    public PageMarginInfo? Margins { get; set; }
+}
+
+public sealed class ProfileStylePolicy
+{
+    public bool PreserveNumericStyleIds { get; set; }
+
+    public List<string> NumericStyleIds { get; set; } = [];
+
+    public List<string> DisallowedGeneratedStyleIds { get; set; } = [];
+}
+
+public sealed class ProfilePackagePolicy
+{
+    public string ImagePartRoot { get; set; } = "";
+
+    public string ImageRelationshipTargetMode { get; set; } = "";
+
+    public int? ImageCount { get; set; }
+
+    public bool AllowUnresolvedImageReferences { get; set; }
+}
+
+public sealed class ProfileFieldPolicy
+{
+    public bool RequiresToc { get; set; }
+
+    public bool AllowTcFields { get; set; } = true;
+}
+
+public sealed class ProfileZonePolicy
+{
+    public List<ProfileZoneLandmark> Landmarks { get; set; } = [];
+
+    public List<string> ForbiddenFrontMatterHeadings { get; set; } = [];
+}
+
+public sealed class ProfileZoneLandmark
+{
+    public string Role { get; set; } = "";
+
+    public int ParagraphIndex { get; set; }
+
+    public int BodyElementIndex { get; set; }
+
+    public string TextPreview { get; set; } = "";
 }
 
 public sealed class ProfileStyleRole

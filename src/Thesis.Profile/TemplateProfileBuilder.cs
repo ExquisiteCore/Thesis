@@ -17,6 +17,11 @@ public static class TemplateProfileBuilder
             RequiresFinalization = map.RequiresFinalization,
             FinalizationReasons = [.. map.FinalizationReasons],
             PageSetup = BuildPageSetup(map),
+            StructurePolicy = BuildStructurePolicy(map),
+            StylePolicy = BuildStylePolicy(map),
+            PackagePolicy = BuildPackagePolicy(map),
+            FieldPolicy = BuildFieldPolicy(map),
+            ZonePolicy = BuildZonePolicy(map),
             StyleRoles = BuildStyleRoles(map),
             RolePolicies = BuildRolePolicies(map),
             FormatClusters = ProfileFormatClusterBuilder.Build(map),
@@ -37,6 +42,87 @@ public static class TemplateProfileBuilder
             Margins = section?.PageMargin is null ? null : ProfileSampleCloner.Clone(section.PageMargin),
             Headers = section is null ? [] : [.. section.Headers.Select(ProfileSampleCloner.Clone)],
             Footers = section is null ? [] : [.. section.Footers.Select(ProfileSampleCloner.Clone)]
+        };
+    }
+
+    private static ProfileStructurePolicy BuildStructurePolicy(DocumentMap map)
+    {
+        return new ProfileStructurePolicy
+        {
+            SectionCount = map.Sections.Count,
+            Sections = [.. map.Sections.Select(section => new ProfileSectionSignature
+            {
+                Index = section.Index,
+                HeaderSignature = HeaderFooterSignature(section.Headers),
+                FooterSignature = HeaderFooterSignature(section.Footers),
+                PageSize = section.PageSize is null ? null : ProfileSampleCloner.Clone(section.PageSize),
+                Margins = section.PageMargin is null ? null : ProfileSampleCloner.Clone(section.PageMargin)
+            })]
+        };
+    }
+
+    private static ProfileStylePolicy BuildStylePolicy(DocumentMap map)
+    {
+        var numericStyleIds = map.Styles
+            .Select(style => style.StyleId)
+            .Where(styleId => !string.IsNullOrWhiteSpace(styleId) && styleId.All(char.IsAsciiDigit))
+            .Select(styleId => styleId!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(styleId => styleId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new ProfileStylePolicy
+        {
+            PreserveNumericStyleIds = numericStyleIds.Count > 0,
+            NumericStyleIds = numericStyleIds,
+            DisallowedGeneratedStyleIds = []
+        };
+    }
+
+    private static ProfilePackagePolicy BuildPackagePolicy(DocumentMap map)
+    {
+        var imageRelationships = map.Package.Relationships
+            .Where(relationship => string.Equals(relationship.Type, "image", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var allImageTargetsAreRelativeMedia = imageRelationships.Count > 0
+            && imageRelationships.All(relationship =>
+                string.IsNullOrWhiteSpace(relationship.TargetMode)
+                && relationship.Target.StartsWith("media/", StringComparison.Ordinal)
+                && !relationship.Target.StartsWith("/", StringComparison.Ordinal));
+
+        return new ProfilePackagePolicy
+        {
+            ImagePartRoot = allImageTargetsAreRelativeMedia ? "word/media" : "",
+            ImageRelationshipTargetMode = allImageTargetsAreRelativeMedia ? "relative" : "",
+            ImageCount = map.Package.ImageCount > 0 ? map.Package.ImageCount : null,
+            AllowUnresolvedImageReferences = false
+        };
+    }
+
+    private static ProfileFieldPolicy BuildFieldPolicy(DocumentMap map)
+    {
+        var hasToc = map.FinalizationReasons.Contains("toc", StringComparer.OrdinalIgnoreCase)
+            || map.Package.FieldCodes.Any(field => string.Equals(field.Kind, "TOC", StringComparison.OrdinalIgnoreCase));
+        return new ProfileFieldPolicy
+        {
+            RequiresToc = hasToc,
+            AllowTcFields = true
+        };
+    }
+
+    private static ProfileZonePolicy BuildZonePolicy(DocumentMap map)
+    {
+        var landmarks = new List<ProfileZoneLandmark>();
+        AddZoneLandmark(landmarks, map, "abstract.zh", paragraph => ThesisTextHeuristics.IsChineseAbstractHeading(paragraph.Text));
+        AddZoneLandmark(landmarks, map, "toc.title", paragraph => ThesisTextHeuristics.IsTocHeading(paragraph.Text));
+        AddZoneLandmark(landmarks, map, "body", paragraph => IsChapterHeading(paragraph.Text));
+        AddZoneLandmark(landmarks, map, "references", paragraph => ThesisTextHeuristics.IsReferencesHeading(paragraph.Text));
+        AddZoneLandmark(landmarks, map, "acknowledgements", paragraph => ThesisTextHeuristics.IsAcknowledgementsHeading(paragraph.Text));
+
+        return new ProfileZonePolicy
+        {
+            Landmarks = landmarks,
+            ForbiddenFrontMatterHeadings = []
         };
     }
 
@@ -242,6 +328,50 @@ public static class TemplateProfileBuilder
             },
             Format = ProfileSampleCloner.Clone(paragraph.Format)
         });
+    }
+
+    private static void AddZoneLandmark(
+        List<ProfileZoneLandmark> landmarks,
+        DocumentMap map,
+        string role,
+        Func<DocumentParagraph, bool> predicate)
+    {
+        var paragraph = map.Paragraphs.FirstOrDefault(predicate);
+        if (paragraph is null)
+        {
+            return;
+        }
+
+        landmarks.Add(new ProfileZoneLandmark
+        {
+            Role = role,
+            ParagraphIndex = paragraph.Index,
+            BodyElementIndex = paragraph.BodyElementIndex,
+            TextPreview = Preview(paragraph.Text)
+        });
+    }
+
+    private static string HeaderFooterSignature(List<HeaderFooterReference> references)
+    {
+        return string.Join(
+            "|",
+            references
+                .Select(reference => Lower(reference.Type))
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsChapterHeading(DocumentParagraph paragraph)
+    {
+        return IsChapterHeading(paragraph.Text);
+    }
+
+    private static bool IsChapterHeading(string text)
+    {
+        var normalized = text.Trim();
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            normalized,
+            @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章(?:\s+\S.*)?$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     private static ParagraphFormatSample? SelectRoleFormat(

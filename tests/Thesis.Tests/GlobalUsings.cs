@@ -1,5 +1,6 @@
 global using System.Diagnostics;
 global using System.IO.Compression;
+global using System.Security;
 global using System.Text.Json.Nodes;
 global using System.Text.RegularExpressions;
 global using Thesis.Cli;

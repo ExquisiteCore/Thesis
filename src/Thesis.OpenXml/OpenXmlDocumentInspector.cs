@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System.Text.RegularExpressions;
 using Thesis.Schema;
+using A = DocumentFormat.OpenXml.Drawing;
 
 namespace Thesis.OpenXml;
 
@@ -65,7 +66,8 @@ public static class OpenXmlDocumentInspector
             Sections = ReadSections(body),
             Tables = ReadTables(body),
             Comments = ReadComments(mainPart),
-            RequirementHints = ReadRequirementHints(body, mainPart)
+            RequirementHints = ReadRequirementHints(body, mainPart),
+            Package = ReadPackageFacts(mainPart, body)
         };
     }
 
@@ -518,6 +520,142 @@ public static class OpenXmlDocumentInspector
             "首行缩进", "页边距", "目录", "参考文献", "页码", "标题", "正文"
         };
         return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static DocumentPackageFacts ReadPackageFacts(MainDocumentPart mainPart, Body body)
+    {
+        var relationships = new List<DocumentRelationship>();
+        var unresolvedImageReferenceCount = 0;
+        var drawingCount = 0;
+        var visited = new HashSet<Uri>();
+        ReadPartRelationships(mainPart, mainPart, relationships, ref unresolvedImageReferenceCount, ref drawingCount, visited);
+
+        return new DocumentPackageFacts
+        {
+            ImageCount = mainPart.ImageParts.Count(),
+            DrawingCount = drawingCount,
+            UnresolvedImageReferenceCount = unresolvedImageReferenceCount,
+            Relationships = relationships,
+            FieldCodes = ReadFieldCodes(body)
+        };
+    }
+
+    private static void ReadPartRelationships(
+        MainDocumentPart mainPart,
+        OpenXmlPartContainer container,
+        List<DocumentRelationship> relationships,
+        ref int unresolvedImageReferenceCount,
+        ref int drawingCount,
+        HashSet<Uri> visited)
+    {
+        if (container is OpenXmlPart part && !visited.Add(part.Uri))
+        {
+            return;
+        }
+
+        var imageRelationshipIds = container.Parts
+            .Where(partPair => partPair.OpenXmlPart is ImagePart)
+            .Select(partPair => partPair.RelationshipId)
+            .ToHashSet(StringComparer.Ordinal);
+        var root = (container as OpenXmlPart)?.RootElement;
+        if (root is not null)
+        {
+            drawingCount += root.Descendants<Drawing>().Count();
+            unresolvedImageReferenceCount += root
+                .Descendants<A.Blip>()
+                .Select(blip => blip.Embed?.Value)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!)
+                .Count(id => !imageRelationshipIds.Contains(id));
+        }
+
+        foreach (var partPair in container.Parts)
+        {
+            relationships.Add(new DocumentRelationship
+            {
+                Id = partPair.RelationshipId,
+                Type = RelationshipTypeName(partPair.OpenXmlPart.RelationshipType),
+                Target = NormalizePartTarget(mainPart, partPair.OpenXmlPart),
+                TargetMode = ""
+            });
+
+            if (partPair.OpenXmlPart is not ImagePart)
+            {
+                ReadPartRelationships(mainPart, partPair.OpenXmlPart, relationships, ref unresolvedImageReferenceCount, ref drawingCount, visited);
+            }
+        }
+
+        relationships.AddRange(container.HyperlinkRelationships.Select(relationship => new DocumentRelationship
+        {
+            Id = relationship.Id,
+            Type = "hyperlink",
+            Target = relationship.Uri.ToString(),
+            TargetMode = relationship.IsExternal ? "external" : ""
+        }));
+        relationships.AddRange(container.ExternalRelationships.Select(relationship => new DocumentRelationship
+        {
+            Id = relationship.Id,
+            Type = RelationshipTypeName(relationship.RelationshipType),
+            Target = relationship.Uri.ToString(),
+            TargetMode = "external"
+        }));
+    }
+
+    private static List<DocumentFieldCode> ReadFieldCodes(Body body)
+    {
+        var fieldCodes = body
+            .Descendants<FieldCode>()
+            .Select(code => code.Text)
+            .Concat(body.Descendants<SimpleField>().Select(field => field.Instruction?.Value))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => NormalizeFieldInstruction(value!))
+            .ToList();
+
+        fieldCodes.AddRange(body
+            .Descendants<FieldChar>()
+            .Where(field => string.Equals(GetWordprocessingAttribute(field, "fldCharType"), "begin", StringComparison.OrdinalIgnoreCase))
+            .Select(_ => new DocumentFieldCode { Kind = "FIELD", Instruction = "" }));
+
+        return fieldCodes;
+    }
+
+    private static DocumentFieldCode NormalizeFieldInstruction(string instruction)
+    {
+        var trimmed = instruction.Trim();
+        var kindMatch = Regex.Match(trimmed, @"^[A-Za-z]+", RegexOptions.CultureInvariant);
+        return new DocumentFieldCode
+        {
+            Kind = kindMatch.Success ? kindMatch.Value.ToUpperInvariant() : "FIELD",
+            Instruction = trimmed
+        };
+    }
+
+    private static string RelationshipTypeName(string relationshipType)
+    {
+        var separator = Math.Max(relationshipType.LastIndexOf('/'), relationshipType.LastIndexOf('#'));
+        return separator >= 0 && separator + 1 < relationshipType.Length
+            ? relationshipType[(separator + 1)..]
+            : relationshipType;
+    }
+
+    private static string NormalizePartTarget(MainDocumentPart mainPart, OpenXmlPart part)
+    {
+        var partUri = part.Uri.ToString();
+        if (partUri.StartsWith("/word/", StringComparison.OrdinalIgnoreCase))
+        {
+            return partUri["/word/".Length..];
+        }
+
+        if (partUri.StartsWith("/", StringComparison.Ordinal))
+        {
+            return partUri;
+        }
+
+        var mainPartUri = mainPart.Uri.ToString();
+        var basePrefix = mainPartUri[..(mainPartUri.LastIndexOf('/') + 1)];
+        return partUri.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase)
+            ? partUri[basePrefix.Length..]
+            : partUri;
     }
 
     private static TableFormatSample ReadTableFormat(Table table, IReadOnlyList<TableRow> rows)

@@ -130,6 +130,18 @@ internal static class ProfileSampleCloner
         };
     }
 
+    public static ProfileSectionSignature Clone(ProfileSectionSignature value)
+    {
+        return new ProfileSectionSignature
+        {
+            Index = value.Index,
+            HeaderSignature = value.HeaderSignature,
+            FooterSignature = value.FooterSignature,
+            PageSize = value.PageSize is null ? null : Clone(value.PageSize),
+            Margins = value.Margins is null ? null : Clone(value.Margins)
+        };
+    }
+
     public static DocumentNumbering Clone(DocumentNumbering value)
     {
         return new DocumentNumbering

@@ -758,4 +758,85 @@ internal static partial class Program
         AssertEqual(true, profile.Diagnostics.Any(diagnostic => diagnostic.Code == "profile_table_missing"));
     }
 
+    static void TemplateProfileBuilderExtractsStructuralPackageAndZonePolicies()
+    {
+        var map = new DocumentMap
+        {
+            Path = Path.GetFullPath("accepted-thesis.docx"),
+            Paragraphs =
+            [
+                new DocumentParagraph { Index = 0, BodyElementIndex = 0, Text = "封面" },
+                new DocumentParagraph { Index = 1, BodyElementIndex = 1, Text = "独创性声明" },
+                new DocumentParagraph { Index = 2, BodyElementIndex = 2, Text = "摘   要", StyleId = "21" },
+                new DocumentParagraph { Index = 3, BodyElementIndex = 3, Text = "目    录", StyleId = "22" },
+                new DocumentParagraph { Index = 4, BodyElementIndex = 4, Text = "第一章 绪论", StyleId = "23" },
+                new DocumentParagraph { Index = 5, BodyElementIndex = 5, Text = "参考文献", StyleId = "24" },
+                new DocumentParagraph { Index = 6, BodyElementIndex = 6, Text = "致谢", StyleId = "25" }
+            ],
+            Styles =
+            [
+                new DocumentStyle { StyleId = "21", Name = "摘要标题", Type = "paragraph", UsageCount = 1 },
+                new DocumentStyle { StyleId = "22", Name = "目录标题", Type = "paragraph", UsageCount = 1 },
+                new DocumentStyle { StyleId = "23", Name = "章标题", Type = "paragraph", UsageCount = 1 },
+                new DocumentStyle { StyleId = "Heading1", Name = "heading 1", Type = "paragraph", UsageCount = 0 }
+            ],
+            Sections =
+            [
+                new DocumentSection
+                {
+                    Index = 0,
+                    Headers = [new HeaderFooterReference { Type = "default", RelationshipId = "rIdCoverHeader" }],
+                    Footers = []
+                },
+                new DocumentSection
+                {
+                    Index = 1,
+                    Headers = [new HeaderFooterReference { Type = "default", RelationshipId = "rIdBodyHeader" }],
+                    Footers = [new HeaderFooterReference { Type = "default", RelationshipId = "rIdBodyFooter" }]
+                },
+                new DocumentSection
+                {
+                    Index = 2,
+                    Headers = [new HeaderFooterReference { Type = "default", RelationshipId = "rIdTailHeader" }],
+                    Footers = [new HeaderFooterReference { Type = "default", RelationshipId = "rIdTailFooter" }]
+                }
+            ],
+            Package = new DocumentPackageFacts
+            {
+                ImageCount = 2,
+                DrawingCount = 2,
+                UnresolvedImageReferenceCount = 0,
+                Relationships =
+                [
+                    new DocumentRelationship { Id = "rIdImage1", Type = "image", Target = "media/image1.png", TargetMode = "" },
+                    new DocumentRelationship { Id = "rIdImage2", Type = "image", Target = "media/image2.png", TargetMode = "" }
+                ],
+                FieldCodes =
+                [
+                    new DocumentFieldCode { Kind = "TOC", Instruction = "TOC \\o \"1-3\" \\h \\z \\u" }
+                ]
+            }
+        };
+
+        var profile = TemplateProfileBuilder.Build(map, "doc");
+
+        AssertEqual(3, profile.StructurePolicy.SectionCount);
+        AssertEqual(3, profile.StructurePolicy.Sections.Count);
+        AssertEqual("default", profile.StructurePolicy.Sections[0].HeaderSignature);
+        AssertEqual("default", profile.StructurePolicy.Sections[1].FooterSignature);
+        AssertEqual(true, profile.StylePolicy.PreserveNumericStyleIds);
+        AssertEqual(true, profile.StylePolicy.NumericStyleIds.Contains("21"));
+        AssertEqual(false, profile.StylePolicy.DisallowedGeneratedStyleIds.Contains("21"));
+        AssertEqual(false, profile.StylePolicy.DisallowedGeneratedStyleIds.Contains("Heading1"));
+        AssertEqual("word/media", profile.PackagePolicy.ImagePartRoot);
+        AssertEqual("relative", profile.PackagePolicy.ImageRelationshipTargetMode);
+        AssertEqual(2, profile.PackagePolicy.ImageCount);
+        AssertEqual(false, profile.PackagePolicy.AllowUnresolvedImageReferences);
+        AssertEqual(true, profile.FieldPolicy.RequiresToc);
+        AssertEqual(true, profile.FieldPolicy.AllowTcFields);
+        AssertEqual("abstract.zh", profile.ZonePolicy.Landmarks[0].Role);
+        AssertEqual("body", profile.ZonePolicy.Landmarks[2].Role);
+        AssertEqual(0, profile.ZonePolicy.ForbiddenFrontMatterHeadings.Count);
+    }
+
 }

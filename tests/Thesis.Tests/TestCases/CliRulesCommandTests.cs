@@ -135,6 +135,103 @@ internal static partial class Program
         AssertEqual(true, merged.Diagnostics.Any(diagnostic => diagnostic.Code == "ai_rule"));
     }
 
+    static void CliRulesMergeAppliesProjectPolicyOverrides()
+    {
+        using var temp = new TempDirectory();
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        var projectPath = Path.Combine(temp.Path, "project-rules.json");
+        var outputPath = Path.Combine(temp.Path, "final-rules.json");
+        File.WriteAllText(profilePath, ThesisJson.Serialize(new TemplateProfile
+        {
+            StructurePolicy = new ProfileStructurePolicy
+            {
+                SectionCount = 1,
+                Sections =
+                [
+                    new ProfileSectionSignature
+                    {
+                        Index = 0,
+                        HeaderSignature = "default",
+                        FooterSignature = ""
+                    }
+                ]
+            },
+            StylePolicy = new ProfileStylePolicy
+            {
+                PreserveNumericStyleIds = true,
+                NumericStyleIds = ["21"],
+                DisallowedGeneratedStyleIds = []
+            },
+            PackagePolicy = new ProfilePackagePolicy
+            {
+                ImagePartRoot = "word/media",
+                ImageRelationshipTargetMode = "relative",
+                ImageCount = 1,
+                AllowUnresolvedImageReferences = false
+            },
+            FieldPolicy = new ProfileFieldPolicy
+            {
+                RequiresToc = false,
+                AllowTcFields = true
+            },
+            ZonePolicy = new ProfileZonePolicy
+            {
+                ForbiddenFrontMatterHeadings = []
+            }
+        }));
+        File.WriteAllText(
+            projectPath,
+            """
+            {
+              "schemaVersion": "1.0",
+              "rulesKind": "projectRules",
+              "structurePolicy": {
+                "sectionCount": 2,
+                "sections": [
+                  { "index": 0, "headerSignature": "default", "footerSignature": "" },
+                  { "index": 1, "headerSignature": "default|first", "footerSignature": "default" }
+                ]
+              },
+              "stylePolicy": {
+                "preserveNumericStyleIds": true,
+                "numericStyleIds": ["21", "22"],
+                "disallowedGeneratedStyleIds": ["Heading1"]
+              },
+              "packagePolicy": {
+                "imageCount": 2,
+                "allowUnresolvedImageReferences": false
+              },
+              "fieldPolicy": {
+                "requiresToc": true,
+                "allowTcFields": false
+              },
+              "zonePolicy": {
+                "forbiddenFrontMatterHeadings": ["开题报告"]
+              }
+            }
+            """);
+
+        var (exitCode, result) = RunCli(["rules", "merge", "--profile", profilePath, "--project", projectPath, "--out", outputPath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        var merged = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(outputPath));
+        AssertEqual(2, merged.StructurePolicy.SectionCount);
+        AssertEqual(2, merged.StructurePolicy.Sections.Count);
+        AssertEqual("default|first", merged.StructurePolicy.Sections[1].HeaderSignature);
+        AssertEqual(true, merged.StylePolicy.PreserveNumericStyleIds);
+        AssertEqual(true, merged.StylePolicy.NumericStyleIds.Contains("21"));
+        AssertEqual(true, merged.StylePolicy.NumericStyleIds.Contains("22"));
+        AssertEqual(true, merged.StylePolicy.DisallowedGeneratedStyleIds.Contains("Heading1"));
+        AssertEqual("word/media", merged.PackagePolicy.ImagePartRoot);
+        AssertEqual("relative", merged.PackagePolicy.ImageRelationshipTargetMode);
+        AssertEqual(2, merged.PackagePolicy.ImageCount);
+        AssertEqual(false, merged.PackagePolicy.AllowUnresolvedImageReferences);
+        AssertEqual(true, merged.FieldPolicy.RequiresToc);
+        AssertEqual(false, merged.FieldPolicy.AllowTcFields);
+        AssertEqual("开题报告", merged.ZonePolicy.ForbiddenFrontMatterHeadings[0]);
+    }
+
     static void CliRulesMergeValidatesProjectRulesAndNormalizesNullContainers()
     {
         using var temp = new TempDirectory();

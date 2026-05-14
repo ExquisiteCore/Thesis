@@ -21,6 +21,11 @@ internal static class ProfileComplianceValidator
         };
 
         ValidatePageSetup(map, profile, report);
+        ValidateStructure(map, profile, report);
+        ValidateStylePolicy(map, profile, report);
+        ValidatePackagePolicy(map, profile, report);
+        ValidateFieldPolicy(map, profile, report);
+        ValidateZonePolicy(map, profile, report);
         ValidateRoleEvidence(map, profile, report);
         ValidateTables(map, profile, report);
         report.Compliant = report.Diagnostics.Count == 0;
@@ -61,6 +66,194 @@ internal static class ProfileComplianceValidator
             {
                 Id = "fix-page-setup",
                 Op = "applyProfilePageSetup"
+            });
+        }
+    }
+
+    private static void ValidateStructure(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        var expected = profile.StructurePolicy;
+        if (expected.SectionCount > 0 && map.Sections.Count != expected.SectionCount)
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_section_count_mismatch",
+                Message = $"Document has {map.Sections.Count} sections; profile expects {expected.SectionCount}.",
+                Path = "sections"
+            });
+        }
+
+        foreach (var expectedSection in expected.Sections)
+        {
+            var actual = map.Sections.FirstOrDefault(section => section.Index == expectedSection.Index);
+            if (actual is null
+                || !string.Equals(HeaderFooterSignature(actual.Headers), NormalizeHeaderFooterSignature(expectedSection.HeaderSignature), StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(HeaderFooterSignature(actual.Footers), NormalizeHeaderFooterSignature(expectedSection.FooterSignature), StringComparison.OrdinalIgnoreCase))
+            {
+                report.Diagnostics.Add(new Diagnostic
+                {
+                    Severity = "error",
+                    Code = "profile_section_header_footer_mismatch",
+                    Message = $"Section {expectedSection.Index} header/footer topology does not match the profile.",
+                    Path = $"sections[{expectedSection.Index}]"
+                });
+            }
+        }
+    }
+
+    private static void ValidateStylePolicy(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        var policy = profile.StylePolicy;
+        if (policy.PreserveNumericStyleIds && policy.NumericStyleIds.Count > 0)
+        {
+            var actualNumericStyleIds = map.Styles
+                .Select(style => style.StyleId)
+                .Where(styleId => !string.IsNullOrWhiteSpace(styleId) && styleId.All(char.IsAsciiDigit))
+                .Select(styleId => styleId!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var expectedStyleId in policy.NumericStyleIds)
+            {
+                if (actualNumericStyleIds.Contains(expectedStyleId))
+                {
+                    continue;
+                }
+
+                report.Diagnostics.Add(new Diagnostic
+                {
+                    Severity = "error",
+                    Code = "profile_numeric_style_missing",
+                    Message = $"Profile expects numeric style id '{expectedStyleId}' to be preserved.",
+                    Path = $"styles[{expectedStyleId}]"
+                });
+            }
+        }
+
+        if (policy.DisallowedGeneratedStyleIds.Count == 0)
+        {
+            return;
+        }
+
+        var usedStyleIds = map.Paragraphs
+            .Select(paragraph => paragraph.StyleId)
+            .Where(styleId => !string.IsNullOrWhiteSpace(styleId))
+            .Select(styleId => styleId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var disallowedStyleId in policy.DisallowedGeneratedStyleIds.Where(usedStyleIds.Contains))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_disallowed_generated_style_used",
+                Message = $"Generated style '{disallowedStyleId}' is not allowed by the profile.",
+                Path = $"styles[{disallowedStyleId}]"
+            });
+        }
+    }
+
+    private static void ValidatePackagePolicy(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        var policy = profile.PackagePolicy;
+        if (!policy.AllowUnresolvedImageReferences && map.Package.UnresolvedImageReferenceCount > 0)
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_unresolved_image_reference",
+                Message = $"Document contains {map.Package.UnresolvedImageReferenceCount} drawing image references without matching image relationships.",
+                Path = "package.relationships"
+            });
+        }
+
+        var imageRelationships = map.Package.Relationships
+            .Where(relationship => string.Equals(relationship.Type, "image", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (imageRelationships.Count == 0)
+        {
+            return;
+        }
+
+        if (string.Equals(policy.ImageRelationshipTargetMode, "relative", StringComparison.OrdinalIgnoreCase)
+            && imageRelationships.Any(relationship =>
+                !string.IsNullOrWhiteSpace(relationship.TargetMode)
+                || relationship.Target.StartsWith("/", StringComparison.Ordinal)
+                || relationship.Target.Contains("://", StringComparison.Ordinal)))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_image_relationship_target_invalid",
+                Message = "Image relationships must use relative package targets.",
+                Path = "package.relationships"
+            });
+        }
+
+        if (string.Equals(policy.ImagePartRoot, "word/media", StringComparison.OrdinalIgnoreCase)
+            && imageRelationships.Any(relationship => !relationship.Target.StartsWith("media/", StringComparison.Ordinal)))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_image_relationship_target_invalid",
+                Message = "Image relationships must target files under word/media.",
+                Path = "package.relationships"
+            });
+        }
+    }
+
+    private static void ValidateFieldPolicy(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        var policy = profile.FieldPolicy;
+        if (policy.RequiresToc
+            && !map.FinalizationReasons.Contains("toc", StringComparer.OrdinalIgnoreCase)
+            && !map.Package.FieldCodes.Any(field => string.Equals(field.Kind, "TOC", StringComparison.OrdinalIgnoreCase)))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_required_toc_missing",
+                Message = "Profile requires a TOC field, but the document does not contain one.",
+                Path = "fields"
+            });
+        }
+
+        if (!policy.AllowTcFields
+            && map.Package.FieldCodes.Any(field => string.Equals(field.Kind, "TC", StringComparison.OrdinalIgnoreCase)))
+        {
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_tc_field_not_allowed",
+                Message = "Profile does not allow TC fields in the final document.",
+                Path = "fields"
+            });
+        }
+    }
+
+    private static void ValidateZonePolicy(DocumentMap map, TemplateProfile profile, ValidationReport report)
+    {
+        if (profile.ZonePolicy.ForbiddenFrontMatterHeadings.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var paragraph in map.Paragraphs)
+        {
+            var compactText = Compact(paragraph.Text);
+            var forbidden = profile.ZonePolicy.ForbiddenFrontMatterHeadings
+                .FirstOrDefault(heading => string.Equals(Compact(heading), compactText, StringComparison.Ordinal));
+            if (forbidden is null)
+            {
+                continue;
+            }
+
+            report.Diagnostics.Add(new Diagnostic
+            {
+                Severity = "error",
+                Code = "profile_forbidden_front_matter",
+                Message = $"Document contains forbidden front-matter heading '{forbidden}'.",
+                Path = $"paragraphs[{paragraph.Index}]"
             });
         }
     }
@@ -554,6 +747,39 @@ internal static class ProfileComplianceValidator
     private static bool ListMatches(List<int> actual, List<int> expected)
     {
         return expected.Count == 0 || actual.SequenceEqual(expected);
+    }
+
+    private static string HeaderFooterSignature(List<HeaderFooterReference> references)
+    {
+        return string.Join(
+            "|",
+            references
+                .Select(reference => Lower(reference.Type))
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeHeaderFooterSignature(string signature)
+    {
+        return string.Join(
+            "|",
+            signature
+                .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(item =>
+                {
+                    var separator = item.IndexOf(':', StringComparison.Ordinal);
+                    return Lower(separator >= 0 ? item[..separator] : item);
+                })
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string Lower(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "" : value.ToLowerInvariant();
+    }
+
+    private static string Compact(string text)
+    {
+        return Regex.Replace(text.Trim(), @"\s+", "", RegexOptions.CultureInvariant);
     }
 
     private static string SafeId(string value)

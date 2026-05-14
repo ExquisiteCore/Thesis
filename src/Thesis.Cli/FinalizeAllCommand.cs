@@ -19,6 +19,8 @@ internal sealed class FinalizeAllOptions
 
     public string Workdir { get; set; } = "";
 
+    public List<string> FrontMatterDocPaths { get; set; } = [];
+
     public bool SkipHostFinalize { get; set; }
 
     public string RequestedHost { get; set; } = "wps";
@@ -80,6 +82,9 @@ internal static class FinalizeAllCommand
                 case "--workdir":
                     options.Workdir = Next("finalize_all_workdir_missing");
                     break;
+                case "--front-matter-doc":
+                    options.FrontMatterDocPaths.Add(Next("finalize_all_front_matter_doc_missing"));
+                    break;
                 case "--skip-host-finalize":
                     options.SkipHostFinalize = true;
                     break;
@@ -104,6 +109,10 @@ internal static class FinalizeAllCommand
         var fullProjectRulesPath = Path.GetFullPath(options.ProjectRulesPath);
         var fullOutputPath = Path.GetFullPath(options.OutputPath);
         var fullWorkdir = Path.GetFullPath(options.Workdir);
+        var fullFrontMatterDocPaths = options.FrontMatterDocPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToList();
         Directory.CreateDirectory(fullWorkdir);
 
         var profilePath = Path.Combine(fullWorkdir, "profile.json");
@@ -154,7 +163,7 @@ internal static class FinalizeAllCommand
         try
         {
             File.Copy(fullTemplatePath, assembledPath, overwrite: true);
-            ThesisDocumentGenerator.AssembleIntoTemplate(content, finalRules, assembledPath);
+            ThesisDocumentGenerator.AssembleIntoTemplate(content, finalRules, assembledPath, fullFrontMatterDocPaths);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -575,6 +584,7 @@ internal static class FinalizeAllCommand
         }
             .OfType<string>()
             .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Concat(options.FrontMatterDocPaths.Where(path => !string.IsNullOrWhiteSpace(path)))
             .Select(Path.GetFullPath)
             .ToList();
 
@@ -701,6 +711,23 @@ internal static class FinalizeAllCommand
         rules.RoleAliases ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         rules.RoleFormats ??= new Dictionary<string, ProjectParagraphFormatRule>(StringComparer.OrdinalIgnoreCase);
         rules.RolePolicies ??= [];
+        if (rules.StructurePolicy is not null)
+        {
+            rules.StructurePolicy.Sections ??= [];
+        }
+
+        if (rules.StylePolicy is not null)
+        {
+            rules.StylePolicy.NumericStyleIds ??= [];
+            rules.StylePolicy.DisallowedGeneratedStyleIds ??= [];
+        }
+
+        if (rules.ZonePolicy is not null)
+        {
+            rules.ZonePolicy.Landmarks ??= [];
+            rules.ZonePolicy.ForbiddenFrontMatterHeadings ??= [];
+        }
+
         rules.TableArchetypes ??= [];
         rules.Diagnostics ??= [];
     }

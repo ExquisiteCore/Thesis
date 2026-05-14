@@ -1,9 +1,14 @@
+using System.IO.Compression;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Thesis.Core;
 using Thesis.Schema;
+using A = DocumentFormat.OpenXml.Drawing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
+using WP = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace Thesis.OpenXml;
 
@@ -15,45 +20,63 @@ public static class ThesisDocumentGenerator
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        using var document = WordprocessingDocument.Create(outputPath, WordprocessingDocumentType.Document);
-        var mainPart = document.AddMainDocumentPart();
-        mainPart.Document = new Document();
-        var body = mainPart.Document.AppendChild(new Body());
+        using (var document = WordprocessingDocument.Create(outputPath, WordprocessingDocumentType.Document))
+        {
+            var mainPart = document.AddMainDocumentPart();
+            mainPart.Document = new Document();
+            var body = mainPart.Document.AppendChild(new Body());
 
-        AppendThesisContent(body, content, rules);
-        MarkDocumentFieldsDirty(mainPart);
-        body.AppendChild(CreateSectionProperties(rules.PageSetup));
-        mainPart.Document.Save();
+            AppendThesisContent(mainPart, body, content, rules);
+            MarkDocumentFieldsDirty(mainPart);
+            body.AppendChild(CreateSectionProperties(rules.PageSetup));
+            mainPart.Document.Save();
+        }
+
+        NormalizeImagePackageTargets(outputPath);
     }
 
-    public static void AssembleIntoTemplate(ThesisContent content, TemplateProfile rules, string templateCopyPath)
+    public static void AssembleIntoTemplate(
+        ThesisContent content,
+        TemplateProfile rules,
+        string templateCopyPath,
+        IReadOnlyList<string>? frontMatterDocPaths = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentException.ThrowIfNullOrWhiteSpace(templateCopyPath);
 
-        using var document = WordprocessingDocument.Open(templateCopyPath, isEditable: true);
-        var mainPart = document.MainDocumentPart
-            ?? throw new InvalidDataException("DOCX does not contain a main document part.");
-        var wordDocument = mainPart.Document
-            ?? throw new InvalidDataException("DOCX does not contain a document.");
-        var body = wordDocument.Body
-            ?? throw new InvalidDataException("DOCX does not contain a document body.");
-
-        if (!TryReplaceTemplateThesisRange(body, content, rules))
+        using (var document = WordprocessingDocument.Open(templateCopyPath, isEditable: true))
         {
-            var sectionProperties = body.Elements<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties
-                ?? CreateSectionProperties(rules.PageSetup);
-            body.RemoveAllChildren();
-            AppendThesisContent(body, content, rules);
-            body.AppendChild(sectionProperties);
+            var mainPart = document.MainDocumentPart
+                ?? throw new InvalidDataException("DOCX does not contain a main document part.");
+            var wordDocument = mainPart.Document
+                ?? throw new InvalidDataException("DOCX does not contain a document.");
+            var body = wordDocument.Body
+                ?? throw new InvalidDataException("DOCX does not contain a document body.");
+
+            if (!TryReplaceTemplateThesisRange(mainPart, body, content, rules, frontMatterDocPaths ?? []))
+            {
+                var sectionProperties = body.Elements<SectionProperties>().LastOrDefault()?.CloneNode(deep: true) as SectionProperties
+                    ?? CreateSectionProperties(rules.PageSetup);
+                body.RemoveAllChildren();
+                AppendFrontMatterDocuments(mainPart, body, frontMatterDocPaths ?? []);
+                AppendThesisContent(mainPart, body, content, rules);
+                body.AppendChild(sectionProperties);
+            }
+
+            MarkDocumentFieldsDirty(mainPart);
+            wordDocument.Save();
         }
 
-        MarkDocumentFieldsDirty(mainPart);
-        wordDocument.Save();
+        NormalizeImagePackageTargets(templateCopyPath);
     }
 
-    private static bool TryReplaceTemplateThesisRange(Body body, ThesisContent content, TemplateProfile rules)
+    private static bool TryReplaceTemplateThesisRange(
+        MainDocumentPart mainPart,
+        Body body,
+        ThesisContent content,
+        TemplateProfile rules,
+        IReadOnlyList<string> frontMatterDocPaths)
     {
         var blocks = body.Elements<OpenXmlElement>().ToList();
         var startIndex = FindThesisRangeStart(blocks);
@@ -69,7 +92,7 @@ public static class ThesisDocumentGenerator
         }
 
         var generatedBody = new Body();
-        AppendThesisContent(generatedBody, content, rules);
+        AppendThesisContent(mainPart, generatedBody, content, rules);
         var generatedBlocks = generatedBody.Elements<OpenXmlElement>()
             .Select(block => block.CloneNode(deep: true))
             .ToList();
@@ -77,6 +100,7 @@ public static class ThesisDocumentGenerator
         var rewrittenBlocks = blocks
             .Take(startIndex.Value)
             .Select(block => block.CloneNode(deep: true))
+            .Concat(ReadFrontMatterBlocks(mainPart, frontMatterDocPaths))
             .Concat(generatedBlocks)
             .Concat([sectionBreak])
             .ToList();
@@ -88,6 +112,79 @@ public static class ThesisDocumentGenerator
         }
 
         return true;
+    }
+
+    private static List<OpenXmlElement> ReadFrontMatterBlocks(MainDocumentPart targetMainPart, IReadOnlyList<string> frontMatterDocPaths)
+    {
+        var blocks = new List<OpenXmlElement>();
+        foreach (var docPath in frontMatterDocPaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            using var source = WordprocessingDocument.Open(Path.GetFullPath(docPath), isEditable: false);
+            var sourceMainPart = source.MainDocumentPart
+                ?? throw new InvalidDataException($"Front matter DOCX does not contain a main document part: {docPath}");
+            var sourceBody = sourceMainPart.Document?.Body
+                ?? throw new InvalidDataException($"Front matter DOCX does not contain a document body: {docPath}");
+
+            foreach (var sourceBlock in sourceBody.Elements<OpenXmlElement>())
+            {
+                if (sourceBlock is SectionProperties)
+                {
+                    continue;
+                }
+
+                if (sourceBlock is Paragraph paragraph
+                    && paragraph.ParagraphProperties?.SectionProperties is not null
+                    && string.IsNullOrWhiteSpace(BlockText(paragraph))
+                    && !paragraph.Descendants<Drawing>().Any())
+                {
+                    continue;
+                }
+
+                var clone = sourceBlock.CloneNode(deep: true);
+                CopyReferencedParts(sourceMainPart, targetMainPart, clone);
+                blocks.Add(clone);
+            }
+        }
+
+        return blocks;
+    }
+
+    private static void AppendFrontMatterDocuments(
+        MainDocumentPart targetMainPart,
+        Body body,
+        IReadOnlyList<string> frontMatterDocPaths)
+    {
+        foreach (var block in ReadFrontMatterBlocks(targetMainPart, frontMatterDocPaths))
+        {
+            body.AppendChild(block);
+        }
+    }
+
+    private static void CopyReferencedParts(MainDocumentPart sourceMainPart, MainDocumentPart targetMainPart, OpenXmlElement block)
+    {
+        foreach (var drawing in block.Descendants<Drawing>())
+        {
+            var blip = drawing.Descendants<A.Blip>().FirstOrDefault();
+            var oldRelationshipId = blip?.Embed?.Value;
+            if (string.IsNullOrWhiteSpace(oldRelationshipId))
+            {
+                continue;
+            }
+
+            var sourcePart = sourceMainPart.GetPartById(oldRelationshipId);
+            if (sourcePart is not ImagePart sourceImagePart)
+            {
+                continue;
+            }
+
+            var targetImagePart = targetMainPart.AddImagePart(sourceImagePart.ContentType);
+            using (var stream = sourceImagePart.GetStream(FileMode.Open, FileAccess.Read))
+            {
+                targetImagePart.FeedData(stream);
+            }
+
+            blip!.Embed = targetMainPart.GetIdOfPart(targetImagePart);
+        }
     }
 
     private static int? FindThesisRangeStart(List<OpenXmlElement> blocks)
@@ -176,13 +273,13 @@ public static class ThesisDocumentGenerator
         return string.Concat(block.Descendants<Text>().Select(text => text.Text));
     }
 
-    private static void AppendThesisContent(Body body, ThesisContent content, TemplateProfile rules)
+    private static void AppendThesisContent(MainDocumentPart mainPart, Body body, ThesisContent content, TemplateProfile rules)
     {
         AppendParagraph(body, RequiredTitle(content), ResolveParagraphFormat(rules, "title"), "Title");
         AppendOptionalParagraph(body, content.Author, ResolveParagraphFormat(rules, "body"), "Normal");
         AppendAbstracts(body, content, rules);
         AppendTableOfContents(body, rules);
-        AppendChapters(body, content.Chapters, rules);
+        AppendChapters(mainPart, body, content.Chapters, rules);
         AppendReferences(body, content.References, rules);
         AppendAcknowledgements(body, content.Acknowledgements, rules);
     }
@@ -215,22 +312,53 @@ public static class ThesisDocumentGenerator
         AppendParagraph(body, prefix + string.Join(separator, keywords.Where(keyword => !string.IsNullOrWhiteSpace(keyword))), format, "Normal");
     }
 
-    private static void AppendChapters(Body body, List<ThesisChapterContent> chapters, TemplateProfile rules)
+    private static void AppendChapters(MainDocumentPart mainPart, Body body, List<ThesisChapterContent> chapters, TemplateProfile rules)
     {
         for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
         {
             var chapter = chapters[chapterIndex];
             var chapterNumber = chapterIndex + 1;
             AppendParagraph(body, FormatChapterTitle(chapter.Title, chapterNumber), ResolveParagraphFormat(rules, "heading1"), "Heading1");
-            AppendBodyParagraphs(body, chapter.Paragraphs, rules);
-            AppendTables(body, chapter.Tables, rules);
+            AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules);
 
             for (var sectionIndex = 0; sectionIndex < chapter.Sections.Count; sectionIndex++)
             {
                 var section = chapter.Sections[sectionIndex];
                 AppendParagraph(body, FormatSectionTitle(section.Title, chapterNumber, sectionIndex + 1), ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
-                AppendBodyParagraphs(body, section.Paragraphs, rules);
-                AppendTables(body, section.Tables, rules);
+                AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules);
+            }
+        }
+    }
+
+    private static void AppendContentBlocks(
+        MainDocumentPart mainPart,
+        Body body,
+        List<ThesisContentBlock> blocks,
+        List<string> legacyParagraphs,
+        List<ThesisTableContent> legacyTables,
+        TemplateProfile rules)
+    {
+        if (blocks.Count == 0)
+        {
+            AppendBodyParagraphs(body, legacyParagraphs, rules);
+            AppendTables(body, legacyTables, rules);
+            return;
+        }
+
+        foreach (var block in blocks)
+        {
+            var type = string.IsNullOrWhiteSpace(block.Type) ? "paragraph" : block.Type.Trim();
+            if (string.Equals(type, "paragraph", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendOptionalParagraph(body, block.Text, ResolveParagraphFormat(rules, "body"), "Normal");
+            }
+            else if (string.Equals(type, "image", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendImageBlock(mainPart, body, block, rules);
+            }
+            else if (string.Equals(type, "table", StringComparison.OrdinalIgnoreCase) && block.Table is not null)
+            {
+                AppendTables(body, [block.Table], rules);
             }
         }
     }
@@ -251,6 +379,484 @@ public static class ThesisDocumentGenerator
             AppendOptionalParagraph(body, table.Caption, ResolveParagraphFormat(rules, "tableCaption", "body"), "Normal");
             body.AppendChild(CreateTable(table, ResolveTableFormat(rules)));
         }
+    }
+
+    private static void AppendImageBlock(MainDocumentPart mainPart, Body body, ThesisContentBlock block, TemplateProfile rules)
+    {
+        if (string.IsNullOrWhiteSpace(block.Path))
+        {
+            return;
+        }
+
+        var fullPath = Path.GetFullPath(block.Path);
+        if (!File.Exists(fullPath))
+        {
+            throw new InvalidDataException($"Image file not found: {fullPath}");
+        }
+
+        var imagePart = AddImagePart(mainPart, fullPath);
+        var (widthEmu, heightEmu) = ResolveImageSize(block);
+        body.AppendChild(CreateImageParagraph(
+            mainPart.GetIdOfPart(imagePart),
+            widthEmu,
+            heightEmu,
+            block.AltText ?? block.Caption ?? Path.GetFileName(fullPath),
+            NextDrawingId(mainPart, body),
+            ResolveParagraphFormat(rules, "figure", "body") ?? new ParagraphFormatSample { Alignment = "center" }));
+        AppendOptionalParagraph(body, block.Caption, ResolveParagraphFormat(rules, "figureCaption", "body"), "Normal");
+    }
+
+    private static ImagePart AddImagePart(MainDocumentPart mainPart, string imagePath)
+    {
+        var imagePartType = Path.GetExtension(imagePath).ToLowerInvariant() switch
+        {
+            ".bmp" => ImagePartType.Bmp,
+            ".gif" => ImagePartType.Gif,
+            ".ico" => ImagePartType.Icon,
+            ".jpeg" or ".jpg" => ImagePartType.Jpeg,
+            ".png" => ImagePartType.Png,
+            ".tif" or ".tiff" => ImagePartType.Tiff,
+            _ => throw new InvalidDataException("Unsupported image format.")
+        };
+
+        var imagePart = mainPart.AddImagePart(imagePartType);
+        using var stream = File.OpenRead(imagePath);
+        imagePart.FeedData(stream);
+        return imagePart;
+    }
+
+    private static void NormalizeImagePackageTargets(string docxPath)
+    {
+        using var archive = ZipFile.Open(docxPath, ZipArchiveMode.Update);
+        var relationshipParts = ReadRelationshipParts(archive);
+        if (relationshipParts.Count == 0)
+        {
+            return;
+        }
+
+        var movedEntries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var part in relationshipParts)
+        {
+            foreach (var relationship in part.Relationships)
+            {
+                var type = relationship.Attribute("Type")?.Value;
+                if (type is null
+                    || !type.EndsWith("/image", StringComparison.OrdinalIgnoreCase)
+                    || !string.IsNullOrWhiteSpace(relationship.Attribute("TargetMode")?.Value))
+                {
+                    continue;
+                }
+
+                var target = relationship.Attribute("Target")?.Value;
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    continue;
+                }
+
+                var sourceEntryName = ResolveRelationshipTarget(part.SourcePartEntryName, target);
+                if (sourceEntryName is null)
+                {
+                    continue;
+                }
+
+                var sourceEntry = archive.GetEntry(sourceEntryName);
+                if (sourceEntry is null)
+                {
+                    continue;
+                }
+
+                var targetEntryName = ResolveNormalizedMediaEntry(archive, movedEntries, sourceEntryName);
+                var normalizedTarget = RelativeRelationshipTarget(part.SourcePartEntryName, targetEntryName);
+                if (!string.Equals(target, normalizedTarget, StringComparison.Ordinal))
+                {
+                    relationship.SetAttributeValue("Target", normalizedTarget);
+                    part.Changed = true;
+                }
+            }
+        }
+
+        foreach (var (sourceEntryName, targetEntryName) in movedEntries)
+        {
+            if (string.Equals(sourceEntryName, targetEntryName, StringComparison.OrdinalIgnoreCase)
+                || AnyRelationshipTargetsEntry(relationshipParts, sourceEntryName))
+            {
+                continue;
+            }
+
+            archive.GetEntry(sourceEntryName)?.Delete();
+            RemoveContentTypeOverride(archive, sourceEntryName);
+        }
+
+        foreach (var part in relationshipParts.Where(part => part.Changed))
+        {
+            part.Entry.Delete();
+            var newEntry = archive.CreateEntry(part.EntryName);
+            using var writer = new StreamWriter(newEntry.Open());
+            part.Document.Save(writer, SaveOptions.DisableFormatting);
+        }
+    }
+
+    private static List<RelationshipPart> ReadRelationshipParts(ZipArchive archive)
+    {
+        XNamespace rels = "http://schemas.openxmlformats.org/package/2006/relationships";
+        var parts = new List<RelationshipPart>();
+        foreach (var entry in archive.Entries.Where(entry => entry.FullName.EndsWith(".rels", StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            XDocument document;
+            using (var reader = new StreamReader(entry.Open()))
+            {
+                document = XDocument.Load(reader);
+            }
+
+            var relationships = document.Root?.Elements(rels + "Relationship").ToList() ?? [];
+            if (relationships.Count == 0)
+            {
+                continue;
+            }
+
+            parts.Add(new RelationshipPart(
+                entry.FullName,
+                entry,
+                SourcePartEntryName(entry.FullName),
+                document,
+                relationships));
+        }
+
+        return parts;
+    }
+
+    private static string SourcePartEntryName(string relationshipsEntryName)
+    {
+        var normalized = relationshipsEntryName.Replace('\\', '/');
+        if (string.Equals(normalized, "_rels/.rels", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        const string marker = "/_rels/";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0 || !normalized.EndsWith(".rels", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        var prefix = normalized[..markerIndex];
+        var fileName = normalized[(markerIndex + marker.Length)..^".rels".Length];
+        return string.IsNullOrWhiteSpace(prefix) ? fileName : $"{prefix}/{fileName}";
+    }
+
+    private static string? ResolveRelationshipTarget(string sourcePartEntryName, string target)
+    {
+        var normalizedTarget = Uri.UnescapeDataString(target.Replace('\\', '/'));
+        if (normalizedTarget.Contains("://", StringComparison.Ordinal) || normalizedTarget.StartsWith('#'))
+        {
+            return null;
+        }
+
+        if (normalizedTarget.StartsWith("/", StringComparison.Ordinal))
+        {
+            return NormalizePackageEntryName(normalizedTarget.TrimStart('/'));
+        }
+
+        var sourceDirectory = PackageDirectory(sourcePartEntryName);
+        return NormalizePackageEntryName(string.IsNullOrWhiteSpace(sourceDirectory)
+            ? normalizedTarget
+            : $"{sourceDirectory}/{normalizedTarget}");
+    }
+
+    private static string ResolveNormalizedMediaEntry(
+        ZipArchive archive,
+        Dictionary<string, string> movedEntries,
+        string sourceEntryName)
+    {
+        if (IsWordMediaEntry(sourceEntryName))
+        {
+            return sourceEntryName;
+        }
+
+        if (movedEntries.TryGetValue(sourceEntryName, out var existingTarget))
+        {
+            return existingTarget;
+        }
+
+        var sourceEntry = archive.GetEntry(sourceEntryName)
+            ?? throw new InvalidDataException($"Image package part not found: {sourceEntryName}");
+        var targetEntryName = UniqueMediaEntryName(archive, Path.GetFileName(sourceEntryName), sourceEntryName);
+        var targetEntry = archive.CreateEntry(targetEntryName);
+        using (var sourceStream = sourceEntry.Open())
+        using (var targetStream = targetEntry.Open())
+        {
+            sourceStream.CopyTo(targetStream);
+        }
+
+        EnsureContentTypeForMovedPart(archive, sourceEntryName, targetEntryName);
+        movedEntries[sourceEntryName] = targetEntryName;
+        return targetEntryName;
+    }
+
+    private static bool IsWordMediaEntry(string entryName)
+    {
+        return entryName.StartsWith("word/media/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool AnyRelationshipTargetsEntry(List<RelationshipPart> relationshipParts, string entryName)
+    {
+        return relationshipParts
+            .SelectMany(part => part.Relationships.Select(relationship => new { Part = part, Relationship = relationship }))
+            .Where(item => string.IsNullOrWhiteSpace(item.Relationship.Attribute("TargetMode")?.Value))
+            .Select(item => ResolveRelationshipTarget(item.Part.SourcePartEntryName, item.Relationship.Attribute("Target")?.Value ?? ""))
+            .Any(target => string.Equals(target, entryName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string UniqueMediaEntryName(ZipArchive archive, string fileName, string sourceEntryName)
+    {
+        var normalizedSource = sourceEntryName.Replace('\\', '/');
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        var candidate = "word/media/" + fileName;
+        if (archive.GetEntry(candidate) is null
+            || string.Equals(candidate, normalizedSource, StringComparison.OrdinalIgnoreCase))
+        {
+            return candidate;
+        }
+
+        for (var index = 1; ; index++)
+        {
+            candidate = $"word/media/{baseName}_{index}{extension}";
+            if (archive.GetEntry(candidate) is null
+                || string.Equals(candidate, normalizedSource, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static void EnsureContentTypeForMovedPart(ZipArchive archive, string sourceEntryName, string targetEntryName)
+    {
+        var contentTypesEntry = archive.GetEntry("[Content_Types].xml");
+        if (contentTypesEntry is null)
+        {
+            return;
+        }
+
+        XDocument contentTypesDocument;
+        using (var reader = new StreamReader(contentTypesEntry.Open()))
+        {
+            contentTypesDocument = XDocument.Load(reader);
+        }
+
+        var root = contentTypesDocument.Root;
+        if (root is null)
+        {
+            return;
+        }
+
+        XNamespace types = "http://schemas.openxmlformats.org/package/2006/content-types";
+        var targetPartName = "/" + targetEntryName;
+        if (root.Elements(types + "Override").Any(element =>
+            string.Equals(element.Attribute("PartName")?.Value, targetPartName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var sourcePartName = "/" + sourceEntryName;
+        var sourceOverride = root.Elements(types + "Override").FirstOrDefault(element =>
+            string.Equals(element.Attribute("PartName")?.Value, sourcePartName, StringComparison.OrdinalIgnoreCase));
+        var contentType = sourceOverride?.Attribute("ContentType")?.Value;
+
+        var extension = Path.GetExtension(targetEntryName).TrimStart('.');
+        if (string.IsNullOrWhiteSpace(contentType)
+            && !string.IsNullOrWhiteSpace(extension)
+            && root.Elements(types + "Default").Any(element =>
+                string.Equals(element.Attribute("Extension")?.Value, extension, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            contentType = ImageContentTypeForExtension(extension);
+        }
+
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return;
+        }
+
+        root.Add(new XElement(
+            types + "Override",
+            new XAttribute("PartName", targetPartName),
+            new XAttribute("ContentType", contentType)));
+
+        contentTypesEntry.Delete();
+        var newEntry = archive.CreateEntry("[Content_Types].xml");
+        using var writer = new StreamWriter(newEntry.Open());
+        contentTypesDocument.Save(writer, SaveOptions.DisableFormatting);
+    }
+
+    private static void RemoveContentTypeOverride(ZipArchive archive, string sourceEntryName)
+    {
+        var contentTypesEntry = archive.GetEntry("[Content_Types].xml");
+        if (contentTypesEntry is null)
+        {
+            return;
+        }
+
+        XDocument contentTypesDocument;
+        using (var reader = new StreamReader(contentTypesEntry.Open()))
+        {
+            contentTypesDocument = XDocument.Load(reader);
+        }
+
+        var root = contentTypesDocument.Root;
+        if (root is null)
+        {
+            return;
+        }
+
+        XNamespace types = "http://schemas.openxmlformats.org/package/2006/content-types";
+        var sourcePartName = "/" + sourceEntryName;
+        var sourceOverrides = root.Elements(types + "Override")
+            .Where(element => string.Equals(element.Attribute("PartName")?.Value, sourcePartName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (sourceOverrides.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var sourceOverride in sourceOverrides)
+        {
+            sourceOverride.Remove();
+        }
+
+        contentTypesEntry.Delete();
+        var newEntry = archive.CreateEntry("[Content_Types].xml");
+        using var writer = new StreamWriter(newEntry.Open());
+        contentTypesDocument.Save(writer, SaveOptions.DisableFormatting);
+    }
+
+    private static string RelativeRelationshipTarget(string sourcePartEntryName, string targetEntryName)
+    {
+        var sourceDirectory = PackageDirectory(sourcePartEntryName);
+        var relative = string.IsNullOrWhiteSpace(sourceDirectory)
+            ? targetEntryName
+            : Path.GetRelativePath(sourceDirectory, targetEntryName);
+        return relative.Replace('\\', '/');
+    }
+
+    private static string PackageDirectory(string entryName)
+    {
+        var normalized = entryName.Replace('\\', '/');
+        var separator = normalized.LastIndexOf('/');
+        return separator < 0 ? "" : normalized[..separator];
+    }
+
+    private static string NormalizePackageEntryName(string value)
+    {
+        var segments = new List<string>();
+        foreach (var segment in value.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment == ".")
+            {
+                continue;
+            }
+
+            if (segment == "..")
+            {
+                if (segments.Count > 0)
+                {
+                    segments.RemoveAt(segments.Count - 1);
+                }
+
+                continue;
+            }
+
+            segments.Add(segment);
+        }
+
+        return string.Join("/", segments);
+    }
+
+    private static string? ImageContentTypeForExtension(string extension)
+    {
+        return extension.ToLowerInvariant() switch
+        {
+            "bmp" => "image/bmp",
+            "gif" => "image/gif",
+            "ico" => "image/x-icon",
+            "jpeg" or "jpg" => "image/jpeg",
+            "png" => "image/png",
+            "tif" or "tiff" => "image/tiff",
+            _ => null
+        };
+    }
+
+    private sealed class RelationshipPart(
+        string entryName,
+        ZipArchiveEntry entry,
+        string sourcePartEntryName,
+        XDocument document,
+        List<XElement> relationships)
+    {
+        public string EntryName { get; } = entryName;
+
+        public ZipArchiveEntry Entry { get; } = entry;
+
+        public string SourcePartEntryName { get; } = sourcePartEntryName;
+
+        public XDocument Document { get; } = document;
+
+        public List<XElement> Relationships { get; } = relationships;
+
+        public bool Changed { get; set; }
+    }
+
+    private static (int WidthEmu, int HeightEmu) ResolveImageSize(ThesisContentBlock block)
+    {
+        var width = block.WidthEmu is > 0 ? block.WidthEmu.Value : 5_600_000;
+        var height = block.HeightEmu is > 0 ? block.HeightEmu.Value : 2_956_000;
+        return (width, height);
+    }
+
+    private static Paragraph CreateImageParagraph(
+        string relationshipId,
+        int widthEmu,
+        int heightEmu,
+        string altText,
+        uint drawingId,
+        ParagraphFormatSample format)
+    {
+        var drawing = new Drawing(
+            new WP.Inline(
+                new WP.Extent { Cx = widthEmu, Cy = heightEmu },
+                new WP.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
+                new WP.DocProperties { Id = drawingId, Name = string.IsNullOrWhiteSpace(altText) ? $"Picture {drawingId}" : altText, Description = altText },
+                new WP.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(
+                    new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = 0U, Name = string.IsNullOrWhiteSpace(altText) ? "Picture" : altText },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = relationshipId },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(
+                                    new A.Offset { X = 0, Y = 0 },
+                                    new A.Extents { Cx = widthEmu, Cy = heightEmu }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+                    { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            {
+                DistanceFromTop = 0U,
+                DistanceFromBottom = 0U,
+                DistanceFromLeft = 0U,
+                DistanceFromRight = 0U
+            });
+
+        var paragraph = new Paragraph(new Run(drawing));
+        OpenXmlFormatApplier.ApplyParagraphFormat(paragraph, OpenXmlFormatMerger.Clone(format));
+        return paragraph;
     }
 
     private static void AppendReferences(Body body, List<string> references, TemplateProfile rules)
@@ -493,6 +1099,21 @@ public static class ThesisDocumentGenerator
     private static bool RoleMatches(string? candidate, string role)
     {
         return string.Equals(candidate, role, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static uint NextDrawingId(MainDocumentPart mainPart, Body body)
+    {
+        var documentMax = mainPart.Document?
+            .Descendants<WP.DocProperties>()
+            .Select(properties => properties.Id?.Value ?? 0U)
+            .DefaultIfEmpty(0U)
+            .Max() ?? 0U;
+        var bodyMax = body
+            .Descendants<WP.DocProperties>()
+            .Select(properties => properties.Id?.Value ?? 0U)
+            .DefaultIfEmpty(0U)
+            .Max();
+        return Math.Max(documentMax, bodyMax) + 1U;
     }
 
     private static string RequiredTitle(ThesisContent content)

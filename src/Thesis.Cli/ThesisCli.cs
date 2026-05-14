@@ -497,6 +497,7 @@ public static class ThesisCli
         var contentPath = RequiredOption(args, "--content");
         var profilePath = RequiredOption(args, "--profile");
         var outputPath = RequiredOption(args, "--out");
+        var frontMatterDocPaths = Options(args, "--front-matter-doc");
         var fullDocPath = Path.GetFullPath(docPath);
         var fullOutputPath = Path.GetFullPath(outputPath);
         var parent = Path.GetDirectoryName(fullOutputPath);
@@ -507,7 +508,8 @@ public static class ThesisCli
 
         if (SamePath(fullOutputPath, fullDocPath)
             || SamePath(fullOutputPath, contentPath)
-            || SamePath(fullOutputPath, profilePath))
+            || SamePath(fullOutputPath, profilePath)
+            || frontMatterDocPaths.Any(path => SamePath(fullOutputPath, path)))
         {
             return Error("assemble_output_refused", "Assemble output path must not overwrite input files.");
         }
@@ -529,7 +531,7 @@ public static class ThesisCli
         try
         {
             File.Copy(fullDocPath, tempPath, overwrite: true);
-            ThesisDocumentGenerator.AssembleIntoTemplate(content!, profile!, tempPath);
+            ThesisDocumentGenerator.AssembleIntoTemplate(content!, profile!, tempPath, frontMatterDocPaths);
             File.Move(tempPath, fullOutputPath, overwrite: true);
             return new CliResult
             {
@@ -1158,6 +1160,17 @@ public static class ThesisCli
             && profile.FormatClusters is not null
             && profile.FinalizationReasons is not null
             && profile.PageSetup is not null
+            && profile.StructurePolicy is not null
+            && profile.StructurePolicy.Sections is not null
+            && profile.StructurePolicy.Sections.All(section => section is not null)
+            && profile.StylePolicy is not null
+            && profile.StylePolicy.NumericStyleIds is not null
+            && profile.StylePolicy.DisallowedGeneratedStyleIds is not null
+            && profile.PackagePolicy is not null
+            && profile.FieldPolicy is not null
+            && profile.ZonePolicy is not null
+            && profile.ZonePolicy.Landmarks is not null
+            && profile.ZonePolicy.ForbiddenFrontMatterHeadings is not null
             && profile.NumberingPolicy is not null
             && profile.TablePolicy is not null
             && profile.TableArchetypes is not null
@@ -1387,6 +1400,16 @@ public static class ThesisCli
         profile.TableArchetypes ??= [];
         profile.TablePolicy ??= new ProfileTablePolicy();
         profile.PageSetup ??= new ProfilePageSetup();
+        profile.StructurePolicy ??= new ProfileStructurePolicy();
+        profile.StructurePolicy.Sections ??= [];
+        profile.StylePolicy ??= new ProfileStylePolicy();
+        profile.StylePolicy.NumericStyleIds ??= [];
+        profile.StylePolicy.DisallowedGeneratedStyleIds ??= [];
+        profile.PackagePolicy ??= new ProfilePackagePolicy();
+        profile.FieldPolicy ??= new ProfileFieldPolicy();
+        profile.ZonePolicy ??= new ProfileZonePolicy();
+        profile.ZonePolicy.Landmarks ??= [];
+        profile.ZonePolicy.ForbiddenFrontMatterHeadings ??= [];
         profile.SourceEvidence ??= new ProfileSourceEvidence();
     }
 
@@ -1395,6 +1418,23 @@ public static class ThesisCli
         rules.RoleAliases ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         rules.RoleFormats ??= new Dictionary<string, ProjectParagraphFormatRule>(StringComparer.OrdinalIgnoreCase);
         rules.RolePolicies ??= [];
+        if (rules.StructurePolicy is not null)
+        {
+            rules.StructurePolicy.Sections ??= [];
+        }
+
+        if (rules.StylePolicy is not null)
+        {
+            rules.StylePolicy.NumericStyleIds ??= [];
+            rules.StylePolicy.DisallowedGeneratedStyleIds ??= [];
+        }
+
+        if (rules.ZonePolicy is not null)
+        {
+            rules.ZonePolicy.Landmarks ??= [];
+            rules.ZonePolicy.ForbiddenFrontMatterHeadings ??= [];
+        }
+
         rules.TableArchetypes ??= [];
         rules.Diagnostics ??= [];
     }
@@ -1477,6 +1517,20 @@ public static class ThesisCli
         }
 
         return null;
+    }
+
+    private static List<string> Options(string[] args, string name)
+    {
+        var values = new List<string>();
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], name, StringComparison.Ordinal))
+            {
+                values.Add(args[i + 1]);
+            }
+        }
+
+        return values;
     }
 
     private static bool HasFlag(string[] args, string name)

@@ -448,6 +448,16 @@ public static class SessionLifecycle
             && profile.FormatClusters is not null
             && profile.FinalizationReasons is not null
             && profile.PageSetup is not null
+            && profile.StructurePolicy is not null
+            && profile.StructurePolicy.Sections is not null
+            && profile.StylePolicy is not null
+            && profile.StylePolicy.NumericStyleIds is not null
+            && profile.StylePolicy.DisallowedGeneratedStyleIds is not null
+            && profile.PackagePolicy is not null
+            && profile.FieldPolicy is not null
+            && profile.ZonePolicy is not null
+            && profile.ZonePolicy.Landmarks is not null
+            && profile.ZonePolicy.ForbiddenFrontMatterHeadings is not null
             && profile.NumberingPolicy is not null
             && profile.TablePolicy is not null
             && profile.TableArchetypes is not null

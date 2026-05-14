@@ -31,6 +31,8 @@ public sealed class ThesisChapterContent
 
     public List<string> Paragraphs { get; set; } = [];
 
+    public List<ThesisContentBlock> Blocks { get; set; } = [];
+
     public List<ThesisSectionContent> Sections { get; set; } = [];
 
     public List<ThesisTableContent> Tables { get; set; } = [];
@@ -42,7 +44,28 @@ public sealed class ThesisSectionContent
 
     public List<string> Paragraphs { get; set; } = [];
 
+    public List<ThesisContentBlock> Blocks { get; set; } = [];
+
     public List<ThesisTableContent> Tables { get; set; } = [];
+}
+
+public sealed class ThesisContentBlock
+{
+    public string Type { get; set; } = "paragraph";
+
+    public string? Text { get; set; }
+
+    public string? Path { get; set; }
+
+    public string? Caption { get; set; }
+
+    public string? AltText { get; set; }
+
+    public int? WidthEmu { get; set; }
+
+    public int? HeightEmu { get; set; }
+
+    public ThesisTableContent? Table { get; set; }
 }
 
 public sealed class ThesisTableContent

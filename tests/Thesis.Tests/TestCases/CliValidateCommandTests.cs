@@ -529,4 +529,99 @@ internal static partial class Program
             diagnostic.Code == "profile_role_target_unresolved"
             && diagnostic.Path == "roles[appendix]"));
     }
+
+    static void CliValidateBlocksStructuralPackageAndFieldPolicyViolations()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "candidate.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteSimpleDocx(
+            docx,
+            """
+            <w:p><w:r><w:t>开题报告</w:t></w:r></w:p>
+            <w:p><w:r><w:t>摘要</w:t></w:r></w:p>
+            <w:p><w:r><w:t>目录</w:t></w:r></w:p>
+            <w:p><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
+            <w:p><w:r><w:t>正文内容。</w:t></w:r></w:p>
+            """);
+
+        var profile = new TemplateProfile
+        {
+            StructurePolicy = new ProfileStructurePolicy
+            {
+                SectionCount = 3,
+                Sections =
+                [
+                    new ProfileSectionSignature { Index = 0, HeaderSignature = "default:rIdCoverHeader", FooterSignature = "" },
+                    new ProfileSectionSignature { Index = 1, HeaderSignature = "default:rIdBodyHeader", FooterSignature = "default:rIdBodyFooter" },
+                    new ProfileSectionSignature { Index = 2, HeaderSignature = "default:rIdTailHeader", FooterSignature = "default:rIdTailFooter" }
+                ]
+            },
+            StylePolicy = new ProfileStylePolicy
+            {
+                PreserveNumericStyleIds = true,
+                NumericStyleIds = ["21", "22"],
+                DisallowedGeneratedStyleIds = ["Heading1", "Heading2"]
+            },
+            PackagePolicy = new ProfilePackagePolicy
+            {
+                ImagePartRoot = "word/media",
+                ImageRelationshipTargetMode = "relative",
+                AllowUnresolvedImageReferences = false
+            },
+            FieldPolicy = new ProfileFieldPolicy
+            {
+                RequiresToc = true,
+                AllowTcFields = false
+            },
+            ZonePolicy = new ProfileZonePolicy
+            {
+                ForbiddenFrontMatterHeadings = ["开题报告"]
+            }
+        };
+        File.WriteAllText(profilePath, ThesisJson.Serialize(profile));
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(false, result.Validation!.Compliant);
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_section_count_mismatch"));
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_section_header_footer_mismatch"));
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_required_toc_missing"));
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_forbidden_front_matter"));
+    }
+
+    static void CliValidateBlocksAbsoluteRootMediaAndUnresolvedImageReferences()
+    {
+        using var temp = new TempDirectory();
+        var docx = Path.Combine(temp.Path, "bad-images.docx");
+        var profilePath = Path.Combine(temp.Path, "profile.json");
+        WriteDocxWithImageRelationshipIssues(docx);
+        File.WriteAllText(
+            profilePath,
+            ThesisJson.Serialize(new TemplateProfile
+            {
+                PackagePolicy = new ProfilePackagePolicy
+                {
+                    ImagePartRoot = "word/media",
+                    ImageRelationshipTargetMode = "relative",
+                    AllowUnresolvedImageReferences = false
+                }
+            }));
+
+        var (exitCode, result) = RunCli(["validate", "--doc", docx, "--profile", profilePath]);
+
+        AssertEqual(0, exitCode);
+        AssertEqual("success", result.Status);
+        AssertEqual(false, result.Validation!.Compliant);
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_image_relationship_target_invalid"));
+        AssertEqual(true, result.Validation.Diagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code == "profile_unresolved_image_reference"));
+    }
 }

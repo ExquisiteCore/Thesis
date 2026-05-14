@@ -278,9 +278,7 @@ internal static partial class Program
         using var temp = new TempDirectory();
         var context = CreateInitializedDocxWorkspace(temp.Path);
         var imagePath = Path.Combine(temp.Path, "pixel.png");
-        File.WriteAllBytes(
-            imagePath,
-            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="));
+        WriteSinglePixelPng(imagePath);
         var requestPath = Path.Combine(temp.Path, "request.json");
         File.WriteAllText(
             requestPath,
