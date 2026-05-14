@@ -5,22 +5,23 @@ description: Use when using Thesis DOCX CLI to extract thesis template rules, me
 
 # thesis-docx
 
+这是 Thesis DOCX CLI 的封装 skill。核心原则：正式论文优先在模板副本上装配或增量写入，而不是从空白文档重新生成。
+
+## CLI
+
 从仓库根目录使用：
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe
 ```
 
-命令写法始终是 exe 后面直接跟参数。
+如果 exe 不存在：
 
-## 推荐终稿链路
-
-```text
-finalize-all
-  = profile extract -> rules merge -> assemble -> validate -> finalize -> validate -> rehearsal compare -> final audit
+```powershell
+dotnet build ThesisTool.slnx
 ```
 
-正式终稿优先先用 `content extract` 把成品论文或已有正文稿抽成 `content.json`，审核后再用 `finalize-all` 生成终稿候选和审计报告。`assemble`、`validate`、`finalize apply`、`rehearsal compare` 仍可单独使用，但主要作为拆解调试路径。
+命令写法始终是 exe 后面直接跟参数。
 
 ## 规则优先级
 
@@ -28,32 +29,79 @@ finalize-all
 request.json 单次操作参数 > project-rules.json / final-rules.json > profile.json > 工具默认规则
 ```
 
-## 核心命令
+- `profile.json`：从模板或成品论文提取的基础格式画像。
+- `project-rules.json`：从模板正文、批注、学校要求或 AI 分析补充出的项目级规则。
+- `final-rules.json`：`profile.json` 和 `project-rules.json` 合并后的最终规则，可作为 `--profile` 输入。
+- `request.json`：本次写入或微调操作，参数可覆盖最终规则。
+
+## 推荐终稿流程
+
+```text
+finalize-all
+  = profile extract -> rules merge -> assemble -> validate -> finalize -> validate -> rehearsal compare -> final audit
+```
+
+正式终稿默认用 `finalize-all`。散命令仍保留给规则调试、内容抽取、局部微调和失败排查。
+
+### 1. 检查模板正文和批注
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe inspect --doc "模板.docx"
+```
+
+读取 `documentMap.requirementHints` 和 `documentMap.comments`，整理正文中写明但样式无法体现的要求。
+
+### 2. 提取 profile.json
+
+```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile extract --doc "模板.docx" --out ".analysis\profile.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe profile explain --profile ".analysis\profile.json"
+```
+
+### 3. 提取 content.json
+
+```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe content extract --doc "成品论文.docx" --out ".analysis\content.json" --report ".analysis\content-extract-report.json" --profile ".analysis\profile.json" --project-rules ".analysis\project-rules.json"
+```
+
+抽取后必须审核 `content.json` 和 `content-extract-report.json`，重点看章节层级、表格行列、参考文献和 `ready`。
+
+### 4. 合并 project-rules.json
+
+```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rules merge --profile ".analysis\profile.json" --project ".analysis\project-rules.json" --out ".analysis\final-rules.json"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+```
+
+### 5. 用 assemble 装配整篇正文
+
+`assemble` 是整篇论文第一版主入口。它把 `content.json` 里的标题、摘要、关键词、章节、段落、表格、参考文献和致谢写入模板副本，格式来自 `final-rules.json`。
+
+```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe assemble --doc "模板.docx" --content ".analysis\content.json" --profile ".analysis\final-rules.json" --out ".analysis\thesis.docx"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis-revised.docx"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis-revised.docx" --profile ".analysis\final-rules.json"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis-revised.docx" --out ".analysis\final.docx"
-.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
+```
+
+如果模板没有可识别论文锚点或节边界，`assemble` 会回退到整主体重写路径。复杂多节前置页或必须原位替换的模板，要先用 `inspect` 检查结构，再用 `apply/writeBlock` 补齐或微调。
+
+### 6. 用 finalize-all 生成终稿候选
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
 
 `finalize-all` 的 `--workdir` 会产出 `profile.json`、`final-rules.json`、`assembled.docx`、`candidate.docx`、`validate-before-finalize.json`、`host-finalization.json`、`validate-after-finalize.json`、`rehearsal-report.json`、`final-audit.json`、`repair-plan.json` 和 `manual-checklist.md`。只有 `final-audit.ready=true` 才会写入 `--out` 并进入终审；不 ready 时命令返回 error，保留既有 `--out`，候选稿留在 `--workdir\candidate.docx`。`--skip-host-finalize` 只能用于离线试跑。
 
-## writeBlock
+### 7. 用 writeBlock 微调正文
 
-第一版整篇论文优先用 `assemble` 写入 `content.json`。老师反馈后的局部替换、插入和格式覆盖再用 `writeBlock`。角色格式来自 `final-rules.json`，本次 `format` 覆盖角色默认格式。`position` 支持 `before`、`after` 和 `replace`；替换模板占位段落时使用 `replace`。如果模板没有可识别论文锚点或节边界，`assemble` 会回退到整主体重写路径，这类模板要先用 `inspect` 检查结构。
+`writeBlock` 接收 `text + role + target + format`，用于老师反馈后的局部替换、插入和格式覆盖。角色格式来自 `final-rules.json`，本次 `format` 覆盖角色默认格式。`position` 支持 `before`、`after` 和 `replace`；替换模板占位段落时使用 `replace`。
 
 ```json
 {
   "schemaVersion": "1.0",
   "mode": "execute",
-  "options": { "createSnapshot": false, "requireSingleMatch": true },
+  "options": {
+    "createSnapshot": false,
+    "requireSingleMatch": true
+  },
   "operations": [
     {
       "id": "write-body",
@@ -71,18 +119,64 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 }
 ```
 
+执行：
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe apply --doc ".analysis\thesis.docx" --profile ".analysis\final-rules.json" --request ".analysis\request.json" --out ".analysis\thesis-revised.docx"
+```
+
 查看样例：
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations sample --op writeBlock
 ```
 
-## 草稿生成
+### 8. 校验和最终化
 
-`generate --content` 会从空白文档生成并插入目录字段，只适合结构化草稿，不作为正式终稿主路径。
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe validate --doc ".analysis\thesis-revised.docx" --profile ".analysis\final-rules.json"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize plan --doc ".analysis\thesis-revised.docx"
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe finalize apply --doc ".analysis\thesis-revised.docx" --out ".analysis\final.docx"
+```
+
+如果没有微调步骤，直接对 `assemble` 生成的 `.analysis\thesis.docx` 执行校验和最终化。
+
+### 9. 和参考成品做 rehearsal 对比
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe rehearsal compare --candidate ".analysis\final.docx" --reference "成品论文.docx" --profile ".analysis\final-rules.json" --out ".analysis\rehearsal-report.json"
+```
+
+重点看 `headingCoverage`、`readyForFinalReview`、`requiresFinalization`、段落/表格/节数量差异，以及 `validation.compliant`。同时检查 `contentCoverage.gaps`，它会列出参考稿中候选稿没有覆盖的正文段落和表格，包含章节上下文和内容预览；该列表从摘要或第一章等正文起点之后开始比较，会过滤封面/任务书/授权页等前置表单、目录行和 Word/WPS 域代码。
+
+## 常用操作
+
+```powershell
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations list
+.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe operations sample --op writeBlock
+```
+
+- `writeBlock`：按语义角色写入标题、正文、摘要等文本块。
+- `applyProfileRole`：对已有段落套用某个角色格式。
+- `setParagraphFormat`：直接设置首行缩进、行距、字体字号等。
+- `insertTable` / `applyProfileTable` / `applyThreeLineTable`：插入和格式化表格。
+- `setTableRowHeader`：设置跨页重复表头。
+- `insertCaption`：插入图题或表题。
+- `insertTocField`：插入目录字段。
+- `replaceReferences` / `insertReferenceItem` / `applyReferenceFormat`：处理参考文献。
+
+## 草稿生成路径
+
+`generate --content` 会从空白文档生成并插入目录字段，只能作为结构化草稿路径，不作为正式终稿主路径：
 
 ```powershell
 .\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe generate --content ".analysis\content.json" --rules ".analysis\final-rules.json" --out ".analysis\draft.docx"
 ```
 
-正式交付前必须用 Word/WPS 最终化，并用 `rehearsal compare` 对照成品论文或参考稿检查标题覆盖、段落/表格/节差异和 profile 校验结果。重点看 `contentCoverage.gaps`，它会列出参考稿中候选稿没有覆盖的正文段落和表格，包含章节上下文和内容预览；该列表从摘要或第一章等正文起点之后开始比较，会过滤封面/任务书/授权页等前置表单、目录行和 Word/WPS 域代码。最后仍要人工抽查真实分页、目录页码、孤行、跨页表格、节状态和续表标题。
+原因：它从新文档生成，不能完整保留模板中的节、页眉页脚、字段和复杂结构。
+
+## 判断标准
+
+- 可以离线保证：DOCX 结构、样式引用、段落格式、表格边框、重复表头、参考文献编号、目录字段标记。
+- 不能纯离线保证：真实分页、目录页码、孤行、跨页显示、自动续表标题。
+- 正式论文交付必须经过 Word/WPS 最终化和人工抽查。
