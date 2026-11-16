@@ -11,8 +11,8 @@ public static class ExternalProcessRunner
             RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException($"Process did not start: {executable}");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = ReadBounded(process.StandardOutput);
+        var stderr = ReadBounded(process.StandardError);
         if (!process.WaitForExit(timeoutSeconds * 1000))
         {
             process.Kill(entireProcessTree: true);
@@ -24,4 +24,13 @@ public static class ExternalProcessRunner
             throw new IOException($"{Path.GetFileName(executable)} exited {process.ExitCode}: {Limit(stderr.Result + stdout.Result)}");
     }
     private static string Limit(string text) => text.Length <= 4000 ? text : text[..4000];
+    private static async Task<string> ReadBounded(StreamReader reader)
+    {
+        var result = new System.Text.StringBuilder();
+        var buffer = new char[1024];
+        int read;
+        while ((read = await reader.ReadAsync(buffer)) > 0)
+            if (result.Length < 4000) result.Append(buffer, 0, Math.Min(read, 4000 - result.Length));
+        return result.ToString();
+    }
 }

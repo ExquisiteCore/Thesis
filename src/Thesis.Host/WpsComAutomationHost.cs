@@ -17,6 +17,27 @@ public sealed class WpsComAutomationHost
         "Word.Application"
     ];
 
+    private static bool HasNoOpenDocuments(object? application)
+    {
+        if (application is null) return false;
+        try { dynamic host = application; return Convert.ToInt32(host.Documents.Count) == 0; }
+        catch (COMException) { return false; }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { return false; }
+    }
+
+    private static int ReadPageInformation(dynamic range, int kind)
+    {
+        try
+        {
+            var page = Convert.ToInt32(range.Information(kind));
+            if (page > 0) return page;
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { }
+        var indexed = Convert.ToInt32(range.Information[kind]);
+        if (indexed < 1) throw new HostApplicationException("host_page_information_invalid", "Office returned an invalid bookmark page number.");
+        return indexed;
+    }
+
     public HostApplicationReport FinalizeDocument(string documentPath, HostApplicationOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentPath);
@@ -33,13 +54,21 @@ public sealed class WpsComAutomationHost
 
         dynamic? application = null;
         dynamic? document = null;
+        var hasExistingDocuments = false;
+        int? originalAlerts = null;
         try
         {
             application = CreateApplication(host);
-            TrySet(application, "Visible", options.Visible);
+            originalAlerts = TryReadInt(() => application.DisplayAlerts);
+            hasExistingDocuments = Convert.ToInt32(application.Documents.Count) > 0;
+            if (!hasExistingDocuments) TrySet(application, "Visible", options.Visible);
             TrySet(application, "DisplayAlerts", 0);
 
             document = OpenDocument(application, fullPath, options.Visible);
+            // Word opens Visible:false documents without an active pagination window.
+            // Activating that document computes Range.Information while the application stays hidden.
+            document.Activate();
+            TrySet(document.ActiveWindow.View, "Type", 3);
 
             if (options.UpdateFields)
             {
@@ -71,11 +100,14 @@ public sealed class WpsComAutomationHost
                 report.Steps.Add(Step("repaginate", "skipped", "Repagination was disabled."));
             }
 
-            report.Layout = ReadLayoutMetrics(document);
-
             if (options.Save)
             {
-                document.Save();
+                if (options.OutputDocumentPath is string converted)
+                {
+                    try { document.SaveAs2(Path.GetFullPath(converted), 12); }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { document.SaveAs(Path.GetFullPath(converted), 12); }
+                }
+                else document.Save();
                 report.Steps.Add(Step("save", "applied", "The document was saved after host finalization."));
             }
             else
@@ -83,6 +115,26 @@ public sealed class WpsComAutomationHost
                 report.Steps.Add(Step("save", "skipped", "Saving was disabled."));
             }
 
+            if (options.PdfPath is not null)
+            {
+                var pdf = Path.GetFullPath(options.PdfPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(pdf)!);
+                document.ExportAsFixedFormat(pdf, 17);
+                if (!File.Exists(pdf) || new FileInfo(pdf).Length == 0) throw new IOException("The COM host produced no PDF.");
+                report.Steps.Add(Step("exportPdf", "applied", "PDF was exported by the same host that finalized the DOCX."));
+            }
+            report.Layout = ReadLayoutMetrics(document);
+            foreach (dynamic bookmark in document.Bookmarks)
+            {
+                string name = bookmark.Name;
+                if (name.StartsWith("thesis_target_", StringComparison.Ordinal)) name = name.Replace("thesis_target_", "thesis_heading_", StringComparison.Ordinal);
+                else if (!name.StartsWith("thesis_heading_", StringComparison.Ordinal)) continue;
+                report.BookmarkPages[name] = new HostBookmarkPage
+                {
+                    PhysicalPage = ReadPageInformation(bookmark.Range, 3),
+                    AdjustedPage = ReadPageInformation(bookmark.Range, 1)
+                };
+            }
             return report;
         }
         catch (COMException ex)
@@ -100,13 +152,14 @@ public sealed class WpsComAutomationHost
         finally
         {
             AddCloseDocumentStep(report, document, saveChanges: false, keepOpen: options.KeepOpen);
-            if (!options.KeepOpen)
+            if (application is not null && originalAlerts.HasValue) TrySet(application, "DisplayAlerts", originalAlerts.Value);
+            if (!options.KeepOpen && !hasExistingDocuments && HasNoOpenDocuments(application))
             {
                 AddQuitApplicationStep(report, application);
             }
             else
             {
-                report.Steps.Add(Step("quitApplication", "skipped", "Host application was left open because keepOpen was enabled."));
+                report.Steps.Add(Step("quitApplication", "skipped", "Host application was left open for existing documents or keepOpen."));
             }
 
             ReleaseComObject(document);
@@ -130,10 +183,14 @@ public sealed class WpsComAutomationHost
 
         dynamic? application = null;
         dynamic? document = null;
+        var hasExistingDocuments = false;
+        int? originalAlerts = null;
         try
         {
             application = CreateApplication(host);
-            TrySet(application, "Visible", options.Visible);
+            originalAlerts = TryReadInt(() => application.DisplayAlerts);
+            hasExistingDocuments = Convert.ToInt32(application.Documents.Count) > 0;
+            if (!hasExistingDocuments) TrySet(application, "Visible", options.Visible);
             TrySet(application, "DisplayAlerts", 0);
 
             document = OpenDocument(application, fullPath, options.Visible, readOnly: true);
@@ -157,7 +214,8 @@ public sealed class WpsComAutomationHost
         finally
         {
             AddCloseDocumentStep(report, document, saveChanges: false, keepOpen: options.KeepOpen);
-            if (!options.KeepOpen)
+            if (application is not null && originalAlerts.HasValue) TrySet(application, "DisplayAlerts", originalAlerts.Value);
+            if (!options.KeepOpen && !hasExistingDocuments && HasNoOpenDocuments(application))
             {
                 AddQuitApplicationStep(report, application);
             }

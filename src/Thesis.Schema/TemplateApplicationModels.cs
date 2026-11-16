@@ -14,7 +14,10 @@ public sealed class TemplateApplicationPlan
     public Dictionary<string, string> TemplateTextReplacements { get; set; } = [];
     public Dictionary<string, string> TocPages { get; set; } = [];
     public int ContentWidthTwips { get; set; } = 9072;
+    public int? TemplateTableIndex { get; set; }
     public bool NormalizePageFooters { get; set; }
+    public List<string> PendingReviews { get; set; } = [];
+    public List<ContentRequirement> Requirements { get; set; } = [];
 }
 
 public sealed class TemplateApplicationBlock
@@ -36,12 +39,18 @@ public sealed class TemplateApplicationBlock
     public int? PageNumberStart { get; set; }
     public bool FinalSection { get; set; }
     public bool NoPageNumber { get; set; }
+    public bool ContinuePageNumbering { get; set; }
+    public bool PageBreakBefore { get; set; }
+    public string? SectionBreakType { get; set; }
+    public int? ColumnCount { get; set; }
     public Dictionary<int, string> ParagraphTexts { get; set; } = [];
     public Dictionary<string, string> CellTexts { get; set; } = [];
 }
 
 public sealed class TemplateRoleFormat
 {
+    public int? TemplateParagraphIndex { get; set; }
+    public bool PreserveEmphasis { get; set; } = true;
     public string EastAsiaFont { get; set; } = "宋体";
     public string LatinFont { get; set; } = "Times New Roman";
     public int SizeHalfPoints { get; set; } = 24;
@@ -68,7 +77,14 @@ public sealed class TemplateApplicationReport
     public bool LayoutExecuted { get; set; }
     public bool LayoutPassed { get; set; }
     public bool PlanReviewPassed => Preflight.FingerprintsPinned && Preflight.UnmappedSourceBlocks.Count == 0;
-    public bool Ready => AssemblyPassed && StructurePassed && LayoutExecuted && LayoutPassed && PlanReviewPassed;
+    public bool ContentPassed { get; set; } = true;
+    public bool AutomatedChecksPassed => AssemblyPassed && StructurePassed && LayoutExecuted && LayoutPassed && PlanReviewPassed && ContentPassed;
+    public bool Ready => AutomatedChecksPassed && PendingReviews.Count == 0;
+    public List<string> PendingReviews { get; set; } = [];
+    public List<RequirementResult> RequirementResults { get; set; } = [];
+    public string? LayoutEngine { get; set; }
+    public HostApplicationReport? HostApplication { get; set; }
+    public DeliveryReview? Review { get; set; }
     public List<string> StructuralErrors { get; set; } = [];
     public List<string> LayoutErrors { get; set; } = [];
     public List<string> ManualReviewItems { get; set; } = [];

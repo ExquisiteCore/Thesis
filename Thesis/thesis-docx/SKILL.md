@@ -48,7 +48,7 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 - `--project-rules`：只传项目覆盖规则；不要把合并后的 `final-rules.json` 传给 `finalize-all --project-rules`。
 - `--content`：正文结构，包含摘要、章节、段落、图片、表格、参考文献和致谢。
 - `--front-matter-doc`：任务书、开题报告、承诺书等额外前置 DOCX；可重复传参，顺序即插入顺序。
-- `--reference`：参考成品用于 rehearsal/audit，不会被复制进候选稿；正式终稿生产线必须带。
+- `--reference`：兼容 Profile 模式的参考成品，用于 rehearsal/audit；统一 `compose` 链路使用模板、绑定计划及候选稿复核。
 
 禁止事项：
 
@@ -59,12 +59,20 @@ request.json 单次操作参数 > project-rules.json / final-rules.json > profil
 
 ## 推荐终稿流程
 
+新任务优先使用统一 `compose` 链路：`template-plan analyze` → `template-plan draft` → 处理 `pendingReviews` → `template-plan bind` → `apply-template` 渲染候选稿 → 检查 DOCX/PDF → `delivery-review` 按指纹提升成品。`compose` 和 `apply-template` 共用应用服务，前者默认要求 `ready`，后者允许待审候选稿。`--doc` 输入现有初稿；`--content` 输入结构化文本。
+
+WPS/Office 最终阅读的论文，配置 `engine:wps` 或 `engine:word`，用同一引擎更新域、保存 DOCX、导出 PDF。执行前用 `doctor --render-config` 检查基础依赖。旧 `.doc` 用 `document-convert --host wps|word` 转为 DOCX，再进行模板分析。
+
+学长合格论文可作版式样本，但草案必须替换封面身份信息、审核区域和节页码设置，并把学校的文字要求写入 `requirements`。`templateParagraphIndex` 提取实际段落格式，`templateTableIndex` 提取表格样本。自动检查通过后，按报告的 `pendingReviews` 复核字体、图表、公式、封面和文献；`delivery-review` 要求 DOCX/PDF/报告的 SHA-256 匹配，防止审核对象变化。
+
+下方 `finalize-all` 是兼容 Profile/参考稿模式；带 `--plan` 则转入统一套版服务。
+
 ```text
 finalize-all
   = profile extract -> rules merge -> assemble -> validate -> finalize -> validate -> rehearsal compare -> final audit
 ```
 
-正式终稿默认用 `finalize-all`。散命令仍保留给规则调试、内容抽取、局部微调和失败排查。
+旧 Profile 项目继续使用 `finalize-all`。散命令用于规则调试、内容抽取、局部微调和失败排查。
 
 ### 1. 检查模板正文和批注
 

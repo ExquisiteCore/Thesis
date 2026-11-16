@@ -35,6 +35,13 @@ public sealed class HostApplicationReport
     public HostLayoutMetrics Layout { get; set; } = new();
 
     public List<HostApplicationStep> Steps { get; set; } = [];
+    public Dictionary<string, HostBookmarkPage> BookmarkPages { get; set; } = [];
+}
+
+public sealed class HostBookmarkPage
+{
+    public int PhysicalPage { get; set; }
+    public int AdjustedPage { get; set; }
 }
 
 public sealed class HostLayoutMetrics

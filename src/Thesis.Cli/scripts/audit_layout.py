@@ -12,6 +12,10 @@ def compact(text):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text))
 
 
+def heading_key(text):
+    return re.sub(r"^(?:第[一二三四五六七八九十百0-9]+[章节]|[0-9]+(?:\.[0-9]+)*[.、]?)", "", compact(text))
+
+
 def labels_for(labels, fmt):
     pattern = r"[0-9]+" if fmt == "decimal" else r"[IVXLCDM]+" if fmt == "upperRoman" else r"[ivxlcdm]+"
     return [label for label in labels if re.fullmatch(pattern, label)]
@@ -27,8 +31,8 @@ def analyze(pdf_path, manifest):
                     text = "".join(span["text"] for span in line["spans"]).strip()
                     if text:
                         lines.append((text, line["bbox"]))
-            numeric_lines = [(text, box) for text, box in lines if box[1] > page.rect.height * .85
-                             and re.fullmatch(r"[0-9]+|[IVXLCDMivxlcdm]+", text)]
+            numeric_lines = [(match.group(1), box) for text, box in lines if box[1] > page.rect.height * .85
+                             and (match := re.fullmatch(r"[-—–·\s]*([0-9]+|[IVXLCDMivxlcdm]+)[-—–·\s]*", text))]
             # Table rows can extend into the lower page band. Footer labels are
             # taken from the lowest numeric baseline, not every number in that band.
             lowest = max((box[1] for _, box in numeric_lines), default=0)
@@ -49,19 +53,22 @@ def analyze(pdf_path, manifest):
                             if any(compact(text).lower() in ("目录", "contents", "tableofcontents") for text, _ in lines)
                             or sum(bool(re.search(r"[.．·]{3,}\s*(?:[0-9]+|[IVXLCDMivxlcdm]+)\s*$", text)) for text, _ in lines) >= 2}
         mapping = {}
-        headings = manifest["headings"]
+        entries = manifest.get("headingEntries") or [{"key": h, "text": h} for h in manifest["headings"]]
+        headings = [entry["text"] for entry in entries]
         heading_keys = {compact(h) for h in headings}
-        if len(headings) != len(heading_keys):
+        if len(headings) != len(heading_keys) and not manifest.get("hostPages"):
             errors.append("Repeated heading text requires distinct headings for TOC page-cache verification.")
-        for heading in headings:
+        for entry in entries:
+            heading = entry["text"]
+            entry_key = entry["key"]
             key = compact(heading)
-            fmt = manifest["pageFormats"].get(heading, "decimal")
+            fmt = manifest["pageFormats"].get(entry_key, "decimal")
             matches, positions = set(), {}
             for index, (lines, _, height) in enumerate(pages):
                 if index in toc_page_indexes:
                     continue
                 for i, (text, box) in enumerate(lines):
-                    if compact(text) == key and box[1] < height * .9:
+                    if (compact(text) == key or heading_key(text) == heading_key(heading)) and box[1] < height * .9:
                         matches.add(index)
                         positions[index] = box
                     elif key.startswith(compact(text)):
@@ -73,7 +80,18 @@ def analyze(pdf_path, manifest):
             # A short heading may also occur in a table. A declared section page
             # numbering format disambiguates Roman front matter from Arabic body pages.
             explicit = outlines.get(key, set())
-            if len(explicit) == 1:
+            host_page = (manifest.get("hostPages") or {}).get(entry_key)
+            if host_page:
+                index = host_page["physicalPage"] - 1
+                if index < 0 or index >= len(pages):
+                    errors.append(f"Office bookmark points outside the exported PDF: {entry_key}")
+                    continue
+                matches = {index}
+                if not any(heading_key(heading) in heading_key(text) for text, _ in pages[index][0]):
+                    combined = compact("".join(text for text, _ in pages[index][0]))
+                    if heading_key(heading) not in combined:
+                        errors.append(f"Office heading is missing on its exported PDF page: {heading}")
+            elif len(explicit) == 1:
                 matches = explicit
             elif len(matches) > 1:
                 matches = {i for i in matches if len(labels_for(pages[i][1], fmt)) == 1}
@@ -86,10 +104,11 @@ def analyze(pdf_path, manifest):
             if len(valid) != 1:
                 errors.append(f"Heading page label is missing or ambiguous: {heading}, PDF page {index + 1}")
             else:
-                mapping[heading] = valid[0]
+                mapping[entry_key] = valid[0]
             box = positions.get(index)
             if box and box[3] > height * .6 and not any(
-                    y[1] >= box[3] - 1 and y[3] < height * .88 and compact(text) not in heading_keys
+                    y[1] >= box[3] - 1 and y[3] < height * .94 and compact(text) not in heading_keys
+                    and not re.fullmatch(r"[-—–·\s]*([0-9]+|[IVXLCDMivxlcdm]+)[-—–·\s]*", text)
                     for text, y in lines):
                 errors.append(f"Heading has no following body content on PDF page {index + 1}: {heading}")
         return {"pageCount": len(pdf), "tocPages": mapping, "errors": sorted(set(errors)), "reviewItems": [

@@ -43,6 +43,10 @@ public static class ThesisCli
 
     private static CliResult Dispatch(string[] args)
     {
+        if (args is ["internal-host-finalize", .. var workerArgs]) return OfficeWorkerCommand.Execute(workerArgs);
+        if (args is ["document-convert", .. var convertArgs]) return DocumentConvertCommand.Execute(convertArgs);
+        if (args is ["doctor", .. var doctorArgs]) return DoctorCommand.Execute(doctorArgs);
+        if (args is ["delivery-review", .. var reviewArgs]) return DeliveryReviewCommand.Execute(reviewArgs);
         if (args.Length == 0 || args is ["--help"] or ["-h"] or ["help"])
         {
             return Help(GeneralUsage());
@@ -87,8 +91,10 @@ public static class ThesisCli
             return ApplyOneShot(applyArgs);
         }
 
-        if (args is ["apply-template", .. var templateArgs])
+        if (args is ["apply-template" or "compose", .. var templateArgs])
         {
+            if (args[0] == "compose" && !templateArgs.Contains("--require-ready") && templateArgs is not (["--help"] or ["-h"]))
+                templateArgs = [.. templateArgs, "--require-ready", "true"];
             return ApplyTemplateCommand.Execute(templateArgs);
         }
 
@@ -120,6 +126,8 @@ public static class ThesisCli
 
         if (args is ["finalize-all", .. var finalizeAllArgs])
         {
+            if (finalizeAllArgs.Contains("--plan"))
+                return ApplyTemplateCommand.Execute([.. finalizeAllArgs, "--require-ready", "true"]);
             return FinalizeAll(finalizeAllArgs);
         }
 
@@ -771,7 +779,7 @@ public static class ThesisCli
     {
         try
         {
-            return new WpsComAutomationHost().FinalizeDocument(documentPath, hostOptions);
+            return Thesis.Application.DocumentFinalizer.FinalizeWithOffice(documentPath, hostOptions);
         }
         catch (HostApplicationException ex)
         {
@@ -876,7 +884,13 @@ public static class ThesisCli
             "  run --workspace <dir> --request <request.json>",
             "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",
             "  apply-template --doc <source.docx> --template <template.docx> --plan <plan.json> --out <output.docx> [--report <report.json>] [--render-config <render.json> --pdf <output.pdf>] [--workdir <directory>]",
+            "  compose (--doc <source.docx> | --content <content.json>) --template <template.docx> [--plan <plan.json>] --out <final.docx> [--render-config <render.json> --pdf <final.pdf>] [--require-ready true|false]",
+            "  doctor --render-config <render.json>",
+            "  document-convert --doc <source.doc> --out <converted.docx> [--host wps|word|auto]",
+            "  delivery-review --doc <candidate.docx> --pdf <candidate.pdf> --report <candidate.json> --review <review.json> --out <final.docx> --out-pdf <final.pdf> --out-report <final.json>",
             "  template-plan bind|inspect --doc <source.docx> --template <template.docx> --plan <plan.json> --out <result.json>",
+            "  template-plan draft --doc <source.docx> --template <template.docx> --out <draft.json>",
+            "  template-plan analyze --template <template.docx> --out <analysis.json>",
             "  validate --doc <docx> --profile <profile.json>",
             "  validate --workspace <dir> [--host-layout]",
             "  finalize plan --doc <docx>",

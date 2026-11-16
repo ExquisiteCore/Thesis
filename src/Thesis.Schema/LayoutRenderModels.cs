@@ -2,6 +2,8 @@ namespace Thesis.Schema;
 
 public sealed class LayoutRenderConfig
 {
+    public string Engine { get; set; } = "libreoffice";
+    public string? ProgId { get; set; }
     public string LibreOfficePath { get; set; } = "";
     public string PythonPath { get; set; } = "";
     public int TimeoutSeconds { get; set; } = 120;

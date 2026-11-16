@@ -18,6 +18,12 @@ public static class ThesisJson
             ?? throw new JsonException($"Unable to deserialize {typeof(T).Name}.");
     }
 
+    public static T DeserializeStrict<T>(string json)
+    {
+        var strict = new JsonSerializerOptions(Options) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
+        return JsonSerializer.Deserialize<T>(json, strict) ?? throw new JsonException($"Expected a {typeof(T).Name} object.");
+    }
+
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions

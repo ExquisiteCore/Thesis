@@ -31,9 +31,18 @@ public static class TemplatePlanPreflight
         var sourceBlocks = sourceDoc.MainDocumentPart?.Document?.Body?.ChildElements.ToArray() ?? throw new InvalidDataException("Source has no body.");
         var templateBlocks = templateDoc.MainDocumentPart?.Document?.Body?.ChildElements.ToArray() ?? throw new InvalidDataException("Template has no body.");
         var sections = templateDoc.MainDocumentPart!.Document.Body!.Descendants<SectionProperties>().Count();
-        if (plan.SchemaVersion != "1.0" || plan.Blocks is null || plan.Roles is null || plan.SkippedSourceRanges is null)
+        if (plan.SchemaVersion != "1.0" || plan.Blocks is null || plan.Roles is null || plan.SkippedSourceRanges is null
+            || plan.PendingReviews is null || plan.Requirements is null || plan.SourceTextReplacements is null || plan.TemplateTextReplacements is null || plan.TocPages is null)
             throw new ArgumentException("Invalid version 1.0 plan collections.");
+        foreach (var (name, role) in plan.Roles)
+        {
+            if (role is null) throw new ArgumentException($"Null role format: {name}");
+            if (role.TemplateParagraphIndex is int sample && (sample < 0 || sample >= templateBlocks.Length || templateBlocks[sample] is not Paragraph))
+                throw new ArgumentException($"Role {name} must reference a template body paragraph.");
+        }
         var covered = new HashSet<int>();
+        if (plan.TemplateTableIndex is int tableSample && (tableSample < 0 || tableSample >= templateBlocks.Length || templateBlocks[tableSample] is not Table))
+            throw new ArgumentException("Template table sample must reference a body table.");
         foreach (var (element, index) in sourceBlocks.Select((element, index) => (element, index)))
         {
             if (element is SectionProperties) continue;
@@ -46,6 +55,12 @@ public static class TemplatePlanPreflight
         foreach (var block in plan.Blocks)
         {
             if (block is null) throw new ArgumentException("Plan contains a null block.");
+            if (block.Type is not ("sourceRange" or "templateRange" or "paragraph" or "table" or "image" or "toc" or "section"))
+                throw new ArgumentException($"Unknown plan block type: {block.Type}");
+            if (block.ColumnCount is < 1 or > 45 || block.SectionBreakType is not (null or "continuous" or "nextPage" or "nextColumn" or "evenPage" or "oddPage"))
+                throw new ArgumentException("Invalid section columns or break type.");
+            if (block.ContinuePageNumbering && block.PageNumberStart.HasValue)
+                throw new ArgumentException("A section must either continue numbering or specify a starting page.");
             if (block.Role is not null && !plan.Roles.ContainsKey(block.Role)) throw new ArgumentException($"Unknown role: {block.Role}");
             if (block.Role is not null && plan.Roles[block.Role] is null) throw new ArgumentException($"Null role format: {block.Role}");
             if (block.ParagraphTexts is null || block.CellTexts is null) throw new ArgumentException("Range override maps must be objects.");
@@ -84,13 +99,13 @@ public static class TemplatePlanPreflight
                 throw new ArgumentException("Section template index outside template.");
             if (block.Type == "image" && (block.ImageWidthEmu <= 0 || block.ImageHeightEmu <= 0 || !File.Exists(block.ImagePath)))
                 throw new ArgumentException("Image requires an existing file and positive dimensions.");
-            if (block.Type == "table" && (block.Rows is null || block.Rows.Count == 0 || block.Rows.Any(r => r.Count != block.Rows[0].Count)
+            if (block.Type == "table" && (block.Rows is null || block.Rows.Count == 0 || block.Rows[0] is null || block.Rows.Any(r => r is null || r.Count != block.Rows[0].Count)
                 || block.Rows[0].Count == 0 || block.ColumnWidths is null || block.ColumnWidths.Count != block.Rows[0].Count || block.ColumnWidths.Any(w => w <= 0)))
                 throw new ArgumentException("Table rows and positive column widths must have matching dimensions.");
         }
         foreach (var skipped in plan.SkippedSourceRanges)
         {
-            if (skipped.Start < 0 || skipped.End <= skipped.Start || skipped.End > sourceBlocks.Length || string.IsNullOrWhiteSpace(skipped.Reason))
+            if (skipped is null || skipped.Start < 0 || skipped.End <= skipped.Start || skipped.End > sourceBlocks.Length || string.IsNullOrWhiteSpace(skipped.Reason))
                 throw new ArgumentException("Skipped source ranges require valid indexes and a review reason.");
             for (var i = skipped.Start; i < skipped.End; i++)
                 if (sourceBlocks[i] is not SectionProperties && !covered.Add(i)) throw new ArgumentException($"Skipped source block {i} overlaps another range.");

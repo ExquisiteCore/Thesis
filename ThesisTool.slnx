@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Thesis.Application/Thesis.Application.csproj" />
     <Project Path="src/Thesis.Cli/Thesis.Cli.csproj" />
     <Project Path="src/Thesis.Core/Thesis.Core.csproj" />
     <Project Path="src/Thesis.Host/Thesis.Host.csproj" />

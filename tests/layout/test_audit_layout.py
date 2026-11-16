@@ -59,6 +59,29 @@ class LayoutAuditTests(unittest.TestCase):
         self.assertEqual([], facts["errors"])
         self.assertEqual("17", facts["tocPages"]["Heading"])
 
+    def test_decorated_footer_and_low_body_line_are_supported(self):
+        facts = self.document([[(70, 700, "Heading"), (70, 755, "Body follows the heading."), (290, 810, "- 17 -")]],
+                              ["Heading"], {"Heading": "decimal"})
+        self.assertEqual([], facts["errors"])
+        self.assertEqual("17", facts["tocPages"]["Heading"])
+
+    def test_office_bookmarks_disambiguate_repeated_headings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.pdf"
+            with pymupdf.open() as pdf:
+                for i in range(2):
+                    page = pdf.new_page(width=595, height=842)
+                    page.insert_text((70, 100), "Summary")
+                    page.insert_text((70, 150), "Body text.")
+                    page.insert_text((290, 810), str(i + 1))
+                pdf.save(path)
+            facts = audit.analyze(path, {"headings": ["Summary", "Summary"],
+                "headingEntries": [{"key": "h0", "text": "Summary"}, {"key": "h1", "text": "Summary"}],
+                "pageFormats": {"h0": "decimal", "h1": "decimal"},
+                "hostPages": {"h0": {"physicalPage": 1, "adjustedPage": 1}, "h1": {"physicalPage": 2, "adjustedPage": 2}}})
+            self.assertEqual([], facts["errors"])
+            self.assertEqual({"h0": "1", "h1": "2"}, facts["tocPages"])
+
 
 if __name__ == "__main__":
     unittest.main()

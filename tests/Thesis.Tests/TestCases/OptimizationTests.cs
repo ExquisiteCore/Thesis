@@ -222,7 +222,7 @@ internal static partial class Program
         WriteSimpleDocx(source, """
             <w:p><w:r><w:t>论文题目</w:t></w:r></w:p>
             <w:p><w:r><w:t>第一章 绪论</w:t></w:r></w:p>
-            <w:p><w:bookmarkStart w:id="1" w:name="original"/><w:fldSimple w:instr=" REF original "><w:r><w:t>正文</w:t></w:r></w:fldSimple><w:bookmarkEnd w:id="1"/></w:p>
+            <w:p><w:r><w:footnoteReference w:id="1"/></w:r></w:p>
             """);
         AssertEqual(0, RunCli(["content", "extract", "--doc", source, "--out", content, "--report", report]).ExitCode);
         var facts = ThesisJson.Deserialize<ContentExtractReport>(File.ReadAllText(report));
@@ -231,7 +231,7 @@ internal static partial class Program
         var plan = NativeApplicationPlan();
         plan.Blocks = [new() { Type = "sourceRange", Start = 2, End = 3 }, new() { Type = "section", FinalSection = true }];
         try { _ = TemplatePlanPreflight.Check(source, source, plan); throw new UnreachableException("Expected migration diagnostic."); }
-        catch (InvalidDataException ex) { AssertContains(ex.Message, "bookmarks/cross-references"); }
+        catch (InvalidDataException ex) { AssertContains(ex.Message, "footnoteReference"); }
         plan.Blocks = [new() { Type = "sourceRange", Start = 0, End = 1 }, new() { Type = "section", FinalSection = true }];
         File.WriteAllText(Path.Combine(temp.Path, "content.json"), ThesisJson.Serialize(new ThesisContent
         {

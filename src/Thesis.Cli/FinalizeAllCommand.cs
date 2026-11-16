@@ -239,7 +239,7 @@ internal static class FinalizeAllCommand
 
             try
             {
-                hostReport = new WpsComAutomationHost().FinalizeDocument(tempFinalPath, hostOptions);
+                hostReport = Thesis.Application.DocumentFinalizer.FinalizeWithOffice(tempFinalPath, hostOptions);
                 OpenXmlFinalizationMetadata.MarkHostFinalized(
                     tempFinalPath,
                     hostReport,

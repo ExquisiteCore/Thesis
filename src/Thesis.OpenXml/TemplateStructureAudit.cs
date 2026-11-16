@@ -11,6 +11,7 @@ public static class TemplateStructureAudit
     {
         using var doc = WordprocessingDocument.Open(path, false);
         report.StructuralErrors.Clear();
+        report.StructuralErrors.AddRange(DocumentIntegrityAudit.Check(path));
         foreach (var error in new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Office2019).Validate(doc).Take(30))
             report.StructuralErrors.Add($"{error.Part?.Uri} {error.Path?.XPath}: {error.Description}");
         var body = doc.MainDocumentPart!.Document!.Body!;

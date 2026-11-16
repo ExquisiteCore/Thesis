@@ -19,4 +19,6 @@ public sealed class HostApplicationOptions
     public bool Repaginate { get; set; } = true;
 
     public bool Save { get; set; } = true;
+    public string? PdfPath { get; set; }
+    public string? OutputDocumentPath { get; set; }
 }

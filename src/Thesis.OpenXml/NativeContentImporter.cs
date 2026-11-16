@@ -22,21 +22,19 @@ internal sealed class NativeContentImporter(MainDocumentPart target) : IDisposab
             if (!hash.Equals(block.SourceSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Native content source changed: {path}");
             source = new Source(WordprocessingDocument.Open(path, false), hash);
             sources.Add(path, source);
-            source.Styles = OpenXmlStyleTransfer.Copy(source.Document.MainDocumentPart!, target, "native" + sources.Count + "_");
+            source.Transfer = new OpenXmlSourceTransfer(source.Document.MainDocumentPart!, target, "native" + sources.Count + "_");
         }
         if (!source.Hash.Equals(block.SourceSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Conflicting native source fingerprints.");
         var children = source.Document.MainDocumentPart!.Document!.Body!.ChildElements;
         var index = block.SourceBodyElementIndex.Value;
         if (index < 0 || index >= children.Count || children[index] is SectionProperties) throw new InvalidDataException($"Invalid native block index: {index}");
         var clone = children[index].CloneNode(true);
-        var unsupported = Unsupported(clone, source.Document.MainDocumentPart);
+        var unsupported = Unsupported(clone, source.Document.MainDocumentPart, allowMigratableReferences: true);
         if (unsupported.Count > 0) throw new InvalidDataException($"Native block {index} needs migration support for: {string.Join(", ", unsupported)}");
         foreach (var p in clone.Descendants<Paragraph>().Prepend(clone as Paragraph).OfType<Paragraph>())
             p.ParagraphProperties?.RemoveAllChildren<SectionProperties>();
         foreach (var el in clone.Descendants().Where(e => e.LocalName is "commentRangeStart" or "commentRangeEnd" or "commentReference" or "proofErr").ToArray()) el.Remove();
-        OpenXmlBookmarkTransfer.Remap(target, clone);
-        OpenXmlStyleTransfer.Remap(clone, source.Styles);
-        OpenXmlPartTransfer.Copy(source.Document.MainDocumentPart!, target, clone, source.Relationships);
+        source.Transfer!.Remap(clone);
         if (clone is Paragraph paragraph && paragraphFormat is not null) OpenXmlFormatApplier.ApplyParagraphFormat(paragraph, paragraphFormat);
         if (clone is Table table && tableFormat is not null) OpenXmlFormatApplier.ApplyTableFormat(table, tableFormat);
         foreach (var prop in clone.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties>())
@@ -45,31 +43,23 @@ internal sealed class NativeContentImporter(MainDocumentPart target) : IDisposab
     }
 
     private int drawingId;
-    public static List<string> Unsupported(OpenXmlElement block, MainDocumentPart? source = null)
+    public static List<string> Unsupported(OpenXmlElement block, MainDocumentPart? source = null, bool allowMigratableReferences = true)
     {
         var features = new HashSet<string>();
         foreach (var e in block.Descendants().Prepend(block))
         {
-            if (e.LocalName is "footnoteReference" or "endnoteReference" or "altChunk" or "OLEObject") features.Add(e.LocalName);
-            if (e is NumberingId id && id.Val?.Value is > 0) features.Add("automatic numbering");
-            if (e is FieldCode field && System.Text.RegularExpressions.Regex.IsMatch(field.Text, @"\b(REF|PAGEREF|NOTEREF)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) features.Add("bookmarks/cross-references");
-            if (e is SimpleField simple && System.Text.RegularExpressions.Regex.IsMatch(simple.Instruction?.Value ?? "", @"\b(REF|PAGEREF|NOTEREF)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) features.Add("bookmarks/cross-references");
-            if (e is ParagraphStyleId reference && source?.StyleDefinitionsPart?.Styles is Styles styles)
-            {
-                var seen = new HashSet<string>();
-                var styleId = reference.Val?.Value;
-                while (styleId is not null && seen.Add(styleId))
-                {
-                    var style = styles.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == styleId);
-                    if (style?.Descendants<NumberingId>().Any(n => n.Val?.Value is > 0) == true) features.Add("automatic numbering in paragraph style");
-                    styleId = style?.BasedOn?.Val?.Value;
-                }
-            }
+            if (e.LocalName is "footnoteReference" or "endnoteReference" or "altChunk") features.Add(e.LocalName);
+            if (e.LocalName == "OLEObject" && !block.Descendants().Any(n => n.LocalName == "imagedata")) features.Add("embedded object without preview");
+            if (!allowMigratableReferences && e is FieldCode field && System.Text.RegularExpressions.Regex.IsMatch(field.Text, @"\b(REF|PAGEREF|NOTEREF)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) features.Add("bookmarks/cross-references");
+            if (!allowMigratableReferences && e is SimpleField simple && System.Text.RegularExpressions.Regex.IsMatch(simple.Instruction?.Value ?? "", @"\b(REF|PAGEREF|NOTEREF)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) features.Add("bookmarks/cross-references");
         }
-        var starts = block.Descendants<BookmarkStart>().Select(b => b.Id?.Value).ToList();
-        var ends = block.Descendants<BookmarkEnd>().Select(b => b.Id?.Value).ToList();
-        if (starts.Any(id => id is null) || starts.Count != starts.Distinct().Count() || ends.Count != ends.Distinct().Count()
-            || !starts.Order().SequenceEqual(ends.Order())) features.Add("bookmarks/cross-references spanning body blocks");
+        if (!allowMigratableReferences)
+        {
+            var starts = block.Descendants<BookmarkStart>().Select(b => b.Id?.Value).ToList();
+            var ends = block.Descendants<BookmarkEnd>().Select(b => b.Id?.Value).ToList();
+            if (starts.Any(id => id is null) || starts.Count != starts.Distinct().Count() || ends.Count != ends.Distinct().Count()
+                || !starts.Order().SequenceEqual(ends.Order())) features.Add("bookmarks/cross-references spanning body blocks");
+        }
         return features.Order().ToList();
     }
 
@@ -78,7 +68,6 @@ internal sealed class NativeContentImporter(MainDocumentPart target) : IDisposab
     {
         public WordprocessingDocument Document { get; } = doc;
         public string Hash { get; } = hash;
-        public Dictionary<string, string> Relationships { get; } = [];
-        public Dictionary<string, string> Styles { get; set; } = [];
+        public OpenXmlSourceTransfer? Transfer { get; set; }
     }
 }

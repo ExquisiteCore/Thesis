@@ -36,10 +36,11 @@ public static class OpenXmlTemplateApplicator
             || plan.Blocks[^1].Type != "section" || !plan.Blocks[^1].FinalSection)
             throw new ArgumentException("The plan must contain exactly one final section, as its last block.");
         var temp = outputFull + ".template-" + Guid.NewGuid().ToString("N") + ".tmp";
-        var report = new TemplateApplicationReport { Source = sourceFull, Template = templateFull, Output = outputFull, Preflight = checkedPlan.Report };
+        var report = new TemplateApplicationReport { Source = sourceFull, Template = templateFull, Output = outputFull, Preflight = checkedPlan.Report, PendingReviews = [.. plan.PendingReviews] };
         try
         {
             File.Copy(templateFull, temp, overwrite: false);
+            File.SetAttributes(temp, File.GetAttributes(temp) & ~FileAttributes.ReadOnly);
             using (var source = WordprocessingDocument.Open(sourceFull, false))
             using (var output = WordprocessingDocument.Open(temp, true))
             {
@@ -49,14 +50,28 @@ public static class OpenXmlTemplateApplicator
                 var body = main.Document?.Body ?? throw new InvalidDataException("Template has no body.");
                 var templateBlocks = body.ChildElements.Select(x => x.CloneNode(true)).ToArray();
                 var sectionSamples = EffectiveSections(body);
-                var imported = new Dictionary<string, string>(StringComparer.Ordinal);
+                var tableSample = plan.TemplateTableIndex is int tableIndex ? ((Table)templateBlocks[tableIndex]).TableProperties : null;
                 var usedSourceBlocks = new HashSet<int>();
                 InstallStyles(main, plan);
-                var sourceStyles = OpenXmlStyleTransfer.Copy(sourceMain, main, "source_");
+                TemplateHeaderFieldTransfer.Remap(main, plan);
+                var sourceTransfer = new OpenXmlSourceTransfer(sourceMain, main, "source_");
                 body.RemoveAllChildren();
                 var tocMarkers = new List<Paragraph>();
-                foreach (var block in plan.Blocks)
+                var requestedWidth = plan.ContentWidthTwips;
+                foreach (var (block, blockIndex) in plan.Blocks.Select((b, i) => (b, i)))
                 {
+                    var availableHeight = int.MaxValue;
+                    var nextSection = plan.Blocks.Skip(blockIndex).FirstOrDefault(b => b.Type == "section");
+                    if (nextSection is not null)
+                    {
+                        var layout = sectionSamples[nextSection.SectionTemplateIndex];
+                        var margins = layout.GetFirstChild<PageMargin>();
+                        var available = (int)(layout.GetFirstChild<PageSize>()?.Width?.Value ?? 11906) - (int)(margins?.Left?.Value ?? 0) - (int)(margins?.Right?.Value ?? 0) - (int)(margins?.Gutter?.Value ?? 0);
+                        var columns = nextSection.ColumnCount ?? layout.GetFirstChild<Columns>()?.ColumnCount?.Value ?? 1;
+                        availableHeight = (int)(layout.GetFirstChild<PageSize>()?.Height?.Value ?? 16838) - (margins?.Top?.Value ?? 0) - (margins?.Bottom?.Value ?? 0) - 720;
+                        var gap = int.TryParse(layout.GetFirstChild<Columns>()?.Space?.Value, out var spacing) ? spacing : 720;
+                        plan.ContentWidthTwips = Math.Min(requestedWidth, Math.Max(1, (available - (columns - 1) * gap) / Math.Max(columns, 1)));
+                    }
                     switch (block.Type)
                     {
                         case "sourceRange":
@@ -71,7 +86,7 @@ public static class OpenXmlTemplateApplicator
                                 if (isSource && !usedSourceBlocks.Add(i))
                                     throw new ArgumentException($"Source block {i} was included more than once.");
                                 var clone = candidates[i].CloneNode(true);
-                                RemoveReviewMarkup(clone, removeTextBoxes: !isSource);
+                                RemoveReviewMarkup(clone);
                                 foreach (var paragraph in Paragraphs(clone))
                                     paragraph.ParagraphProperties?.RemoveAllChildren<SectionProperties>();
                                 if (block.ParagraphTexts.TryGetValue(i, out var replacement))
@@ -91,13 +106,17 @@ public static class OpenXmlTemplateApplicator
                                 ReplaceText(clone, isSource ? plan.SourceTextReplacements : plan.TemplateTextReplacements);
                                 if (isSource)
                                 {
-                                    OpenXmlBookmarkTransfer.Remap(main, clone);
-                                    OpenXmlStyleTransfer.Remap(clone, sourceStyles);
-                                    CopyRelationships(sourceMain, main, clone, imported);
-                                    FormatBlock(clone, block.Role, plan);
+                                    sourceTransfer.Remap(clone);
+                                    FormatBlock(clone, block.Role, plan, tableSample);
+                                    NormalizeDrawingIdsAndSizes(clone, plan.ContentWidthTwips, availableHeight);
                                     report.CopiedSourceBlocks.Add(i);
                                 }
-                                else if (block.Role is not null) FormatBlock(clone, block.Role, plan);
+                                else if (block.Role is not null) FormatBlock(clone, block.Role, plan, tableSample);
+                                if (i == block.Start && block.PageBreakBefore && Paragraphs(clone).FirstOrDefault() is Paragraph firstParagraph)
+                                {
+                                    firstParagraph.ParagraphProperties ??= new ParagraphProperties();
+                                    firstParagraph.ParagraphProperties.PageBreakBefore = new PageBreakBefore();
+                                }
                                 body.Append(clone);
                             }
                             break;
@@ -119,10 +138,18 @@ public static class OpenXmlTemplateApplicator
                             if (block.SectionTemplateIndex < 0 || block.SectionTemplateIndex >= sectionSamples.Count)
                                 throw new ArgumentException("Section sample index is outside the template.");
                             var section = (SectionProperties)sectionSamples[block.SectionTemplateIndex].CloneNode(true);
-                            section.RemoveAllChildren<SectionType>();
-                            section.AddChild(new SectionType { Val = SectionMarkValues.NextPage }, true);
-                            section.RemoveAllChildren<Columns>();
-                            section.AddChild(new Columns { ColumnCount = 1, Space = "720" }, true);
+                            if (block.SectionBreakType is not null)
+                            {
+                                section.RemoveAllChildren<SectionType>();
+                                var sectionType = new SectionType();
+                                sectionType.SetAttribute(new OpenXmlAttribute("w", "val", W.NamespaceName, block.SectionBreakType));
+                                section.AddChild(sectionType, true);
+                            }
+                            if (block.ColumnCount.HasValue)
+                            {
+                                section.RemoveAllChildren<Columns>();
+                                section.AddChild(new Columns { ColumnCount = (short)block.ColumnCount.Value, Space = "720" }, true);
+                            }
                             if (block.PageNumberFormat is not null)
                             {
                                 section.RemoveAllChildren<PageNumberType>();
@@ -131,6 +158,7 @@ public static class OpenXmlTemplateApplicator
                                 if (block.PageNumberStart.HasValue) numbering.Start = block.PageNumberStart.Value;
                                 section.AddChild(numbering, true);
                             }
+                            if (block.ContinuePageNumbering && section.GetFirstChild<PageNumberType>() is PageNumberType pageNumbers) pageNumbers.Start = null;
                             if (block.NoPageNumber) section.RemoveAllChildren<FooterReference>();
                             else if (plan.NormalizePageFooters) NormalizeFooter(main, section, block.PageNumberFormat == "upperRoman");
                             if (block.FinalSection) body.Append(section);
@@ -150,7 +178,7 @@ public static class OpenXmlTemplateApplicator
                 if (body.LastChild is not SectionProperties)
                     throw new ArgumentException("Plan must end with a final section block.");
                 BuildToc(body, tocMarkers, plan, report);
-                NormalizeDrawingIdsAndSizes(body, plan.ContentWidthTwips);
+                NormalizeDrawingIdsAndSizes(body, 0);
                 if (main.WordprocessingCommentsPart is not null) main.DeletePart(main.WordprocessingCommentsPart);
                 var settings = main.DocumentSettingsPart ?? main.AddNewPart<DocumentSettingsPart>();
                 settings.Settings ??= new Settings();
@@ -166,6 +194,7 @@ public static class OpenXmlTemplateApplicator
                 report.Notes.Add("Assembly status is separate from structural validation, rendered pagination and scholarly review.");
             }
             // Reopen before promotion, so an unreadable package never replaces an existing output.
+            OpenXmlCompatibilityRepair.NormalizeStyleOrder(temp);
             using (var verification = WordprocessingDocument.Open(temp, false))
                 _ = verification.MainDocumentPart?.Document?.Body ?? throw new InvalidDataException("Generated document is unreadable.");
             File.Move(temp, outputFull, overwrite: true);
@@ -196,12 +225,10 @@ public static class OpenXmlTemplateApplicator
         return result;
     }
 
-    private static void RemoveReviewMarkup(OpenXmlElement block, bool removeTextBoxes)
+    private static void RemoveReviewMarkup(OpenXmlElement block)
     {
         foreach (var el in block.Descendants().Where(x => x is CommentRangeStart or CommentRangeEnd or CommentReference or ProofError
-            || x.LocalName is "lastRenderedPageBreak" or "bookmarkStart" or "bookmarkEnd").ToArray()) el.Remove();
-        if (removeTextBoxes)
-            foreach (var el in block.Descendants().Where(x => x.LocalName == "AlternateContent" && x.Descendants().Any(c => c.LocalName == "txbxContent")).ToArray()) el.Remove();
+            || x.LocalName is "lastRenderedPageBreak").ToArray()) el.Remove();
     }
 
     private static void ReplaceParagraphText(Paragraph paragraph, string text)
@@ -220,7 +247,7 @@ public static class OpenXmlTemplateApplicator
         {
             foreach (var pair in replacements)
             {
-                var nodes = p.Descendants<Text>().Where(x => !x.Ancestors().Any(a => a.LocalName == "txbxContent")).ToList();
+                var nodes = p.Descendants<Text>().Where(x => x.Ancestors<Paragraph>().FirstOrDefault() == p).ToList();
                 var joined = string.Concat(nodes.Select(x => x.Text));
                 var start = joined.IndexOf(pair.Key, StringComparison.Ordinal);
                 if (start < 0) continue;
@@ -247,9 +274,6 @@ public static class OpenXmlTemplateApplicator
             }
         }
     }
-
-    private static void CopyRelationships(MainDocumentPart source, MainDocumentPart target, OpenXmlElement block, Dictionary<string, string> map)
-        => OpenXmlPartTransfer.Copy(source, target, block, map);
 
     private static XElement Element(string name, params (string Name, object? Value)[] attributes) =>
         new(W + name, attributes.Where(a => a.Value is not null).Select(a => new XAttribute(W + a.Name, a.Value!)));
@@ -287,6 +311,11 @@ public static class OpenXmlTemplateApplicator
                 throw new ArgumentException($"Invalid font size or line spacing for role {name}.");
             var id = "Thesis_" + name;
             part.Styles.Elements<Style>().FirstOrDefault(s => s.StyleId == id)?.Remove();
+            if (format.TemplateParagraphIndex.HasValue)
+            {
+                part.Styles.Append(TemplateRoleStyleBuilder.Build(main, id, format));
+                continue;
+            }
             var pPr = ParagraphFormat(format);
             if (format.PageBreakBefore)
             {
@@ -312,11 +341,11 @@ public static class OpenXmlTemplateApplicator
         return "body";
     }
 
-    private static void FormatBlock(OpenXmlElement block, string? role, TemplateApplicationPlan plan)
+    private static void FormatBlock(OpenXmlElement block, string? role, TemplateApplicationPlan plan, TableProperties? tableSample = null)
     {
         if (block is Table table)
         {
-            FormatTable(table, plan);
+            FormatTable(table, plan, tableSample);
             return;
         }
         foreach (var paragraph in Paragraphs(block)) ApplyRole(paragraph, role ?? GuessRole(paragraph), plan);
@@ -325,16 +354,27 @@ public static class OpenXmlTemplateApplicator
     private static void ApplyRole(Paragraph paragraph, string role, TemplateApplicationPlan plan)
     {
         if (!plan.Roles.TryGetValue(role, out var format)) throw new ArgumentException($"Undefined role: {role}.");
-        var numbering = paragraph.ParagraphProperties?.NumberingProperties;
-        if (numbering?.NumberingId?.Val?.Value is int numberId && numberId != 0)
-            throw new InvalidDataException("Source automatic numbering requires an explicit mapping; convert it in the reviewed plan before importing.");
+        var numbering = paragraph.ParagraphProperties?.NumberingProperties?.CloneNode(true);
         paragraph.ParagraphProperties = new ParagraphProperties(new ParagraphStyleId { Val = "Thesis_" + role });
+        if (numbering is not null) paragraph.ParagraphProperties.AddChild(numbering, true);
+        if (paragraph.Descendants<Drawing>().Any() || paragraph.Descendants().Any(e => e.LocalName == "object"))
+        {
+            paragraph.ParagraphProperties.SpacingBetweenLines = new SpacingBetweenLines { Line = "240", LineRule = LineSpacingRuleValues.Auto };
+            paragraph.ParagraphProperties.Indentation = new Indentation { FirstLine = "0", Left = "0", Right = "0" };
+        }
         foreach (var run in paragraph.Descendants<Run>())
         {
-            var semantic = run.RunProperties?.ChildElements.Where(x => x is VerticalTextAlignment or Italic or SymbolChar).Select(x => x.CloneNode(true)).ToArray() ?? [];
-            var rPr = new RunProperties(RunFormat(format).ToString(SaveOptions.DisableFormatting));
-            foreach (var value in semantic) rPr.AddChild(value, true);
-            run.RunProperties = rPr;
+            var semantic = run.RunProperties?.ChildElements.Where(x => x is VerticalTextAlignment or SymbolChar
+                || format.PreserveEmphasis && x is Bold or BoldComplexScript or Italic or ItalicComplexScript or Underline or Strike or DoubleStrike)
+                .Select(x => x.CloneNode(true)).ToArray() ?? [];
+            var rPr = format.TemplateParagraphIndex.HasValue ? new RunProperties() : new RunProperties(RunFormat(format).ToString(SaveOptions.DisableFormatting));
+            foreach (var value in semantic)
+            {
+                foreach (var existing in rPr.ChildElements.Where(e => e.LocalName == value.LocalName).ToArray()) existing.Remove();
+                rPr.AddChild(value, true);
+            }
+            run.RemoveAllChildren<RunProperties>();
+            run.PrependChild(rPr);
         }
         foreach (var pageBreak in paragraph.Descendants<Break>().Where(x => x.Type?.Value == BreakValues.Page).ToArray()) pageBreak.Remove();
     }
@@ -383,13 +423,12 @@ public static class OpenXmlTemplateApplicator
         return t;
     }
 
-    private static void FormatTable(Table table, TemplateApplicationPlan plan)
+    private static void FormatTable(Table table, TemplateApplicationPlan plan, TableProperties? sample = null)
     {
+        if (sample is not null) table.TableProperties = (TableProperties)sample.CloneNode(true);
         table.TableProperties ??= new TableProperties();
-        table.TableProperties.TableStyle = null;
         table.TableProperties.TableWidth = new TableWidth { Type = TableWidthUnitValues.Dxa, Width = plan.ContentWidthTwips.ToString(CultureInfo.InvariantCulture) };
         table.TableProperties.TableJustification = new TableJustification { Val = TableRowAlignmentValues.Center };
-        table.TableProperties.TableBorders = new TableBorders(new TopBorder { Val = BorderValues.Single, Size = 8 }, new LeftBorder { Val = BorderValues.Single, Size = 4 }, new BottomBorder { Val = BorderValues.Single, Size = 8 }, new RightBorder { Val = BorderValues.Single, Size = 4 }, new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 }, new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 });
         table.TableProperties.TableLayout = new TableLayout { Type = TableLayoutValues.Fixed };
         var grid = table.GetFirstChild<TableGrid>();
         if (grid is not null)
@@ -399,17 +438,12 @@ public static class OpenXmlTemplateApplicator
             foreach (var col in columns)
                 col.Width = Math.Max(1, (int)Math.Round((int.TryParse(col.Width?.Value, out var width) ? width : 1) * (double)plan.ContentWidthTwips / Math.Max(sum, 1))).ToString(CultureInfo.InvariantCulture);
         }
-        var rowIndex = 0;
         foreach (var row in table.Elements<TableRow>())
         {
             row.TableRowProperties ??= new TableRowProperties();
             row.TableRowProperties.RemoveAllChildren<TableRowHeight>();
-            row.TableRowProperties.RemoveAllChildren<CantSplit>();
-            row.TableRowProperties.Append(new CantSplit());
-            if (rowIndex++ == 0) { row.TableRowProperties.RemoveAllChildren<TableHeader>(); row.TableRowProperties.Append(new TableHeader()); }
             foreach (var cell in row.Elements<TableCell>())
             {
-                cell.TableCellProperties?.RemoveAllChildren<Shading>();
                 foreach (var p in cell.Descendants<Paragraph>()) ApplyRole(p, "table", plan);
             }
         }
@@ -473,14 +507,21 @@ public static class OpenXmlTemplateApplicator
     {
         var headings = body.Elements<Paragraph>().Where(p =>
         {
+            if (string.IsNullOrWhiteSpace(string.Concat(p.Descendants<Text>().Select(t => t.Text)))) return false;
             var role = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value?.Replace("Thesis_", "", StringComparison.Ordinal);
             return role is not null && plan.Roles.TryGetValue(role, out var f) && f.OutlineLevel is >= 0 and <= 2;
         }).ToList();
+        var nextBookmarkId = body.Descendants<BookmarkStart>().Select(b => long.TryParse(b.Id?.Value, out var n) ? n : 0).DefaultIfEmpty(9999).Max() + 1;
         for (var i = 0; i < headings.Count; i++)
         {
-            var p = headings[i]; var id = (10000 + i).ToString(CultureInfo.InvariantCulture);
-            p.InsertAfter(new BookmarkStart { Id = id, Name = "thesis_heading_" + i }, p.ParagraphProperties!);
-            p.Append(new BookmarkEnd { Id = id }); report.Headings.Add(p.InnerText);
+            var p = headings[i]; var id = (nextBookmarkId + i * 2).ToString(CultureInfo.InvariantCulture);
+            var headingStart = new BookmarkStart { Id = id, Name = "thesis_heading_" + i };
+            p.InsertAfter(headingStart, p.ParagraphProperties!);
+            var targetId = (nextBookmarkId + i * 2 + 1).ToString(CultureInfo.InvariantCulture);
+            p.InsertAfter(new BookmarkStart { Id = targetId, Name = "thesis_target_" + i }, headingStart);
+            p.Append(new BookmarkEnd { Id = targetId });
+            p.Append(new BookmarkEnd { Id = id });
+            report.Headings.Add(p.InnerText);
         }
         foreach (var marker in markers)
         {
@@ -494,12 +535,14 @@ public static class OpenXmlTemplateApplicator
                 var p = CreateParagraph(heading.InnerText, role, plan);
                 p.ParagraphProperties!.Tabs = new Tabs(new TabStop { Val = TabStopValues.Right, Leader = TabStopLeaderCharValues.Dot, Position = plan.ContentWidthTwips });
                 p.Append(new Run(new TabChar()));
-                var value = plan.TocPages.GetValueOrDefault(heading.InnerText, "0");
+                var value = plan.TocPages.GetValueOrDefault("thesis_heading_" + i, plan.TocPages.GetValueOrDefault(heading.InnerText, "0"));
                 var pageFormat = new TemplateRoleFormat { SizeHalfPoints = 24 };
                 foreach (var run in FieldRuns($" PAGEREF thesis_heading_{i} \\h ", value, pageFormat)) p.Append(run);
                 if (i == 0)
                 {
-                    var preamble = new[] { new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }), new Run(new FieldCode(" TOC \\o \"1-3\" \\h \\z \\u ") { Space = SpaceProcessingModeValues.Preserve }), new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }) };
+                    var tocStyles = string.Join(",", plan.Roles.Where(r => r.Value.OutlineLevel is >= 0 and <= 2)
+                        .OrderBy(r => r.Value.OutlineLevel).ThenBy(r => r.Key, StringComparer.Ordinal).Select(r => $"Thesis_{r.Key},{r.Value.OutlineLevel + 1}"));
+                    var preamble = new[] { new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }), new Run(new FieldCode($" TOC \\t \"{tocStyles}\" \\h \\z ") { Space = SpaceProcessingModeValues.Preserve }), new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }) };
                     foreach (var run in preamble.Reverse()) p.InsertAfter(run, p.ParagraphProperties!);
                 }
                 if (i == headings.Count - 1) p.Append(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
@@ -515,17 +558,37 @@ public static class OpenXmlTemplateApplicator
         }
     }
 
-    private static void NormalizeDrawingIdsAndSizes(Body body, int contentWidth)
+    private static void NormalizeDrawingIdsAndSizes(OpenXmlElement body, int contentWidth, int contentHeight = int.MaxValue)
     {
-        uint id = 1; var maxWidth = contentWidth * 635L;
+        uint id = 1; var maxWidth = contentWidth > 0 ? contentWidth * 635L : long.MaxValue;
         foreach (var property in body.Descendants<DW.DocProperties>()) property.Id = id++;
         foreach (var drawing in body.Descendants<Drawing>())
         {
             var extent = drawing.Descendants<DW.Extent>().FirstOrDefault();
-            if (extent?.Cx?.Value is not long width || width <= maxWidth || extent.Cy?.Value is not long height) continue;
-            var newHeight = (long)Math.Round(height * (double)maxWidth / width);
-            extent.Cx = maxWidth; extent.Cy = newHeight;
-            foreach (var x in drawing.Descendants<A.Extents>()) { x.Cx = maxWidth; x.Cy = newHeight; }
+            if (extent?.Cx?.Value is not long width || extent.Cy?.Value is not long height || width <= 0 || height <= 0) continue;
+            var scale = Math.Min(1, Math.Min((double)maxWidth / width, contentHeight * 635.0 / height));
+            if (scale >= 1) continue;
+            var newWidth = Math.Max(1, (long)Math.Floor(width * scale));
+            var newHeight = Math.Max(1, (long)Math.Floor(height * scale));
+            extent.Cx = newWidth; extent.Cy = newHeight;
+            foreach (var x in drawing.Descendants<A.Extents>()) { x.Cx = newWidth; x.Cy = newHeight; }
+        }
+        if (contentWidth <= 0) return;
+        foreach (var shape in body.Descendants().Where(e => e.LocalName == "shape" && e.NamespaceUri == "urn:schemas-microsoft-com:vml"))
+        {
+            var style = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style");
+            if (style.Value is null) continue;
+            var widthMatch = Regex.Match(style.Value, @"(?:^|;)\s*width:([\d.]+)pt", RegexOptions.IgnoreCase);
+            var heightMatch = Regex.Match(style.Value, @"(?:^|;)\s*height:([\d.]+)pt", RegexOptions.IgnoreCase);
+            if (!widthMatch.Success || !heightMatch.Success) continue;
+            var width = double.Parse(widthMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+            var height = double.Parse(heightMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+            var limit = contentWidth / 20.0;
+            var scale = Math.Min(1, Math.Min(limit / width, contentHeight / 20.0 / height));
+            if (scale >= 1) continue;
+            var value = Regex.Replace(style.Value, @"\bwidth:[\d.]+pt", "width:" + (width * scale).ToString("0.###", CultureInfo.InvariantCulture) + "pt", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\bheight:[\d.]+pt", "height:" + (height * scale).ToString("0.###", CultureInfo.InvariantCulture) + "pt", RegexOptions.IgnoreCase);
+            shape.SetAttribute(new OpenXmlAttribute(style.Prefix, style.LocalName, style.NamespaceUri, value));
         }
     }
 }

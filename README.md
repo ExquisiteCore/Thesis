@@ -44,10 +44,34 @@ GitHub Actions 会在两种情况下自动编译二进制包：
 
 ```powershell
 .\Thesis.Cli.exe operations list
-.\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
+.\Thesis.Cli.exe compose --template "模板.docx" --content ".analysis\content.json" --out ".analysis\candidate.docx" --report ".analysis\candidate.json" --render-config render.json --pdf ".analysis\candidate.pdf" --workdir ".analysis\run" --require-ready false
 ```
 
 ## 已有初稿套入模板
+
+统一入口是 `compose`：DOCX 初稿和 `content.json` 都进入 `Thesis.Application` 的同一套版、渲染、验收及事务输出服务。`apply-template` 使用同一服务，默认允许输出待审候选稿；`compose` 默认要求交付门禁通过。旧 `finalize-all` 的 Profile/参考稿模式保留兼容，COM 最终化共用同一服务；带 `--plan` 时转入统一套版链路。
+
+学校正式模板和学长的合格论文均可作为版式样本。先分析区域，再生成映射草案；样式按实际段落格式与继承关系提取，支持数字和自定义样式 ID。草案中的 `pendingReviews` 必须逐项处理，尤其是封面个人信息、区域边界、节页码起始值和学校内容要求。算法建议不等于已审核模板。
+
+```text
+CLI 参数适配
+  → Thesis.Application：内容准备、统一套版、渲染收敛、交付审核
+    → Thesis.OpenXml：模板分析、格式与原生对象迁移、结构和内容校验
+    → IDocumentLayoutEngine：WPS / Word / LibreOffice
+      → Thesis.Host：进程隔离、超时、COM 自动化
+    → Thesis.Core：文件事务和输出互斥
+  ↔ Thesis.Schema：输入计划、配置、报告
+```
+
+草案区分中英文摘要、章标题、结论、参考文献和致谢，按常见格式样本取样，并识别“第%1章”等自动编号。模板前置页的内部节边界单独保留；正文按章节映射模板节，页眉 STYLEREF 同步到迁移后的标题样式。区域独立起页属于草案策略，仍须对照学校样例审核。
+
+目录仅收录本次迁移的语义标题，避免封面自带的大纲级别混入目录。封面文本框保留，身份信息可通过显式文字替换更新。
+
+```powershell
+.\Thesis.Cli.exe document-convert --doc accepted.doc --out accepted.docx --host wps
+.\Thesis.Cli.exe template-plan analyze --template accepted.docx --out .analysis/template-analysis.json
+.\Thesis.Cli.exe template-plan draft --doc source.docx --template accepted.docx --out .analysis/draft-plan.json
+```
 
 `apply-template` 按经过审阅的方案迁移原生 DOCX 段落、表格和图片，并保留模板的封面、声明及节设置。方案记录章节重组、格式和明确的文字修订。
 
@@ -56,6 +80,8 @@ GitHub Actions 会在两种情况下自动编译二进制包：
 .\Thesis.Cli.exe template-plan bind --doc source.docx --template template.docx --plan reviewed-plan.json --out bound-plan.json
 .\Thesis.Cli.exe apply-template --doc source.docx --template template.docx --plan bound-plan.json --out final.docx --report final.json
 ```
+
+结构化文本使用 `compose --content content.json --template template.docx --project-rules project-rules.json ...`；未传 `--plan` 时自动生成待审草案。调试候选稿可显式使用 `--require-ready false`，并用 `--workdir .analysis/run` 保留草案和失败现场。
 
 `inspect` 输出原稿块清单、内容预览、指纹、遗漏范围与需迁移的特性；`bind` 固定原稿和模板的 SHA-256。输入文件变动后应重新审阅方案再绑定。
 
@@ -81,9 +107,21 @@ GitHub Actions 会在两种情况下自动编译二进制包：
 
 `sourceTextReplacements` 和 `templateTextReplacements` 记录文字替换；`contentWidthTwips` 控制图表和目录宽度；`normalizePageFooters` 将包含 PAGE 域的浮动页脚转为居中普通段落。图片路径以方案文件所在目录为基准。
 
+角色可用 `templateParagraphIndex` 指向模板正文直接子段落，复用其生效格式；`preserveEmphasis` 控制行内加粗、斜体和下划线，默认保留。`templateTableIndex` 指定模板表格样本；图表宽高限制按各自节的可用区域计算，保留合并单元格。节的分栏、方向和分节类型默认沿用模板，`columnCount`、`sectionBreakType` 可显式覆盖。
+
+范围块的 `pageBreakBefore:true` 使首段另起一页；节块的 `continuePageNumbering:true` 清除克隆节中的页码重置值，适用于复用同一章版式。两者都应在草案审阅时确认。
+
+`requirements` 声明带模板依据的内容门禁，支持 `keywords`、`sectionCharacters`、`journalReferences` 和 `requiredText`。例如：
+
+```json
+{"id":"conclusion-length","kind":"sectionCharacters","startAnchor":"结论","endAnchor":"参考文献","minimum":700,"evidence":"学校模板：结论不少于700字"}
+```
+
+关键词按分号、逗号或顿号分隔；字数按去空白后的字符数统计；期刊条目按 `[J]`/`[J/OL]` 标记计数。条目计数不验证文献真实性。缺失、重复的要求锚点会产生失败结果。
+
 ### 渲染与分页验收
 
-安装 LibreOffice，并准备包含 PyMuPDF 的 Python 环境：
+推荐选择最终阅读环境的 WPS/Office 完成更新、保存和 PDF 导出；也保留 LibreOffice 引擎。准备包含 PyMuPDF 的 Python 环境：
 
 ```powershell
 uv venv .venv
@@ -94,24 +132,32 @@ uv pip install --python .venv/Scripts/python.exe PyMuPDF==2.0
 
 ```json
 {
-  "libreOfficePath": "C:/Program Files/LibreOffice/program/soffice.com",
+  "engine": "wps",
   "pythonPath": ".venv/Scripts/python.exe",
   "timeoutSeconds": 120,
   "maxPasses": 4
 }
 ```
 
+`engine` 支持 `wps`、`word`、`auto` 和 `libreoffice`。选择 LibreOffice 时另设 `libreOfficePath`。Office COM 通过 STA 工作进程运行，受 `timeoutSeconds` 限制；同一个引擎完成 DOCX 最终化和 PDF 导出。`doctor --render-config render.json` 检查基础依赖。WPS 目录刷新可能重建目录引用书签，因此页码验证使用独立目标书签，并对照 PDF 的真实页面。
+
 ```powershell
 .\Thesis.Cli.exe apply-template --doc source.docx --template template.docx --plan bound-plan.json --out final.docx --report final.json --render-config render.json --pdf final.pdf --workdir render-evidence
 ```
 
-生成后执行 Open XML 结构校验与逐节可用宽度检查，再读取 PDF 的真实页数、标题位置、页码和越界文字/图片。目录缓存变化时重新生成并渲染，直到缓存和页数稳定。DOCX、PDF、报告经过暂存和失败回滚后共同提交，失败时保留原有输出。`--workdir` 保留各轮渲染证据。
+生成后执行 Open XML 结构校验与逐节可用宽度检查，再读取 PDF 的真实页数、标题位置、页码和越界文字/图片。目录缓存变化时重新生成并渲染，直到缓存和页数稳定。DOCX、PDF、报告使用输出互斥、暂存和失败回滚；检查通过后统一提升，失败时保留原有输出。COM 任务跨进程串行执行，完成后保留用户已打开的文档。`--workdir` 保留各轮渲染证据。
 
-报告分别给出 `assemblyPassed`、`structurePassed`、`layoutExecuted`、`layoutPassed` 和 `planReviewPassed`。`ready` 要求这些自动检查通过、输入指纹固定且全部原稿块有去向；未配置渲染时 `ready:false`。字体、公式、跨页表格、图题位置和学术内容的人工复核事项列在 `manualReviewItems`。
+报告分别给出 `assemblyPassed`、`structurePassed`、`contentPassed`、`layoutExecuted`、`layoutPassed`、`planReviewPassed` 和 `automatedChecksPassed`。`ready` 还要求 `pendingReviews` 已处理；未渲染、未绑定方案或存在待审事项时保持 false。字体、公式、跨页表格、图题位置和学术内容列为复核事项。渲染成功不等于学术内容或全部视觉细节已验收。
 
-有序内容抽取保存带指纹的原稿快照，并保留段落、图表及行内内容顺序；旧 `paragraphs`、`sections`、`tables` JSON 仍可读取。普通书签会重新分配 ID 和名称；脚注尾注、自动编号、复杂交叉引用、跨块书签、OLE 和 altChunk 需要专门迁移映射。
+完成候选稿复核后，`delivery-review` 校验该份 DOCX、PDF、报告的 SHA-256，并要求 `review.json` 的 `completedChecks` 覆盖报告中全部 `pendingReviews`。审核记录包含 `documentSha256`、`pdfSha256`、`reportSha256`、`reviewer`、`completedChecks`、`notes`，然后原子提升这份已检查的候选稿，避免审核后重排产生新版本。
 
-## 推荐终稿链路
+```powershell
+.\Thesis.Cli.exe delivery-review --doc candidate.docx --pdf candidate.pdf --report candidate.json --review review.json --out final.docx --out-pdf final.pdf --out-report final.json
+```
+
+有序内容抽取保存带指纹的原稿快照，并保留段落、图表及行内内容顺序；旧 `paragraphs`、`sections`、`tables` JSON 仍可读取。原生迁移统一处理书签、内部链接、跨块交叉引用、自动编号及带预览的嵌入对象。脚注尾注、图片项目符号、无预览嵌入对象及 altChunk 仍需专门适配，预检会报告。正文文本在 Office 最终化前后做一致性校验，域的缓存结果允许更新。
+
+## 兼容 Profile 链路
 
 ```text
 模板/成品论文.docx
@@ -454,4 +500,4 @@ node --test profile-viewer/profile-viewer.test.mjs
 uv run --python .venv/Scripts/python.exe python -m unittest discover -s tests/layout -v
 ```
 
-GitHub Actions 检查 Windows/Linux 构建与测试、profile viewer 和 PDF 审计脚本。源文档、成品、分析报告、截图、环境和构建产物保留本地；测试使用运行时生成的最小样例。
+GitHub Actions 检查 Windows/Linux 构建与测试、profile viewer、PDF 审计脚本，以及真实 LibreOffice 套版导出集成测试；失败产物上传用于排查。WPS/Word 集成测试可在安装 Office 的 Windows 环境执行：`python tests/integration/test_compose.py --cli src/Thesis.Cli/bin/Release/net10.0/Thesis.Cli.dll --engine wps`。源文档、成品、分析报告、截图、环境和构建产物保留本地；测试使用运行时生成的最小样例。
