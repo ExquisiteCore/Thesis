@@ -1,5 +1,6 @@
 # Local analysis and source samples requested by the user
 .analysis/
+cheshi/
 docs/
 lizi/
 .thesis/
@@ -19,3 +20,23 @@ TestResults/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Local language tooling
+.serena/
+__pycache__/
+*.pyc
+
+# Local environments and generated artifacts
+.venv/
+.env
+.env.*
+!.env.example
+artifacts/
+render-evidence/
+/*.docx
+/*.pdf
+/render.json
+*.docx.assets/
+*.stage-*
+*.previous
+*.bak

@@ -1,28 +1,18 @@
+using Xunit;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 internal static partial class Program
 {
-    private static void Main()
-    {
-        var failures = new List<string>();
-        foreach (var (name, test) in Tests)
-        {
-            try
-            {
-                test();
-                Console.WriteLine($"PASS {name}");
-            }
-            catch (Exception ex)
-            {
-                failures.Add($"{name}: {ex.Message}");
-                Console.WriteLine($"FAIL {name}");
-                Console.WriteLine(ex);
-            }
-        }
+    internal static IEnumerable<object[]> CaseNames => Tests.Select(t => new object[] { t.Name });
+    internal static void RunCase(string name) => Tests.Single(t => t.Name == name).Test();
+}
 
-        if (failures.Count > 0)
-        {
-            Console.WriteLine();
-            Console.WriteLine($"{failures.Count} test(s) failed.");
-            Environment.Exit(1);
-        }
-    }
+public sealed class RegressionTests
+{
+    public static IEnumerable<object[]> Cases => Program.CaseNames;
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public void Regression(string name) => Program.RunCase(name);
 }

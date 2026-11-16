@@ -582,7 +582,7 @@ internal static partial class Program
 
         AssertEqual(1, exitCode);
         AssertEqual("error", result.Status);
-        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "host_application_unavailable"));
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == (OperatingSystem.IsWindows() ? "host_application_unavailable" : "host_application_unsupported_os")));
         AssertEqual(false, File.Exists(output));
         AssertEqual(true, File.Exists(Path.Combine(workdir, "assembled.docx")));
         AssertEqual(true, File.Exists(Path.Combine(workdir, "validate-before-finalize.json")));

@@ -35,7 +35,7 @@ jobs:
         run: dotnet build $env:SOLUTION --configuration Release --no-restore
 
       - name: Test
-        run: dotnet run --project $env:TEST_PROJECT --configuration Release --no-build
+        run: dotnet test $env:TEST_PROJECT --configuration Release --no-build --logger "trx;LogFileName=tests.trx" --collect "XPlat Code Coverage"
 
   publish:
     name: publish ${{ matrix.rid }}

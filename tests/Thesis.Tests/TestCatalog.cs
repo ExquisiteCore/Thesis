@@ -2,6 +2,20 @@ internal static partial class Program
 {
     private static readonly (string Name, Action Test)[] Tests =
     [
+        ("Template application preserves native blocks and inherited headers", TemplateApplicationPreservesNativeBlocksAndInheritedHeaders),
+        ("Template application failure preserves existing output", TemplateApplicationFailurePreservesExistingOutput),
+        ("Template application TOC retains section and page caches", TemplateApplicationTocRetainsSectionAndPageCaches),
+        ("Output transaction keeps existing file when staging is incomplete", OutputTransactionKeepsExistingFileWhenStagingIsIncomplete),
+        ("Template preflight rejects changed fingerprint", TemplatePreflightRejectsChangedFingerprint),
+        ("Ordered content roundtrip preserves mixed blocks and relative assets", OrderedContentRoundtripPreservesMixedBlocksAndRelativeAssets),
+        ("Legacy chapter blocks retain separately supplied sections", LegacyChapterBlocksRetainSeparatelySuppliedSections),
+        ("Template preflight validates coverage and unique anchors", TemplatePreflightValidatesCoverageAndUniqueAnchors),
+        ("Finalize host failure preserves previous deliverable", FinalizeHostFailurePreservesPreviousDeliverable),
+        ("Output transaction rolls back an earlier promotion", OutputTransactionRollsBackAnEarlierPromotion),
+        ("Apply template report failure preserves deliverable", ApplyTemplateReportFailurePreservesDeliverable),
+        ("Content extraction skips institution on unlabelled cover", ContentExtractionSkipsInstitutionOnUnlabelledCover),
+        ("Structure audit respects cover and body section widths", StructureAuditRespectsCoverAndBodySectionWidths),
+        ("Unsupported native references are reported before generation", UnsupportedNativeReferencesAreReportedBeforeGeneration),
         ("JSON roundtrip uses camelCase and enum strings", JsonRoundtripUsesCamelCaseAndEnumStrings),
         ("Template profile rules serialize as camelCase JSON", TemplateProfileRulesSerializeAsCamelCaseJson),
         ("Final audit models serialize as camelCase JSON", FinalAuditModelsSerializeAsCamelCaseJson),

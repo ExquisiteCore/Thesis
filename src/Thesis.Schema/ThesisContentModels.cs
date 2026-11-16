@@ -27,6 +27,7 @@ public sealed class ThesisContent
 
 public sealed class ThesisChapterContent
 {
+    public bool OrderedContentIncludesSections { get; set; }
     public string Title { get; set; } = "";
 
     public List<string> Paragraphs { get; set; } = [];
@@ -66,6 +67,12 @@ public sealed class ThesisContentBlock
     public int? HeightEmu { get; set; }
 
     public ThesisTableContent? Table { get; set; }
+
+    /// <summary>Fingerprint-pinned source for a native block, resolved relative to content.json.</summary>
+    public string? SourcePath { get; set; }
+    public string? SourceSha256 { get; set; }
+    public int? SourceBodyElementIndex { get; set; }
+    public string? Role { get; set; }
 }
 
 public sealed class ThesisTableContent

@@ -38,6 +38,7 @@ public sealed class ContentExtractSummary
     public int SectionCount { get; set; }
 
     public int RequirementHintCount { get; set; }
+    public int OrderedBlockCount { get; set; }
 }
 
 public sealed class ContentExtractFinding

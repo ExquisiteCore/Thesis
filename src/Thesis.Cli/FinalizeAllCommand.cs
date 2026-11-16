@@ -1,3 +1,4 @@
+using Thesis.Core;
 using Thesis.Host;
 using Thesis.OpenXml;
 using Thesis.Profile;
@@ -157,6 +158,8 @@ internal static class FinalizeAllCommand
 
         NormalizeProjectRules(projectRules);
         NormalizeContent(content);
+        ContentPaths.Resolve(content, fullContentPath);
+        ContentPaths.ProtectAssets(content, fullOutputPath);
         var finalRules = ProjectRulesMerger.Merge(profile, projectRules);
         File.WriteAllText(finalRulesPath, ThesisJson.Serialize(finalRules));
 
@@ -479,7 +482,20 @@ internal static class FinalizeAllCommand
 
         try
         {
-            File.Copy(candidatePath, fullOutputPath, overwrite: true);
+            using var transaction = new FileOutputTransaction();
+            var stagedOutput = transaction.Stage(fullOutputPath);
+            File.Copy(candidatePath, stagedOutput, overwrite: true);
+            if (hostReport is not null)
+            {
+                hostReport.Document = fullOutputPath;
+                File.WriteAllText(transaction.Stage(hostFinalizationPath), ThesisJson.Serialize(hostReport));
+            }
+            if (rehearsal is not null)
+            {
+                rehearsal.CandidateDocument = fullOutputPath;
+                File.WriteAllText(transaction.Stage(rehearsalPath), ThesisJson.Serialize(rehearsal));
+            }
+            transaction.Commit();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -501,18 +517,6 @@ internal static class FinalizeAllCommand
                     }
                 ]
             };
-        }
-
-        if (hostReport is not null)
-        {
-            hostReport.Document = fullOutputPath;
-            File.WriteAllText(hostFinalizationPath, ThesisJson.Serialize(hostReport));
-        }
-
-        if (rehearsal is not null)
-        {
-            rehearsal.CandidateDocument = fullOutputPath;
-            File.WriteAllText(rehearsalPath, ThesisJson.Serialize(rehearsal));
         }
 
         return new CliResult
@@ -732,35 +736,7 @@ internal static class FinalizeAllCommand
         rules.Diagnostics ??= [];
     }
 
-    private static void NormalizeContent(ThesisContent content)
-    {
-        content.KeywordsZh ??= [];
-        content.KeywordsEn ??= [];
-        content.Chapters ??= [];
-        content.References ??= [];
-        foreach (var chapter in content.Chapters)
-        {
-            chapter.Paragraphs ??= [];
-            chapter.Sections ??= [];
-            chapter.Tables ??= [];
-            foreach (var section in chapter.Sections)
-            {
-                section.Paragraphs ??= [];
-                section.Tables ??= [];
-                foreach (var table in section.Tables)
-                {
-                    table.Headers ??= [];
-                    table.Rows ??= [];
-                }
-            }
-
-            foreach (var table in chapter.Tables)
-            {
-                table.Headers ??= [];
-                table.Rows ??= [];
-            }
-        }
-    }
+    private static void NormalizeContent(ThesisContent content) => ContentNormalizer.Normalize(content);
 
     private static void DeleteIfExists(string path)
     {

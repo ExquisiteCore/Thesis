@@ -6,7 +6,7 @@
 
 ```powershell
 dotnet build ThesisTool.slnx
-dotnet run --project tests\Thesis.Tests\Thesis.Tests.csproj
+dotnet test tests\Thesis.Tests\Thesis.Tests.csproj
 ```
 
 构建后的 CLI：
@@ -46,6 +46,70 @@ GitHub Actions 会在两种情况下自动编译二进制包：
 .\Thesis.Cli.exe operations list
 .\Thesis.Cli.exe finalize-all --template "模板.docx" --content ".analysis\content.json" --project-rules ".analysis\project-rules.json" --reference "成品论文.docx" --out ".analysis\final.docx" --workdir ".analysis\final-run"
 ```
+
+## 已有初稿套入模板
+
+`apply-template` 按经过审阅的方案迁移原生 DOCX 段落、表格和图片，并保留模板的封面、声明及节设置。方案记录章节重组、格式和明确的文字修订。
+
+```powershell
+.\Thesis.Cli.exe template-plan inspect --doc source.docx --template template.docx --plan reviewed-plan.json --out inspection.json
+.\Thesis.Cli.exe template-plan bind --doc source.docx --template template.docx --plan reviewed-plan.json --out bound-plan.json
+.\Thesis.Cli.exe apply-template --doc source.docx --template template.docx --plan bound-plan.json --out final.docx --report final.json
+```
+
+`inspect` 输出原稿块清单、内容预览、指纹、遗漏范围与需迁移的特性；`bind` 固定原稿和模板的 SHA-256。输入文件变动后应重新审阅方案再绑定。
+
+### 套版方案
+
+`schemaVersion` 为 `1.0`。`roles` 定义语义角色的字体、半磅字号、行段间距、缩进、大纲级别与分页策略。`blocks` 按最终阅读顺序排列，索引对应 `word/document.xml` 中 `w:body` 的直接子元素，范围为零基、左闭右开：
+
+| type | 用途 |
+| --- | --- |
+| `templateRange` | 保留模板 `[start,end)`；`paragraphTexts` 按元素索引替换段落，`cellTexts` 按零基 `行,列` 填表格 |
+| `sourceRange` | 迁移原稿 `[start,end)`，保留原生内容及包关系；重复复制同一元素会报错 |
+| `paragraph` | 按 `text`、`role` 生成段落，正文 `[n]` 转为上标引文 |
+| `table` | 用 `rows` 和 `columnWidths`（twips）生成表格 |
+| `image` | 用 `imagePath`、`imageWidthEmu`、`imageHeightEmu` 嵌入图片，`text` 用作替代说明 |
+| `toc` | 生成目录域、标题书签与页码缓存 |
+| `section` | 克隆 `sectionTemplateIndex` 指定的模板节，设置页码格式和起始值；唯一 `finalSection:true` 位于方案末尾 |
+
+范围可使用唯一完整文本 `startAnchor`、`endAnchor` 定位，零匹配或多个匹配均会报错。`requireSourceCoverage:true` 要求每个非节属性原稿块被复制，或写入带 `reason` 的 `skippedSourceRanges`。例如：
+
+```json
+{"start":0,"end":4,"reason":"封面由目标模板替换"}
+```
+
+`sourceTextReplacements` 和 `templateTextReplacements` 记录文字替换；`contentWidthTwips` 控制图表和目录宽度；`normalizePageFooters` 将包含 PAGE 域的浮动页脚转为居中普通段落。图片路径以方案文件所在目录为基准。
+
+### 渲染与分页验收
+
+安装 LibreOffice，并准备包含 PyMuPDF 的 Python 环境：
+
+```powershell
+uv venv .venv
+uv pip install --python .venv/Scripts/python.exe PyMuPDF==2.0
+```
+
+把以下配置保存为项目根目录的 `render.json`，按本机安装位置填写可执行文件路径；相对路径以配置文件所在目录解析：
+
+```json
+{
+  "libreOfficePath": "C:/Program Files/LibreOffice/program/soffice.com",
+  "pythonPath": ".venv/Scripts/python.exe",
+  "timeoutSeconds": 120,
+  "maxPasses": 4
+}
+```
+
+```powershell
+.\Thesis.Cli.exe apply-template --doc source.docx --template template.docx --plan bound-plan.json --out final.docx --report final.json --render-config render.json --pdf final.pdf --workdir render-evidence
+```
+
+生成后执行 Open XML 结构校验与逐节可用宽度检查，再读取 PDF 的真实页数、标题位置、页码和越界文字/图片。目录缓存变化时重新生成并渲染，直到缓存和页数稳定。DOCX、PDF、报告经过暂存和失败回滚后共同提交，失败时保留原有输出。`--workdir` 保留各轮渲染证据。
+
+报告分别给出 `assemblyPassed`、`structurePassed`、`layoutExecuted`、`layoutPassed` 和 `planReviewPassed`。`ready` 要求这些自动检查通过、输入指纹固定且全部原稿块有去向；未配置渲染时 `ready:false`。字体、公式、跨页表格、图题位置和学术内容的人工复核事项列在 `manualReviewItems`。
+
+有序内容抽取保存带指纹的原稿快照，并保留段落、图表及行内内容顺序；旧 `paragraphs`、`sections`、`tables` JSON 仍可读取。普通书签会重新分配 ID 和名称；脚注尾注、自动编号、复杂交叉引用、跨块书签、OLE 和 altChunk 需要专门迁移映射。
 
 ## 推荐终稿链路
 
@@ -364,29 +428,13 @@ profile-viewer/index.html
 
 可拖入 `profile.json`、`project-rules.json` 或 `final-rules.json`，本地查看规则概览和原始 JSON。
 
-## 当前能力和精细检查结论
+## 能力范围
 
-当前项目已经不是只能写样例的玩具，能作为论文 DOCX 自动化的工程核心使用：
-
-- 能从模板/成品论文提取 `profile.json`，包括页面、段落格式、表格、节、页眉页脚、图片关系、目录/字段和结构门禁。
-- 能用 `project-rules.json` 覆盖或扩展 profile，单次 `request.json` 的优先级最高。
-- 能在模板副本上装配 `content.json`，支持段落、图片 block、表格 block、参考文献、致谢和 `--front-matter-doc` 前置材料。
-- 能用 `finalize-all` 串起提取、合并、装配、WPS/Word 最终化、二次校验、参考稿对比和最终审计。
-- 能在审计不通过时保留 `candidate.docx` 和修复计划，避免覆盖旧终稿。
-
-对 `lizi/` 的精细检查结果：
-
-- `lizi/out/论文合并版.md` 可作为正文结构来源，包含中英文摘要、5 章正文、30 条参考文献、1 个 Markdown 表格和 4 张 PNG 图；但需要转成带 `image` block 的 `content.json` 才能无损带图装配。
-- `lizi/out/李同林任务书.docx` 和 `lizi/out/开题报告1修改版(2).docx` 适合通过 `--front-matter-doc` 合入。检查产物显示关键任务书文字、开题报告标题/章节、正文五章和 5 张预期图片可以进入候选稿。
-- 早期候选稿和正确稿高精度对比发现过阻塞差异：分节 2 vs 11、页眉页脚数量不一致、候选稿误用 `Heading1/Heading2`、图片关系路径不一致、TC 字段策略不同。后续已把这些改成通用 profile gate，不再硬编码“开题报告”或默认禁止 Heading/TC。
-- 最新验证能提取真实成品 profile，并能用通用门禁挡住结构明显不合格的候选稿，例如节数、页眉页脚拓扑、数字样式、图片关系、TOC/TC 字段策略等。
-
-仍然不能宣称“全自动终稿机”：
-
-- 内容质量、论证质量和学术表达不由 CLI 保证。
-- 真实分页、目录页码、跨页表格、续表标题、孤行标题仍必须经过 WPS/Word 和人工抽查。
-- 前置材料 DOCX 的复杂节、页眉页脚、OLE/公式、异常图片关系仍是 P1 风险区；`final-audit.ready=true` 是交付门槛，不是省略人工终审的理由。
-- 图片关系归一化已有测试覆盖常见路径，但对重复 basename、跨 part 共享图片、非标准相对路径和特殊 `[Content_Types].xml` 的边界还需要继续加压测。
+- 提取模板画像，合并项目规则，并在模板副本中装配正文和前置材料。
+- 保留原生图片、表格、行内对象与普通书签，检查文档包、节、字段及样式规则。
+- `finalize-all` 支持 Windows Word/WPS COM 最终化、参考稿对比和审计；COM 路径仅适用于 Windows。
+- `apply-template` 支持离线 LibreOffice 渲染、目录页码回填与版面检查；分页受字体和渲染器版本影响。
+- 内容质量、论证、参考文献真实性和细节排版仍需人工复核。
 
 ## Skill 目录
 
@@ -397,3 +445,13 @@ Thesis/thesis-docx/SKILL.md
 ```
 
 技能名称只能包含小写字母、数字和连字符。正确示例：`thesis-docx`。不要使用大写字母、下划线、空格或中文技能名。
+
+## 开发检查
+
+```powershell
+dotnet test tests/Thesis.Tests --configuration Release --collect "XPlat Code Coverage"
+node --test profile-viewer/profile-viewer.test.mjs
+uv run --python .venv/Scripts/python.exe python -m unittest discover -s tests/layout -v
+```
+
+GitHub Actions 检查 Windows/Linux 构建与测试、profile viewer 和 PDF 审计脚本。源文档、成品、分析报告、截图、环境和构建产物保留本地；测试使用运行时生成的最小样例。

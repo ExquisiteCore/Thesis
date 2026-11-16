@@ -1,8 +1,13 @@
+using static Thesis.Cli.ProfileCommands;
+using static Thesis.Cli.CliInputReader;
+using static Thesis.Cli.CliCommandSupport;
+using static Thesis.Cli.DocumentBuildCommands;
 using Thesis.Schema;
 using Thesis.Session;
 using Thesis.OpenXml;
 using Thesis.Profile;
 using Thesis.Host;
+using Thesis.Core;
 
 namespace Thesis.Cli;
 
@@ -53,6 +58,8 @@ public static class ThesisCli
             return Help(FinalizeAllUsage());
         }
 
+        if (args is ["template-plan", .. var planArgs]) return TemplatePlanCommand.Execute(planArgs);
+
         if (args is ["session", "init", .. var initArgs])
         {
             var doc = RequiredOption(initArgs, "--doc");
@@ -78,6 +85,11 @@ public static class ThesisCli
         if (args is ["apply", .. var applyArgs])
         {
             return ApplyOneShot(applyArgs);
+        }
+
+        if (args is ["apply-template", .. var templateArgs])
+        {
+            return ApplyTemplateCommand.Execute(templateArgs);
         }
 
         if (args is ["snapshot", .. var snapshotArgs])
@@ -416,164 +428,7 @@ public static class ThesisCli
         };
     }
 
-    private static CliResult GenerateDocument(string[] args)
-    {
-        var contentPath = RequiredOption(args, "--content");
-        var rulesPath = RequiredOption(args, "--rules");
-        var outputPath = RequiredOption(args, "--out");
-        var fullOutputPath = Path.GetFullPath(outputPath);
-        var parent = Path.GetDirectoryName(fullOutputPath);
-        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
-        {
-            return Error("generate_output_directory_missing", $"Generate output directory not found: {parent}");
-        }
 
-        if (SamePath(fullOutputPath, contentPath) || SamePath(fullOutputPath, rulesPath))
-        {
-            return Error("generate_output_refused", "Generate output path must not overwrite input JSON files.");
-        }
-
-        if (!TryReadContent(contentPath, out var content, out var contentError))
-        {
-            return contentError!;
-        }
-
-        if (!TryReadProfile(rulesPath, out var rules, out var rulesError))
-        {
-            return rulesError!;
-        }
-
-        NormalizeContent(content!);
-        NormalizeProfile(rules!);
-
-        var tempPath = Path.Combine(parent, Path.GetFileName(fullOutputPath) + "." + Guid.NewGuid().ToString("N") + ".tmp.docx");
-        try
-        {
-            ThesisDocumentGenerator.Generate(content!, rules!, tempPath);
-            File.Move(tempPath, fullOutputPath, overwrite: true);
-            return new CliResult
-            {
-                Status = "success",
-                OutputPath = fullOutputPath,
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "info",
-                        Code = "thesis_generated",
-                        Message = "Thesis content JSON was generated into a DOCX document.",
-                        Path = fullOutputPath
-                    }
-                ]
-            };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            return new CliResult
-            {
-                Status = "error",
-                OutputPath = fullOutputPath,
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "generate_failed",
-                        Message = $"Generate failed: {ex.Message}",
-                        Path = fullOutputPath
-                    }
-                ]
-            };
-        }
-        finally
-        {
-            DeleteIfExists(tempPath);
-        }
-    }
-
-    private static CliResult AssembleDocument(string[] args)
-    {
-        var docPath = RequiredOption(args, "--doc");
-        var contentPath = RequiredOption(args, "--content");
-        var profilePath = RequiredOption(args, "--profile");
-        var outputPath = RequiredOption(args, "--out");
-        var frontMatterDocPaths = Options(args, "--front-matter-doc");
-        var fullDocPath = Path.GetFullPath(docPath);
-        var fullOutputPath = Path.GetFullPath(outputPath);
-        var parent = Path.GetDirectoryName(fullOutputPath);
-        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
-        {
-            return Error("assemble_output_directory_missing", $"Assemble output directory not found: {parent}");
-        }
-
-        if (SamePath(fullOutputPath, fullDocPath)
-            || SamePath(fullOutputPath, contentPath)
-            || SamePath(fullOutputPath, profilePath)
-            || frontMatterDocPaths.Any(path => SamePath(fullOutputPath, path)))
-        {
-            return Error("assemble_output_refused", "Assemble output path must not overwrite input files.");
-        }
-
-        if (!TryReadContent(contentPath, out var content, out var contentError))
-        {
-            return contentError!;
-        }
-
-        if (!TryReadProfile(profilePath, out var profile, out var profileError))
-        {
-            return profileError!;
-        }
-
-        NormalizeContent(content!);
-        NormalizeProfile(profile!);
-
-        var tempPath = Path.Combine(parent, Path.GetFileName(fullOutputPath) + "." + Guid.NewGuid().ToString("N") + ".tmp.docx");
-        try
-        {
-            File.Copy(fullDocPath, tempPath, overwrite: true);
-            ThesisDocumentGenerator.AssembleIntoTemplate(content!, profile!, tempPath, frontMatterDocPaths);
-            File.Move(tempPath, fullOutputPath, overwrite: true);
-            return new CliResult
-            {
-                Status = "success",
-                Document = fullDocPath,
-                OutputPath = fullOutputPath,
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "info",
-                        Code = "thesis_assembled",
-                        Message = "Thesis content JSON was assembled into a template DOCX copy.",
-                        Path = fullOutputPath
-                    }
-                ]
-            };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            return new CliResult
-            {
-                Status = "error",
-                Document = fullDocPath,
-                OutputPath = fullOutputPath,
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "assemble_failed",
-                        Message = $"Assemble failed: {ex.Message}",
-                        Path = fullDocPath
-                    }
-                ]
-            };
-        }
-        finally
-        {
-            DeleteIfExists(tempPath);
-        }
-    }
 
     private static CliResult CompareRehearsal(string[] args)
     {
@@ -817,13 +672,8 @@ public static class ThesisCli
         }
 
         var sourcePath = Path.GetFullPath(doc);
-        if (output is null)
-        {
-            return ApplyFinalizationToDocument(args, sourcePath, allowInPlace: true);
-        }
-
-        var outputPath = Path.GetFullPath(output);
-        if (SamePath(outputPath, sourcePath))
+        var outputPath = output is null ? sourcePath : Path.GetFullPath(output);
+        if (output is not null && SamePath(outputPath, sourcePath))
         {
             return Error("finalize_output_refused", "Finalize output path must not overwrite the source document unless --in-place is used.");
         }
@@ -836,7 +686,18 @@ public static class ThesisCli
 
         try
         {
-            File.Copy(sourcePath, outputPath, overwrite: true);
+            using var transaction = new FileOutputTransaction();
+            var staged = transaction.Stage(outputPath);
+            File.Copy(sourcePath, staged);
+            var result = ApplyFinalizationToDocument(args, staged, allowInPlace: true);
+            result.Document = sourcePath;
+            result.OutputPath = outputPath;
+            if (string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                transaction.Commit();
+                if (result.HostApplication is not null) result.HostApplication.Document = outputPath;
+            }
+            return result;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -858,15 +719,6 @@ public static class ThesisCli
             };
         }
 
-        var result = ApplyFinalizationToDocument(args, outputPath, allowInPlace: true);
-        result.Document = sourcePath;
-        result.OutputPath = outputPath;
-        if (!string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase))
-        {
-            DeleteIfExists(outputPath);
-        }
-
-        return result;
     }
 
     private static CliResult ApplyFinalizationToDocument(string[] args, string doc, bool allowInPlace)
@@ -972,517 +824,6 @@ public static class ThesisCli
         };
     }
 
-    private static CliResult ExtractProfile(string[] args)
-    {
-        var outputPath = RequiredOption(args, "--out");
-        var sourceType = "doc";
-        var doc = OptionalOption(args, "--doc");
-        var workspaceOption = OptionalOption(args, "--workspace");
-        SessionPaths? workspacePaths = null;
-
-        if (doc is not null && workspaceOption is not null)
-        {
-            return Error("profile_source_ambiguous", "Specify either --doc or --workspace, not both.");
-        }
-
-        if (doc is null && workspaceOption is null)
-        {
-            return Error("profile_source_missing", "Specify either --doc or --workspace.");
-        }
-
-        if (doc is null)
-        {
-            workspacePaths = SessionPaths.FromWorkspace(workspaceOption!);
-            var inspect = SessionLifecycle.Inspect(workspaceOption!);
-            if (!string.Equals(inspect.Status, "success", StringComparison.OrdinalIgnoreCase))
-            {
-                return inspect;
-            }
-
-            doc = inspect.Document
-                ?? throw new CliException("working_doc_missing", "Workspace inspect did not return a working document.");
-            sourceType = "workspace";
-        }
-
-        var fullOutputPath = Path.GetFullPath(outputPath);
-        var parent = Path.GetDirectoryName(fullOutputPath);
-        if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
-        {
-            return Error("profile_output_directory_missing", $"Profile output directory not found: {parent}");
-        }
-
-        var fullDocPath = Path.GetFullPath(doc);
-        if (IsProfileOutputRefused(fullOutputPath, fullDocPath, workspacePaths))
-        {
-            return Error("profile_output_refused", "Profile output path must not overwrite the source document or workspace state.");
-        }
-
-        if (!OpenXmlDocumentInspector.TryInspect(fullDocPath, out var map, out var diagnostic) || map is null)
-        {
-            return new CliResult
-            {
-                Status = "error",
-                Document = fullDocPath,
-                OutputPath = fullOutputPath,
-                Diagnostics = diagnostic is null ? [] : [diagnostic]
-            };
-        }
-
-        var profile = TemplateProfileBuilder.Build(map, sourceType);
-        File.WriteAllText(fullOutputPath, ThesisJson.Serialize(profile));
-
-        return new CliResult
-        {
-            Status = "success",
-            Document = map.Path,
-            OutputPath = fullOutputPath,
-            ProfileExplanation = ProfileExplanationBuilder.Build(profile, fullOutputPath)
-        };
-    }
-
-    private static CliResult ExplainProfile(string[] args)
-    {
-        var profilePath = OptionalOption(args, "--profile");
-        var workspace = OptionalOption(args, "--workspace");
-        if (profilePath is not null && workspace is not null)
-        {
-            return Error("profile_source_ambiguous", "Specify either --profile or --workspace, not both.");
-        }
-
-        if (profilePath is null && workspace is null)
-        {
-            return Error("profile_source_missing", "Specify either --profile or --workspace.");
-        }
-
-        profilePath ??= SessionPaths.FromWorkspace(workspace!).ProfileJson;
-        var fullProfilePath = Path.GetFullPath(profilePath);
-        TemplateProfile profile;
-        try
-        {
-            profile = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(fullProfilePath));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            return new CliResult
-            {
-                Status = "error",
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "profile_invalid",
-                        Message = $"Profile JSON could not be read: {ex.Message}",
-                        Path = fullProfilePath
-                    }
-                ]
-            };
-        }
-
-        profile.StyleRoles ??= [];
-        profile.Diagnostics ??= [];
-        profile.TableArchetypes ??= [];
-        profile.TablePolicy ??= new ProfileTablePolicy();
-        profile.SourceEvidence ??= new ProfileSourceEvidence();
-
-        return new CliResult
-        {
-            Status = "success",
-            ProfileExplanation = ProfileExplanationBuilder.Build(profile, fullProfilePath)
-        };
-    }
-
-    private static CliResult DiffProfiles(string[] args)
-    {
-        var leftPath = RequiredOption(args, "--left");
-        var rightPath = RequiredOption(args, "--right");
-        if (!TryReadProfile(leftPath, out var left, out var leftError))
-        {
-            return leftError!;
-        }
-
-        if (!TryReadProfile(rightPath, out var right, out var rightError))
-        {
-            return rightError!;
-        }
-
-        NormalizeProfile(left!);
-        NormalizeProfile(right!);
-
-        return new CliResult
-        {
-            Status = "success",
-            ProfileDiff = ProfileDiffBuilder.Build(left!, leftPath, right!, rightPath)
-        };
-    }
-
-    private static bool TryReadProfile(string path, out TemplateProfile? profile, out CliResult? error)
-    {
-        var fullPath = Path.GetFullPath(path);
-        try
-        {
-            profile = ThesisJson.Deserialize<TemplateProfile>(File.ReadAllText(fullPath));
-            if (!IsValidProfile(profile))
-            {
-                error = ProfileInvalid(fullPath, "Profile has an invalid structure.");
-                return false;
-            }
-
-            error = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            profile = null;
-            error = new CliResult
-            {
-                Status = "error",
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "profile_invalid",
-                        Message = $"Profile JSON could not be read: {ex.Message}",
-                        Path = fullPath
-                    }
-                ]
-            };
-            return false;
-        }
-    }
-
-    private static bool IsValidProfile(TemplateProfile? profile)
-    {
-        return profile is not null
-            && profile.StyleRoles is not null
-            && profile.RolePolicies is not null
-            && profile.FormatClusters is not null
-            && profile.FinalizationReasons is not null
-            && profile.PageSetup is not null
-            && profile.StructurePolicy is not null
-            && profile.StructurePolicy.Sections is not null
-            && profile.StructurePolicy.Sections.All(section => section is not null)
-            && profile.StylePolicy is not null
-            && profile.StylePolicy.NumericStyleIds is not null
-            && profile.StylePolicy.DisallowedGeneratedStyleIds is not null
-            && profile.PackagePolicy is not null
-            && profile.FieldPolicy is not null
-            && profile.ZonePolicy is not null
-            && profile.ZonePolicy.Landmarks is not null
-            && profile.ZonePolicy.ForbiddenFrontMatterHeadings is not null
-            && profile.NumberingPolicy is not null
-            && profile.TablePolicy is not null
-            && profile.TableArchetypes is not null
-            && profile.Diagnostics is not null
-            && profile.SourceEvidence is not null
-            && profile.StyleRoles.All(role => role.Evidence is not null)
-            && profile.RolePolicies.All(policy =>
-                policy.Match is not null
-                && policy.Match.StyleIds is not null
-                && policy.Match.TextPatterns is not null
-                && policy.Match.OutlineLevels is not null
-                && IsValidRoleFormatMatch(policy.Match.Format))
-            && profile.FormatClusters.All(IsValidFormatCluster)
-            && profile.NumberingPolicy.Instances is not null
-            && profile.NumberingPolicy.ParagraphUses is not null
-            && profile.TablePolicy.ObservedColumnCounts is not null
-            && profile.TableArchetypes.All(archetype =>
-                archetype.Match is not null
-                && archetype.Match.ColumnCounts is not null)
-            && profile.Diagnostics.All(diagnostic => diagnostic.Evidence is not null)
-            && profile.SourceEvidence.ParagraphSamples is not null;
-    }
-
-    private static bool IsValidFormatCluster(ProfileFormatCluster cluster)
-    {
-        return !string.IsNullOrWhiteSpace(cluster.Id)
-            && string.Equals(cluster.AppliesTo, "paragraph", StringComparison.OrdinalIgnoreCase)
-            && IsKnownClusterRoleHint(cluster.RoleHint)
-            && cluster.Count >= 0
-            && cluster.Confidence is >= 0 and <= 1
-            && cluster.StyleIds is not null
-            && cluster.Match is not null
-            && cluster.Match.StyleIds is not null
-            && cluster.Match.TextPatterns is not null
-            && cluster.Match.OutlineLevels is not null
-            && IsValidRoleFormatMatch(cluster.Match.Format)
-            && cluster.Format is not null
-            && cluster.Evidence is not null
-            && cluster.Evidence.All(evidence => evidence is not null);
-    }
-
-    private static bool IsKnownClusterRoleHint(string? roleHint)
-    {
-        return roleHint is "unknown" or "title" or "heading1" or "heading2" or "heading3" or "body" or "abstract.zh" or "abstract.en" or "toc" or "toc.title" or "references";
-    }
-
-    private static bool IsValidRoleFormatMatch(ProfileRoleFormatMatch? format)
-    {
-        return format is null
-            || (IsValidRange(format.FirstLineIndentTwips)
-                && IsValidRange(format.LeftIndentTwips)
-                && IsValidRange(format.RightIndentTwips));
-    }
-
-    private static bool IsValidRange(IntRangeMatch? range)
-    {
-        if (range is null)
-        {
-            return true;
-        }
-
-        if (range.Exact is null && range.Min is null && range.Max is null)
-        {
-            return false;
-        }
-
-        if (range.Exact is not null && (range.Min is not null || range.Max is not null))
-        {
-            return false;
-        }
-
-        return range.Min is null || range.Max is null || range.Min <= range.Max;
-    }
-
-    private static CliResult ProfileInvalid(string path, string message)
-    {
-        return new CliResult
-        {
-            Status = "error",
-            Diagnostics =
-            [
-                new Diagnostic
-                {
-                    Severity = "error",
-                    Code = "profile_invalid",
-                    Message = message,
-                    Path = path
-                }
-            ]
-        };
-    }
-
-    private static bool TryReadRequest(string path, out OperationRequest request, out CliResult? error)
-    {
-        var fullPath = Path.GetFullPath(path);
-        try
-        {
-            request = ThesisJson.Deserialize<OperationRequest>(File.ReadAllText(fullPath));
-            error = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            request = new OperationRequest();
-            error = new CliResult
-            {
-                Status = "error",
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "request_invalid",
-                        Message = $"Request JSON could not be read: {ex.Message}",
-                        Path = fullPath
-                    }
-                ]
-            };
-            return false;
-        }
-    }
-
-    private static bool TryReadProjectRules(string path, out ProjectRules? rules, out CliResult? error)
-    {
-        var fullPath = Path.GetFullPath(path);
-        try
-        {
-            rules = ThesisJson.Deserialize<ProjectRules>(File.ReadAllText(fullPath));
-            if (!string.Equals(rules.RulesKind, "projectRules", StringComparison.OrdinalIgnoreCase))
-            {
-                error = new CliResult
-                {
-                    Status = "error",
-                    Diagnostics =
-                    [
-                        new Diagnostic
-                        {
-                            Severity = "error",
-                            Code = "project_rules_invalid",
-                            Message = "Project rules JSON must have rulesKind 'projectRules'.",
-                            Path = fullPath
-                        }
-                    ]
-                };
-                return false;
-            }
-
-            NormalizeProjectRules(rules);
-            error = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            rules = null;
-            error = new CliResult
-            {
-                Status = "error",
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "project_rules_invalid",
-                        Message = $"Project rules JSON could not be read: {ex.Message}",
-                        Path = fullPath
-                    }
-                ]
-            };
-            return false;
-        }
-    }
-
-    private static bool TryReadContent(string path, out ThesisContent? content, out CliResult? error)
-    {
-        var fullPath = Path.GetFullPath(path);
-        try
-        {
-            content = ThesisJson.Deserialize<ThesisContent>(File.ReadAllText(fullPath));
-            if (!string.Equals(content.DocumentKind, "thesisContent", StringComparison.OrdinalIgnoreCase))
-            {
-                error = new CliResult
-                {
-                    Status = "error",
-                    Diagnostics =
-                    [
-                        new Diagnostic
-                        {
-                            Severity = "error",
-                            Code = "content_invalid",
-                            Message = "Content JSON must have documentKind 'thesisContent'.",
-                            Path = fullPath
-                        }
-                    ]
-                };
-                return false;
-            }
-
-            error = null;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            content = null;
-            error = new CliResult
-            {
-                Status = "error",
-                Diagnostics =
-                [
-                    new Diagnostic
-                    {
-                        Severity = "error",
-                        Code = "content_invalid",
-                        Message = $"Content JSON could not be read: {ex.Message}",
-                        Path = fullPath
-                    }
-                ]
-            };
-            return false;
-        }
-    }
-
-    private static void NormalizeProfile(TemplateProfile profile)
-    {
-        profile.StyleRoles ??= [];
-        profile.RoleAliases ??= [];
-        profile.Diagnostics ??= [];
-        profile.TableArchetypes ??= [];
-        profile.TablePolicy ??= new ProfileTablePolicy();
-        profile.PageSetup ??= new ProfilePageSetup();
-        profile.StructurePolicy ??= new ProfileStructurePolicy();
-        profile.StructurePolicy.Sections ??= [];
-        profile.StylePolicy ??= new ProfileStylePolicy();
-        profile.StylePolicy.NumericStyleIds ??= [];
-        profile.StylePolicy.DisallowedGeneratedStyleIds ??= [];
-        profile.PackagePolicy ??= new ProfilePackagePolicy();
-        profile.FieldPolicy ??= new ProfileFieldPolicy();
-        profile.ZonePolicy ??= new ProfileZonePolicy();
-        profile.ZonePolicy.Landmarks ??= [];
-        profile.ZonePolicy.ForbiddenFrontMatterHeadings ??= [];
-        profile.SourceEvidence ??= new ProfileSourceEvidence();
-    }
-
-    private static void NormalizeProjectRules(ProjectRules rules)
-    {
-        rules.RoleAliases ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        rules.RoleFormats ??= new Dictionary<string, ProjectParagraphFormatRule>(StringComparer.OrdinalIgnoreCase);
-        rules.RolePolicies ??= [];
-        if (rules.StructurePolicy is not null)
-        {
-            rules.StructurePolicy.Sections ??= [];
-        }
-
-        if (rules.StylePolicy is not null)
-        {
-            rules.StylePolicy.NumericStyleIds ??= [];
-            rules.StylePolicy.DisallowedGeneratedStyleIds ??= [];
-        }
-
-        if (rules.ZonePolicy is not null)
-        {
-            rules.ZonePolicy.Landmarks ??= [];
-            rules.ZonePolicy.ForbiddenFrontMatterHeadings ??= [];
-        }
-
-        rules.TableArchetypes ??= [];
-        rules.Diagnostics ??= [];
-    }
-
-    private static void NormalizeContent(ThesisContent content)
-    {
-        content.KeywordsZh ??= [];
-        content.KeywordsEn ??= [];
-        content.Chapters ??= [];
-        content.References ??= [];
-        foreach (var chapter in content.Chapters)
-        {
-            chapter.Paragraphs ??= [];
-            chapter.Sections ??= [];
-            chapter.Tables ??= [];
-            foreach (var section in chapter.Sections)
-            {
-                section.Paragraphs ??= [];
-                section.Tables ??= [];
-                foreach (var table in section.Tables)
-                {
-                    table.Headers ??= [];
-                    table.Rows ??= [];
-                }
-            }
-
-            foreach (var table in chapter.Tables)
-            {
-                table.Headers ??= [];
-                table.Rows ??= [];
-            }
-        }
-    }
-
-    private static bool IsProfileOutputRefused(string outputPath, string docPath, SessionPaths? workspacePaths)
-    {
-        if (SamePath(outputPath, docPath))
-        {
-            return true;
-        }
-
-        return workspacePaths is not null
-            && (SamePath(outputPath, workspacePaths.WorkingDocument)
-                || SamePath(outputPath, workspacePaths.ProfileJson)
-                || SamePath(outputPath, workspacePaths.SessionJson)
-                || IsPathInsideDirectory(workspacePaths.Workspace, outputPath));
-    }
-
     private static void AddFinalizationDiagnostic(DocumentMap map, List<Diagnostic> diagnostics)
     {
         var plan = FinalizationPlanBuilder.Build(map);
@@ -1498,61 +839,6 @@ public static class ThesisCli
             Message = "Document still requires Word/WPS finalization for fields, TOC page numbers, or true pagination.",
             Path = map.Path
         });
-    }
-
-    private static string RequiredOption(string[] args, string name)
-    {
-        return OptionalOption(args, name)
-            ?? throw new CliException("missing_option", $"Missing required option: {name}");
-    }
-
-    private static string? OptionalOption(string[] args, string name)
-    {
-        for (var i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], name, StringComparison.Ordinal))
-            {
-                return args[i + 1];
-            }
-        }
-
-        return null;
-    }
-
-    private static List<string> Options(string[] args, string name)
-    {
-        var values = new List<string>();
-        for (var i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], name, StringComparison.Ordinal))
-            {
-                values.Add(args[i + 1]);
-            }
-        }
-
-        return values;
-    }
-
-    private static bool HasFlag(string[] args, string name)
-    {
-        return args.Any(arg => string.Equals(arg, name, StringComparison.Ordinal));
-    }
-
-    private static CliResult Error(string code, string message)
-    {
-        return new CliResult
-        {
-            Status = "error",
-            Diagnostics =
-            [
-                new Diagnostic
-                {
-                    Severity = "error",
-                    Code = code,
-                    Message = message
-                }
-            ]
-        };
     }
 
     private static CliResult Help(string message)
@@ -1589,6 +875,8 @@ public static class ThesisCli
             "  generate --content <content.json> --rules <final-rules.json> --out <thesis.docx>",
             "  run --workspace <dir> --request <request.json>",
             "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",
+            "  apply-template --doc <source.docx> --template <template.docx> --plan <plan.json> --out <output.docx> [--report <report.json>] [--render-config <render.json> --pdf <output.pdf>] [--workdir <directory>]",
+            "  template-plan bind|inspect --doc <source.docx> --template <template.docx> --plan <plan.json> --out <result.json>",
             "  validate --doc <docx> --profile <profile.json>",
             "  validate --workspace <dir> [--host-layout]",
             "  finalize plan --doc <docx>",
@@ -1628,22 +916,7 @@ public static class ThesisCli
             "  { \"type\": \"sectionRange\", \"start\": <target>, \"end\": <target>, \"includeStart\": false }");
     }
 
-    private static bool SamePath(string left, string right)
-    {
-        return string.Equals(
-            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-            StringComparison.OrdinalIgnoreCase);
-    }
 
-    private static bool IsPathInsideDirectory(string directory, string path)
-    {
-        var fullDirectory = Path.GetFullPath(directory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        var fullPath = Path.GetFullPath(path);
-        return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
-    }
 
     private static void DeleteIfExists(string path)
     {

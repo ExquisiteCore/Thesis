@@ -314,18 +314,20 @@ public static class ThesisDocumentGenerator
 
     private static void AppendChapters(MainDocumentPart mainPart, Body body, List<ThesisChapterContent> chapters, TemplateProfile rules)
     {
+        using var native = new NativeContentImporter(mainPart);
         for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
         {
             var chapter = chapters[chapterIndex];
             var chapterNumber = chapterIndex + 1;
             AppendParagraph(body, FormatChapterTitle(chapter.Title, chapterNumber), ResolveParagraphFormat(rules, "heading1"), "Heading1");
-            AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules);
+            AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules, native);
+            if (chapter.OrderedContentIncludesSections) continue; // Ordered chapter stream includes its subsection headings.
 
             for (var sectionIndex = 0; sectionIndex < chapter.Sections.Count; sectionIndex++)
             {
                 var section = chapter.Sections[sectionIndex];
                 AppendParagraph(body, FormatSectionTitle(section.Title, chapterNumber, sectionIndex + 1), ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
-                AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules);
+                AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules, native);
             }
         }
     }
@@ -336,7 +338,8 @@ public static class ThesisDocumentGenerator
         List<ThesisContentBlock> blocks,
         List<string> legacyParagraphs,
         List<ThesisTableContent> legacyTables,
-        TemplateProfile rules)
+        TemplateProfile rules,
+        NativeContentImporter native)
     {
         if (blocks.Count == 0)
         {
@@ -360,6 +363,11 @@ public static class ThesisDocumentGenerator
             {
                 AppendTables(body, [block.Table], rules);
             }
+            else if (string.Equals(type, "native", StringComparison.OrdinalIgnoreCase))
+            {
+                body.Append(native.Import(block, ResolveParagraphFormat(rules, block.Role ?? "body", "body"), ResolveTableFormat(rules)));
+            }
+            else throw new InvalidDataException($"Unknown content block type: {type}");
         }
     }
 

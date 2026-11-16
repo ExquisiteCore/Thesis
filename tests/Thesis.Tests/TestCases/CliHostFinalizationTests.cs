@@ -49,7 +49,7 @@ internal static partial class Program
         AssertEqual("error", result.Status);
         AssertEqual(Path.GetFullPath(docx), result.Document);
         AssertEqual(true, result.FinalizationPlan!.Required);
-        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "host_application_unavailable"));
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == (OperatingSystem.IsWindows() ? "host_application_unavailable" : "host_application_unsupported_os")));
         AssertEqual(null, result.HostApplication);
     }
 
@@ -77,7 +77,7 @@ internal static partial class Program
         AssertEqual("error", result.Status);
         AssertEqual(Path.GetFullPath(docx), result.Document);
         AssertEqual(Path.GetFullPath(output), result.OutputPath);
-        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "host_application_unavailable"));
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == (OperatingSystem.IsWindows() ? "host_application_unavailable" : "host_application_unsupported_os")));
         AssertEqual(false, File.Exists(output));
     }
 
@@ -125,7 +125,7 @@ internal static partial class Program
         AssertEqual("error", result.Status);
         AssertEqual(context.Paths.WorkingDocument, result.Document);
         AssertEqual(true, result.Validation is not null);
-        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == "host_application_unavailable"));
+        AssertEqual(true, result.Diagnostics.Any(diagnostic => diagnostic.Code == (OperatingSystem.IsWindows() ? "host_application_unavailable" : "host_application_unsupported_os")));
         AssertEqual(null, result.HostApplication);
     }
 }
