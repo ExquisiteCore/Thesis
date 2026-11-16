@@ -240,23 +240,29 @@ internal static partial class Program
         using var temp = new TempDirectory();
         var context = CreateInitializedWorkspace(temp.Path);
 
-        foreach (var args in new[]
+        foreach (var identifier in new[]
         {
-            new[] { "snapshot", "--workspace", context.Workspace, "--name", ".." },
-            ["snapshot", "--workspace", context.Workspace, "--name", "../outside"],
-            ["snapshot", "--workspace", context.Workspace, "--name", "bad\\name"],
-            ["rollback", "--workspace", context.Workspace, "--snapshot", "../outside"],
-            ["rollback", "--workspace", context.Workspace, "--snapshot", "bad/name"],
-            ["rollback", "--workspace", context.Workspace, "--snapshot", ".."],
-            ["snapshot", "--workspace", context.Workspace, "--name", "CON"]
+            "..", "../outside", "..\\outside", "bad/name", "bad\\name",
+            "bad:name", "bad|name", "bad?name", "bad*name", "bad\"name",
+            "bad<name", "bad>name", "bad\0name", "bad\tname", "bad\nname", "CON"
         })
         {
-            var (exitCode, result) = RunCli(args);
-            AssertEqual(1, exitCode);
-            AssertEqual("error", result.Status);
-            AssertEqual("invalid_snapshot_identifier", result.Diagnostics[0].Code);
+            foreach (var args in new[]
+            {
+                new[] { "snapshot", "--workspace", context.Workspace, "--name", identifier },
+                ["rollback", "--workspace", context.Workspace, "--snapshot", identifier]
+            })
+            {
+                var (exitCode, result) = RunCli(args);
+                AssertEqual(1, exitCode);
+                AssertEqual("error", result.Status);
+                AssertEqual("invalid_snapshot_identifier", result.Diagnostics[0].Code);
+            }
         }
 
+        AssertEqual(1, Directory.GetFiles(context.Paths.SnapshotsDirectory, "*.docx").Length);
+        AssertEqual(1, ThesisJson.Deserialize<SessionState>(File.ReadAllText(context.Paths.SessionJson)).SnapshotCounter);
+        AssertBytesEqual(context.OriginalBytes, File.ReadAllBytes(context.Paths.WorkingDocument));
         AssertBytesEqual(context.OriginalBytes, File.ReadAllBytes(context.SourceDoc));
     }
 

@@ -762,10 +762,10 @@ public static class SessionLifecycle
                 return false;
             }
 
+            // Validate portable filename rules before sanitization. On Unix,
+            // a backslash would otherwise be accepted and silently removed.
             if (value.Contains("..", StringComparison.Ordinal)
-                || value.Contains(Path.DirectorySeparatorChar)
-                || value.Contains(Path.AltDirectorySeparatorChar)
-                || value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                || value.Any(ch => ch < ' ' || "<>:\"/\\|?*".Contains(ch)))
             {
                 return false;
             }
