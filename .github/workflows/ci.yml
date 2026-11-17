@@ -41,6 +41,23 @@ jobs:
           node-version: 22
       - run: node --test profile-viewer/profile-viewer.test.mjs
 
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet build Thesis.Desktop.slnx --configuration Release
+      - name: Exercise native desktop workflow
+        shell: pwsh
+        run: ./tools/test-desktop.ps1 -ArtifactsDirectory artifacts/desktop-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-smoke
+          path: artifacts/desktop-smoke/run-*/
+
   layout-audit:
     runs-on: ubuntu-latest
     steps:

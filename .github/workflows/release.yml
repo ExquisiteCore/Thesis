@@ -81,6 +81,7 @@ jobs:
           Copy-Item profile-viewer "artifacts/thesis-docx-${{ matrix.rid }}/profile-viewer" -Recurse
           New-Item -ItemType Directory -Force -Path "artifacts/thesis-docx-${{ matrix.rid }}/Thesis/thesis-docx" | Out-Null
           Copy-Item Thesis/thesis-docx/SKILL.md "artifacts/thesis-docx-${{ matrix.rid }}/Thesis/thesis-docx/SKILL.md"
+          ./tools/copy-third-party-notices.ps1 -AssetsFile src/Thesis.Cli/obj/project.assets.json -OutputDirectory "artifacts/thesis-docx-${{ matrix.rid }}" -RuntimeIdentifier "${{ matrix.rid }}"
 
       - name: Compress zip
         if: matrix.archive == 'zip'
@@ -100,10 +101,30 @@ jobs:
           name: thesis-docx-${{ matrix.rid }}
           path: artifacts/thesis-docx-${{ matrix.rid }}.${{ matrix.archive }}
 
+  publish-desktop:
+    name: publish desktop win-x64
+    needs: build-and-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Verify published desktop workflow
+        shell: pwsh
+        run: ./tools/test-desktop.ps1 -ArtifactsDirectory artifacts/desktop-smoke
+      - name: Publish self-contained desktop
+        shell: pwsh
+        run: ./tools/publish-desktop.ps1 -Archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thesis-desktop-win-x64
+          path: artifacts/thesis-desktop-win-x64.zip
+
   github-release:
     name: github release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: publish
+    needs: [publish, publish-desktop]
     runs-on: windows-latest
     permissions:
       contents: write
