@@ -12,7 +12,7 @@ permissions:
 env:
   DOTNET_VERSION: "10.0.x"
   PROJECT: src/Thesis.Cli/Thesis.Cli.csproj
-  SOLUTION: ThesisTool.slnx
+  SOLUTION: Thesis.Cli.slnf
   TEST_PROJECT: tests/Thesis.Tests/Thesis.Tests.csproj
 
 jobs:

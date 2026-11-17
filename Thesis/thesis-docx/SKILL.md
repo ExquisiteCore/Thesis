@@ -24,7 +24,7 @@ description: Use when using Thesis DOCX CLI to extract thesis template rules, me
 如果 exe 不存在：
 
 ```powershell
-dotnet build ThesisTool.slnx
+dotnet build Thesis.Cli.slnf
 ```
 
 命令写法始终是 exe 后面直接跟参数。

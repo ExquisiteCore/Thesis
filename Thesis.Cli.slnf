@@ -1,0 +1,9 @@
+{
+  "solution": {
+    "path": "Thesis.slnx",
+    "projects": [
+      "src/Thesis.Cli/Thesis.Cli.csproj",
+      "tests/Thesis.Tests/Thesis.Tests.csproj"
+    ]
+  }
+}

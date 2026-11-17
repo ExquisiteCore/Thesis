@@ -7,7 +7,7 @@
 GUI 面向写作者，CLI + Skill 面向 Agent，是两个独立入口。它们共享 `.thesis.json`、模板设计和 `Thesis.Application`，不要求同时运行。Agent 更新项目后，处于已保存状态的 GUI 会自动刷新；本地有未保存内容时通过指纹保护，保留双方版本。
 
 ```powershell
-dotnet build Thesis.Desktop.slnx --configuration Release
+dotnet build Thesis.slnx --configuration Release
 .\src\Thesis.Gui\bin\Release\net10.0-windows10.0.19041.0\win-x64\Thesis.Gui.exe
 # 打开指定项目
 .\src\Thesis.Gui\bin\Release\net10.0-windows10.0.19041.0\win-x64\Thesis.Gui.exe --project "我的论文.thesis.json"
@@ -17,7 +17,7 @@ dotnet build Thesis.Desktop.slnx --configuration Release
 .\tools\test-desktop.ps1
 ```
 
-桌面端支持 Windows 10 1809 或更新版本。源码构建需要 Windows 和 .NET 10 SDK；发布包包含 .NET 和 Windows App SDK，解压后运行 `Thesis.Gui.exe`。可选执行包内 `install-desktop.ps1` 创建桌面快捷方式；`-RemoveShortcut` 仅移除快捷方式。包内附文件校验清单及第三方许可。跨平台 CLI 使用 `ThesisTool.slnx`，桌面构建使用 `Thesis.Desktop.slnx`。GitHub Release 分别提供 CLI 和 Windows GUI 包。
+桌面端支持 Windows 10 1809 或更新版本。源码构建需要 Windows 和 .NET 10 SDK；发布包包含 .NET 和 Windows App SDK，解压后运行 `Thesis.Gui.exe`。可选执行包内 `install-desktop.ps1` 创建桌面快捷方式；`-RemoveShortcut` 仅移除快捷方式。包内附文件校验清单及第三方许可。完整源码统一使用 `Thesis.slnx`；跨平台 CLI 和测试使用基于它的 `Thesis.Cli.slnf` 过滤方案。GitHub Release 分别提供 CLI 和 Windows GUI 包。
 
 工作流程：新建项目 → 导入或设计模板 → 导入 / 编辑正文 → 快速预览 → 检查 → 生成 DOCX；最终分页与 PDF 导出按需使用 WPS/Word。
 
@@ -77,7 +77,8 @@ Thesis.Cli.exe project compose --project "我的论文.thesis.json" --out "candi
 ## 构建与运行
 
 ```powershell
-dotnet build ThesisTool.slnx
+dotnet build Thesis.Cli.slnf
+dotnet build Thesis.slnx # Windows GUI and all projects
 dotnet test tests\Thesis.Tests\Thesis.Tests.csproj
 ```
 
