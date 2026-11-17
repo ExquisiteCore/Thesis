@@ -26,7 +26,7 @@ public sealed partial class WorkspaceViewModel
         Preferences = WorkspacePreferences.Load(userDataDirectory is null ? null : Path.Combine(userDataDirectory, "workspace.json"));
         ReloadRecent();
     }
-    private void ReloadRecent() { Recent.Clear(); foreach (var item in Preferences.RecentProjects) Recent.Add(item); }
+    private void ReloadRecent() { Recent.Clear(); foreach (var item in Preferences.RecentProjects.Where(p => File.Exists(p.Path))) Recent.Add(item); }
 
     public async Task UseDesignAsync(TemplateDesign design, bool saveToLibrary = false)
     {

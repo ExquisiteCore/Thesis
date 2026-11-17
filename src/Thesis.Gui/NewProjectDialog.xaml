@@ -1,0 +1,24 @@
+<ContentDialog x:Class="Thesis.Gui.NewProjectDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="新建论文" PrimaryButtonText="创建论文" CloseButtonText="取消"
+    DefaultButton="Primary" PrimaryButtonClick="Create_Click">
+  <StackPanel Spacing="18" MinWidth="380" MaxWidth="520">
+    <TextBlock Text="先开始写作，模板和内容都可以稍后调整。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+    <TextBox x:Name="PaperTitle" Header="论文题目" PlaceholderText="例如：校园服务系统的设计与实现" TextChanged="Title_Changed" AutomationProperties.AutomationId="NewProjectTitle"/>
+    <TextBox x:Name="PaperAuthor" Header="作者（选填）" PlaceholderText="你的姓名" AutomationProperties.AutomationId="NewProjectAuthor"/>
+    <StackPanel Spacing="8">
+      <TextBlock Text="保存位置"/>
+      <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBox x:Name="ProjectLocation" TextChanged="Location_Changed" AutomationProperties.Name="项目保存路径" AutomationProperties.AutomationId="NewProjectLocation"/>
+        <Button x:Name="BrowseButton" Grid.Column="1" Content="浏览…" Click="Browse_Click" AutomationProperties.AutomationId="NewProjectBrowse"/>
+      </Grid>
+      <TextBlock Text="自动保存正文、模板和历史版本。可以直接修改路径，或选择其他位置。" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+    </StackPanel>
+    <Border Padding="14" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8A5;" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/><StackPanel><TextBlock Text="通用本科论文模板" FontWeight="SemiBold"/><TextBlock Text="创建后可换成学校模板或合格论文" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel></StackPanel>
+    </Border>
+    <InfoBar x:Name="ValidationMessage" Severity="Error" IsOpen="False" IsClosable="False"/>
+    <ProgressBar x:Name="CreatingProgress" IsIndeterminate="True" Visibility="Collapsed"/>
+  </StackPanel>
+</ContentDialog>

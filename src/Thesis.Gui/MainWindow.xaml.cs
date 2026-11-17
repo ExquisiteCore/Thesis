@@ -6,9 +6,8 @@ using Microsoft.UI.Xaml.Media;
 using Thesis.Gui.ViewModels;
 using Thesis.Schema;
 using Thesis.Application;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using Windows.System;
-using WinRT.Interop;
 
 namespace Thesis.Gui;
 
@@ -57,6 +56,7 @@ public sealed partial class MainWindow : Window
     {
         if (interactionInProgress || viewModel.IsBusy || closing) return;
         interactionInProgress = true;
+        viewModel.HasError = false;
         try { await action(); }
         catch (Exception ex) { viewModel.ShowError(ex); }
         finally { interactionInProgress = false; }
@@ -92,13 +92,11 @@ public sealed partial class MainWindow : Window
     private async Task NewAsync()
     {
         await viewModel.SaveAsync();
-        var title = new TextBox { Header = "论文题目", PlaceholderText = "输入题目，之后可以修改" };
-        var panel = new StackPanel { Spacing = 16 };
-        panel.Children.Add(title);
-        panel.Children.Add(new TextBlock { Text = "项目先使用通用本科论文模板。创建后可在“模板”中导入学校模板或学长的合格论文，再导入 Markdown / Word 正文。", TextWrapping = TextWrapping.Wrap });
-        if (await new ContentDialog { XamlRoot = Root.XamlRoot, Title = "创建论文项目", Content = panel, PrimaryButtonText = "选择保存位置", CloseButtonText = "取消" }.ShowAsync() != ContentDialogResult.Primary) return;
-        var path = await SaveFileAsync("论文项目", ".thesis.json");
-        if (path is not null) { await viewModel.CreateAsync(path); if (!string.IsNullOrWhiteSpace(title.Text)) viewModel.Title = title.Text; await viewModel.SaveAsync(); ShowPage("template"); }
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var dialog = new NewProjectDialog(Path.Combine(documents, "Thesis"),
+            name => SaveFileAsync("论文项目", ".thesis.json", name),
+            async details => await viewModel.CreateAsync(details.Path, details.Title, details.Author)) { XamlRoot = Root.XamlRoot };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) ShowPage("write");
     }
 
     private async Task OpenAsync()
@@ -180,17 +178,14 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> OpenFileAsync(string title, params string[] extensions)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, ViewMode = PickerViewMode.List, CommitButtonText = title };
+        var picker = new FileOpenPicker(AppWindow.Id) { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, ViewMode = PickerViewMode.List, CommitButtonText = title };
         foreach (var extension in extensions.Distinct(StringComparer.OrdinalIgnoreCase)) picker.FileTypeFilter.Add(extension);
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         return (await picker.PickSingleFileAsync())?.Path;
     }
 
-    private async Task<string?> SaveFileAsync(string title, string extension)
+    private async Task<string?> SaveFileAsync(string title, string extension, string suggestedName = "我的论文")
     {
-        var picker = new FileSavePicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, SuggestedFileName = "我的论文", DefaultFileExtension = extension };
-        picker.FileTypeChoices.Add(title, [extension]);
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var picker = ProjectFilePicker.Save(this, title, extension, suggestedName);
         return (await picker.PickSaveFileAsync())?.Path;
     }
 

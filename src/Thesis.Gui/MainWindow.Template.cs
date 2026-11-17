@@ -16,9 +16,13 @@ public sealed partial class MainWindow
     {
         editingRole = null;
         editingDesign = viewModel.Design is null ? null : ThesisJson.Deserialize<TemplateDesign>(ThesisJson.Serialize(viewModel.Design));
+        if (editingDesign is not null)
+            foreach (var role in editingDesign.Roles.Where(r => r.Name == r.Role)) role.Name = TemplateDesigner.RoleName(role.Role);
         DesignName.Text = editingDesign?.Name ?? "尚未导入模板";
         RoleList.ItemsSource = editingDesign?.Roles;
         TemplateNotes.Text = string.Join("\n\n", editingDesign?.ReviewNotes ?? []);
+        TemplateReviewSummary.Text = editingDesign is null ? "导入模板后，选择左侧角色即可核对和调整。"
+            : $"共 {editingDesign.Roles.Count} 类格式规则，{editingDesign.Roles.Count(r => !r.Confirmed)} 类待核对。低置信度项目请重新选择样本段落。";
         if (editingDesign is null) return;
         MarginTop.Value = editingDesign.MarginTopMm; MarginBottom.Value = editingDesign.MarginBottomMm;
         MarginLeft.Value = editingDesign.MarginLeftMm; MarginRight.Value = editingDesign.MarginRightMm;
@@ -30,7 +34,7 @@ public sealed partial class MainWindow
         if (editingRole is null || loadingRole) return;
         editingRole.Font = RoleFont.Text; editingRole.LatinFont = RoleLatinFont.Text; editingRole.Size = RoleSize.Value;
         editingRole.LineSpacing = RoleLine.Value; editingRole.FirstLineCharacters = RoleIndent.Value;
-        editingRole.Alignment = RoleAlign.SelectedItem as string ?? "left"; editingRole.Bold = RoleBold.IsChecked == true;
+        editingRole.Alignment = (RoleAlign.SelectedItem as ComboBoxItem)?.Tag as string ?? "left"; editingRole.Bold = RoleBold.IsChecked == true;
         editingRole.OverrideFormat = RoleOverride.IsChecked == true; editingRole.Confirmed = RoleConfirmed.IsChecked == true;
     }
     private void Role_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -42,7 +46,7 @@ public sealed partial class MainWindow
         {
             RoleFont.Text = editingRole.Font; RoleLatinFont.Text = editingRole.LatinFont;
             RoleSize.Value = editingRole.Size; RoleLine.Value = editingRole.LineSpacing; RoleIndent.Value = editingRole.FirstLineCharacters;
-            RoleAlign.SelectedItem = editingRole.Alignment; RoleBold.IsChecked = editingRole.Bold;
+            RoleAlign.SelectedItem = RoleAlign.Items.OfType<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == editingRole.Alignment); RoleBold.IsChecked = editingRole.Bold;
             RoleOverride.IsChecked = editingRole.OverrideFormat; RoleConfirmed.IsChecked = editingRole.Confirmed;
             RoleEvidence.Text = $"识别角色：{editingRole.Name} · 样本块 {editingRole.SampleIndex} · 置信度 {editingRole.Confidence:P0}\n样本文本：{editingRole.SampleText}";
         }
@@ -55,7 +59,7 @@ public sealed partial class MainWindow
         RoleSample.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(RoleFont.Text) ? "宋体" : RoleFont.Text);
         RoleSample.FontSize = double.IsFinite(RoleSize.Value) ? Math.Clamp(RoleSize.Value * 4 / 3, 7, 96) : 16;
         RoleSample.FontWeight = RoleBold.IsChecked == true ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal;
-        RoleSample.TextAlignment = (RoleAlign?.SelectedItem as string) switch
+        RoleSample.TextAlignment = ((RoleAlign?.SelectedItem as ComboBoxItem)?.Tag as string) switch
         {
             "center" => TextAlignment.Center,
             "right" => TextAlignment.Right,

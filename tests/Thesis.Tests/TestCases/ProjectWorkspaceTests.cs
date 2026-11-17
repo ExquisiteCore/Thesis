@@ -42,6 +42,33 @@ public sealed class ProjectWorkspaceTests : IDisposable
     }
 
     [Fact]
+    public async Task NewProjectPersistsTitleAuthorAndDefaultTemplateBeforeReturning()
+    {
+        var vm = new WorkspaceViewModel(directory);
+        await vm.CreateAsync(FilePath("新建论文.thesis.json"), "校园服务系统", "测试作者");
+        var project = ThesisProjectStore.Open(vm.ProjectPath!);
+        Assert.Equal("校园服务系统", project.Document.Content.Title);
+        Assert.Equal("测试作者", project.Document.Content.Author);
+        Assert.True(File.Exists(ThesisProjectStore.Resolve(project, project.Document.TemplateDesignPath)));
+        Assert.False(vm.IsDirty);
+        Assert.Equal("校园服务系统", Assert.Single(vm.Recent).Title);
+    }
+
+    [Fact]
+    public void MissingRecentFilesAreHiddenAndErrorsAreAvailableOnEveryPage()
+    {
+        var preferences = WorkspacePreferences.Load(FilePath("workspace.json"));
+        preferences.Remember(FilePath("missing.thesis.json"), "旧项目");
+        var vm = new WorkspaceViewModel(directory);
+        Assert.Empty(vm.Recent);
+        vm.ShowError(new IOException("目标文件正在使用"));
+        Assert.True(vm.HasError);
+        Assert.Equal("目标文件正在使用", vm.ErrorMessage);
+        vm.HasError = false;
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
     public void MalformedAndDuplicateNodesAreRejectedBeforeWriting()
     {
         var project = new ThesisProject { Content = new() { Chapters = [new() { Id = "same" }, new() { Id = "same" }] } };

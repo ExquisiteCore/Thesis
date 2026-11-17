@@ -58,7 +58,10 @@ public static class TemplateDesigner
         "abstractHeading" => "中文摘要标题", "abstract" => "中文摘要", "abstractEnglishHeading" => "英文摘要标题",
         "abstractEnglish" => "英文摘要", "referencesHeading" => "参考文献标题", "reference" => "参考文献",
         "backMatterHeading" => "致谢标题", "conclusionHeading" => "结论标题", "table" => "表格文字", "image" => "插图",
-        "toc1" => "目录一级", "toc2" => "目录二级", "toc3" => "目录三级", _ => role
+        "toc1" => "目录一级", "toc2" => "目录二级", "toc3" => "目录三级",
+        "toc" => "目录内容", "tocHeading" => "目录标题", "keywords" => "中文关键词", "keywordsEnglish" => "英文关键词",
+        "englishTitle" => "英文题目", "figureCaption" => "图题", "tableCaption" => "表题", "conclusion" => "结论正文",
+        "backMatter" => "致谢正文", "cover" => "封面", _ => role
     };
 
     public static void Apply(TemplateDesign design, TemplateApplicationPlan plan)

@@ -30,6 +30,8 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     private bool busy;
     private bool dirty;
     private string status = "新建论文项目，或打开已有项目开始写作。";
+    private string errorMessage = "";
+    private bool hasError;
     private CancellationTokenSource? job;
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private long editGeneration;
@@ -47,10 +49,12 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public bool IsDirty => dirty;
     public string ProjectLabel => opened is null ? "尚未打开项目" : $"{Path.GetFileName(opened.Path)} · 版本 {opened.Document.Revision}{(dirty ? " · 待保存" : " · 已保存")}";
     public string Status { get => status; private set { status = value; Notify(); } }
+    public string ErrorMessage { get => errorMessage; private set { errorMessage = value; Notify(); } }
+    public bool HasError { get => hasError; set { hasError = value; Notify(); } }
     public string Title { get => opened?.Document.Content.Title ?? ""; set { if (!CanEdit || opened is null || Title == value) return; opened.Document.Content.Title = value; Changed(); } }
     public string Author { get => opened?.Document.Content.Author ?? ""; set { if (!CanEdit || opened is null || Author == value) return; opened.Document.Content.Author = value; Changed(); } }
     public string Keywords { get => string.Join("；", opened?.Document.Content.KeywordsZh ?? []); set { if (!CanEdit || opened is null || Keywords == value) return; opened.Document.Content.KeywordsZh = value.Split(['；', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); Changed(); } }
-    public string TemplateLabel => Path.GetFileName(opened?.Document.TemplatePath) is { Length: > 0 } name ? name : "选择学校模板或合格论文";
+    public string TemplateLabel => Design?.Name ?? (Path.GetFileName(opened?.Document.TemplatePath) is { Length: > 0 } name ? name : "选择学校模板或合格论文");
     public string PlanLabel => Path.GetFileName(opened?.Document.PlanPath) is { Length: > 0 } name ? name : "首次生成将保留待校准方案";
     public string RenderLabel => Path.GetFileName(opened?.Document.RenderConfigPath) is { Length: > 0 } name ? name : "尚未配置真实分页检查";
     public string CharacterCount => $"当前 {Body.Count(c => !char.IsWhiteSpace(c)):N0} 字符";
@@ -96,16 +100,17 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public string? ProjectPath => opened?.Path;
     public LayoutRenderConfig? RenderSettings { get; private set; }
 
-    public async Task CreateAsync(string path)
+    public async Task CreateAsync(string path, string title = "未命名论文", string author = "")
     {
         if (IsBusy) return;
         IsBusy = true;
         try
         {
             await SaveAsync();
-            var project = new ThesisProject { Content = new() { Title = "未命名论文", Chapters = [new() { Title = "绪论" }] } };
+            var project = new ThesisProject { Content = new() { Title = title, Author = author, Chapters = [new() { Title = "绪论" }] } };
             Accept(await Task.Run(() => ThesisProjectStore.Create(path, project)));
             await AttachDesignAsync(await Task.Run(() => TemplateLibraryStore.Default(userDataDirectory)));
+            await SaveAsync();
         }
         finally { IsBusy = false; }
     }
@@ -354,7 +359,8 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
 
     public void ShowError(Exception error)
     {
-        Status = "操作未完成。请查看右侧详情后重试。";
+        ErrorMessage = error.Message; HasError = true;
+        Status = "操作未完成，请查看页面上方提示。";
         Findings.Insert(0, error.Message);
     }
 

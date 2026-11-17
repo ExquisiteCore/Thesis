@@ -3,8 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Thesis.Application;
 using Thesis.Core;
 using Thesis.Schema;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace Thesis.Gui;
 
@@ -45,25 +44,39 @@ public sealed partial class MainWindow
             finally { checkingExternal = false; }
         };
         externalTimer.Start();
-        Root.SizeChanged += (_, _) => InspectorColumn.Width = new GridLength(Root.ActualWidth >= 1200 && viewModel.Preferences.ShowInspector ? 280 : 0);
+        WorkspaceGrid.SizeChanged += (_, _) => InspectorColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1100 && viewModel.Preferences.ShowInspector ? 280 : 0);
+        viewModel.Recent.CollectionChanged += (_, _) => RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Closed += (_, _) => { externalTimer.Stop(); previewTimer.Stop(); previewJob?.Cancel(); };
     }
     private void ShowPage(string page)
     {
         currentPage = page;
-        foreach (var button in NavigationButtons.Children.OfType<Button>())
-            button.Style = (Style)Microsoft.UI.Xaml.Application.Current.Resources[(string)button.Tag == page ? "AccentButtonStyle" : "DefaultButtonStyle"];
+        NavigationMenu.SelectedItem = NavigationMenu.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == page);
+        (PageHeading.Text, PageDescription.Text) = page switch
+        {
+            "write" => ("写作", "组织大纲，专注当前章节。"),
+            "template" => ("模板", "核对学校要求，让格式为内容服务。"),
+            "preview" => ("快速预览", "查看内容和主要样式；最终分页以导出的 PDF 为准。"),
+            "checks" => ("检查", "逐项定位需要完善或确认的内容。"),
+            "history" => ("历史", "对照之前的版本，找回需要的内容。"),
+            _ => ("首页", "开始新的论文，或继续上次的写作。")
+        };
         foreach (var (element, name) in new (FrameworkElement, string)[] { (HomePanel, "home"), (WorkspaceGrid, "write"), (TemplatePanel, "template"), (PreviewPanel, "preview"), (ChecksPanel, "checks"), (HistoryPanel, "history") })
             element.Visibility = name == page ? Visibility.Visible : Visibility.Collapsed;
         if (page == "template" && (editingDesign is null || editingDesign.Id != viewModel.Design?.Id || editingDesign.SourcePath != viewModel.Design?.SourcePath)) LoadTemplateEditor();
         if (page == "history") { viewModel.RefreshHistory(); HistoryAfter.Text = viewModel.CurrentText; }
     }
-    private async void Navigate_Click(object sender, RoutedEventArgs e)
+    private async void Navigation_Invoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
-        var page = (string)((Button)sender).Tag;
-        ShowPage(page);
-        if (page == "preview") await RefreshQuickPreviewAsync();
-        if (page == "checks") await RunAsync(viewModel.CheckAsync);
+        if (args.InvokedItemContainer is not NavigationViewItem { Tag: string page }) return;
+        await RunAsync(async () =>
+        {
+            if (page == "theme") { Theme_Click(this, new RoutedEventArgs()); return; }
+            ShowPage(page);
+            if (page == "preview") await RefreshQuickPreviewAsync();
+            if (page == "checks") await viewModel.CheckAsync();
+        });
     }
     private async void Recent_Click(object sender, ItemClickEventArgs e) => await RunAsync(async () =>
     {
@@ -80,7 +93,7 @@ public sealed partial class MainWindow
     private async void ImportPackage_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         var archive = await OpenFileAsync("导入论文项目包", ".zip"); if (archive is null) return;
-        var picker = new FolderPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        var picker = new FolderPicker(AppWindow.Id) { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
         var folder = await picker.PickSingleFolderAsync(); if (folder is null) return;
         var directory = Path.Combine(folder.Path, Path.GetFileNameWithoutExtension(archive) + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         var path = await Task.Run(() => ProjectPackage.Import(archive, directory));
