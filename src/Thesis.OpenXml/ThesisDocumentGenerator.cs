@@ -320,7 +320,8 @@ public static class ThesisDocumentGenerator
             (text, role) => AppendParagraph(body, text, ResolveParagraphFormat(rules, role, "body"), role.StartsWith("heading") ? "Heading" + role[^1] : "Normal"),
             block => AppendImageBlock(mainPart, body, block, rules),
             table => AppendTables(body, [table], rules),
-            block => native.Import(block, ResolveParagraphFormat(rules, block.Role ?? "body", "body"), ResolveTableFormat(rules)));
+            block => native.Import(block, ResolveParagraphFormat(rules, block.Role ?? "body", "body"), ResolveTableFormat(rules)),
+            block => AppendContentBlocks(mainPart, body, [block], [], [], rules, native));
         for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
         {
             var chapter = chapters[chapterIndex];
@@ -367,7 +368,8 @@ public static class ThesisDocumentGenerator
             {
                 var latex = block.Latex ?? block.Text ?? "";
                 if (string.IsNullOrWhiteSpace(latex)) throw new InvalidDataException("Equation blocks require LaTeX source.");
-                var paragraph = AppendParagraph(body, latex, ResolveParagraphFormat(rules, "equation", "body"), "Normal");
+                var paragraph = AppendParagraph(body, "", ResolveParagraphFormat(rules, "equation", "body"), "Normal");
+                paragraph.Append(LatexOfficeMath.Create(latex));
                 if (block.DisplayEquation)
                 {
                     paragraph.ParagraphProperties ??= new ParagraphProperties();

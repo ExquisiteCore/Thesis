@@ -37,8 +37,10 @@ internal static partial class Program
         var body = document.MainDocumentPart!.Document!.Body!;
         var paragraph = body.Elements<Paragraph>().Single(p => p.InnerText == "重点正文");
         AssertEqual(true, paragraph.Elements<Run>().First().RunProperties?.GetFirstChild<Bold>() is not null);
-        AssertEqual("E = mc^2", body.Elements<Paragraph>().Single(p => p.InnerText == "E = mc^2").InnerText);
-        AssertEqual(true, body.Elements<Paragraph>().Single(p => p.InnerText == "E = mc^2").ParagraphProperties?.Justification?.Val?.Value == JustificationValues.Center);
+        var equation = body.Elements<Paragraph>().Single(p => p.Descendants<DocumentFormat.OpenXml.Math.OfficeMath>().Any());
+        AssertEqual(true, equation.Descendants<DocumentFormat.OpenXml.Math.Superscript>().Any());
+        AssertEqual(true, equation.ParagraphProperties?.Justification?.Val?.Value == JustificationValues.Center);
+        AssertEqual("E = mc^2", content.Chapters[0].Blocks[1].Latex);
     }
 
     static void OutputTransactionKeepsExistingFileWhenStagingIsIncomplete()

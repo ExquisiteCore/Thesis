@@ -12,7 +12,7 @@ namespace Thesis.OpenXml;
 
 internal sealed class MarkdownDocxWriter(MainDocumentPart main, Body body, string directory,
     Func<string, string, Paragraph> paragraph, Action<ThesisContentBlock> appendImage, Action<ThesisTableContent> appendTable,
-    Func<ThesisContentBlock, OpenXmlElement> appendNative)
+    Func<ThesisContentBlock, OpenXmlElement> appendNative, Action<ThesisContentBlock> appendBlock)
 {
     public void Append(string markdown) => Write(MarkdownSupport.Parse(markdown));
 
@@ -23,8 +23,10 @@ internal sealed class MarkdownDocxWriter(MainDocumentPart main, Body body, strin
             switch (block)
             {
                 case Markdig.Extensions.Mathematics.MathBlock math:
-                    paragraph("$$\n" + math.Lines.ToString() + "\n$$", "body");
+                    appendBlock(new() { Type = "equation", Latex = math.Lines.ToString(), DisplayEquation = true });
                     break;
+                case FencedCodeBlock fence when fence.Info == "thesis-block":
+                    appendBlock(ThesisJson.DeserializeStrict<ThesisContentBlock>(fence.Lines.ToString())); break;
                 case MarkdownTable table:
                     var rows = table.OfType<MarkdownRow>().Select(row => row.Select(cell => string.Join(" ", ((ContainerBlock)cell).OfType<LeafBlock>().Select(leaf => MarkdownSupport.PlainText(leaf.Inline)))).ToList()).ToList();
                     appendTable(new() { Headers = rows.FirstOrDefault() ?? [], Rows = rows.Skip(1).ToList() });
@@ -97,10 +99,12 @@ internal sealed class MarkdownDocxWriter(MainDocumentPart main, Body body, strin
                     else WriteInline(parent, link, bold, italic, strike, vertical);
                     break;
                 case LineBreakInline: parent.Append(new Run(new Break())); break;
+                case Markdig.Extensions.Mathematics.MathInline math:
+                    parent.Append(LatexOfficeMath.Create(math.Content.ToString())); break;
                 case ContainerInline nested: WriteInline(parent, nested, bold, italic, strike, vertical); break;
                 default:
                     var value = inline is LiteralInline literal ? literal.Content.ToString() : inline is CodeInline code ? code.Content
-                        : inline is Markdig.Extensions.Mathematics.MathInline math ? "$" + math.Content.ToString() + "$" : inline.ToString() ?? "";
+                        : inline.ToString() ?? "";
                     // Generated documents can use direct formatting instead of named styles.
                     // Carry that base format into every Markdown run, including runs inside links.
                     var owner = parent as Paragraph ?? parent.Ancestors<Paragraph>().FirstOrDefault();

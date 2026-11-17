@@ -1,6 +1,7 @@
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Thesis.Core;
 using Thesis.Gui.ViewModels;
 
 namespace Thesis.Gui;
@@ -15,16 +16,18 @@ public sealed partial class MainWindow
 
     private void InitializeEditor()
     {
+        BodyEditor.GotFocus += (_, _) => { focusedEditor = BodyEditor; UpdateEditorToolbar(); };
         editorSyncTimer = DispatcherQueue.CreateTimer();
         editorSyncTimer.Interval = TimeSpan.FromMilliseconds(260);
         editorSyncTimer.IsRepeating = false;
         editorSyncTimer.Tick += (_, _) => FlushEditor();
         viewModel.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName is nameof(WorkspaceViewModel.BodyReadOnly))
+            if (args.PropertyName is null or nameof(WorkspaceViewModel.BodyReadOnly))
             {
                 BodyEditor.IsReadOnly = viewModel.BodyReadOnly;
                 SourceBodyEditor.IsReadOnly = viewModel.BodyReadOnly;
+                foreach (var segment in editorSegments) if (segment.Editor is { } editor) editor.IsReadOnly = viewModel.BodyReadOnly;
                 UpdateEditorToolbar();
             }
         };
@@ -36,54 +39,54 @@ public sealed partial class MainWindow
     private void LoadEditorFromViewModel()
     {
         if (loadingEditor || !viewModel.HasProject) return;
-        editorSyncTimer?.Stop();
-        loadingEditor = true;
+        editorSyncTimer?.Stop(); loadingEditor = true;
         try
         {
             var markdown = viewModel.Body;
-            var supportsRichText = RichMarkdownEditor.Supports(markdown, out var reason);
-            sourceEditorActive = forceSourceEditor || !supportsRichText;
-            if (supportsRichText)
+            var usesMarkdown = viewModel.EditorUsesMarkdown;
+            var blocks = viewModel.EditorBlocks;
+            var reason = "";
+            var supported = !usesMarkdown || ContentEditing.TryParseMarkdown(markdown, out blocks);
+            if (!supported) reason = "这部分 Markdown 包含保留语法，可在交换视图中继续编辑。";
+            sourceEditorActive = usesMarkdown && (forceSourceEditor || !supported);
+            blockEditorActive = !sourceEditorActive && !NativeContentEditor.SupportsBlocks(blocks);
+            if (!sourceEditorActive)
             {
-                // WinUI rejects programmatic document writes while IsReadOnly is set.
-                // Project loads also happen while the workspace is busy or read-only.
-                BodyEditor.IsReadOnly = false;
-                try { RichMarkdownEditor.Load(BodyEditor, markdown); }
-                finally { BodyEditor.IsReadOnly = viewModel.BodyReadOnly; }
+                if (blockEditorActive) LoadObjectEditor(blocks);
+                else
+                {
+                    editorSegments.Clear(); focusedEditor = null;
+                    BodyEditor.IsReadOnly = false;
+                    try { NativeContentEditor.LoadBlocks(BodyEditor, blocks); }
+                    finally { BodyEditor.IsReadOnly = viewModel.BodyReadOnly; }
+                }
             }
             SourceBodyEditor.Text = markdown;
-            BodyEditor.Visibility = sourceEditorActive ? Visibility.Collapsed : Visibility.Visible;
+            BodyEditor.Visibility = sourceEditorActive || blockEditorActive ? Visibility.Collapsed : Visibility.Visible;
+            ObjectEditorScroll.Visibility = blockEditorActive ? Visibility.Visible : Visibility.Collapsed;
             SourceBodyEditor.Visibility = sourceEditorActive ? Visibility.Visible : Visibility.Collapsed;
-            SourceModeButton.Content = sourceEditorActive ? "富文本" : "源码";
-            SourceModeButton.IsEnabled = supportsRichText;
-            ToolTipService.SetToolTip(SourceModeButton, sourceEditorActive ? "返回富文本编辑" : "打开源码视图");
-            EditorModeNote.Text = sourceEditorActive
-                ? string.IsNullOrWhiteSpace(reason) ? "源码视图" : reason
-                : "富文本编辑";
-            EditorModeNote.Visibility = sourceEditorActive ? Visibility.Visible : Visibility.Collapsed;
-            EditorBlockStyle.IsEnabled = !sourceEditorActive && !viewModel.BodyReadOnly;
-            foreach (var button in new[] { FormatBoldButton, FormatItalicButton, FormatStrikeButton, BulletListButton, NumberedListButton })
-                button.IsEnabled = !sourceEditorActive && !viewModel.BodyReadOnly;
-            EditorPlaceholder.Visibility = markdown.Length == 0 && !sourceEditorActive && !viewModel.BodyReadOnly ? Visibility.Visible : Visibility.Collapsed;
+            SourceModeButton.Visibility = usesMarkdown ? Visibility.Visible : Visibility.Collapsed;
+            SourceModeButton.Content = sourceEditorActive ? "返回正文" : "Markdown";
+            SourceModeButton.IsEnabled = supported;
+            ToolTipService.SetToolTip(SourceModeButton, sourceEditorActive ? "返回原生正文编辑" : "查看导入的 Markdown");
+            EditorModeNote.Text = viewModel.BodyReadOnly ? viewModel.EditorHint : reason;
+            EditorModeNote.Visibility = sourceEditorActive || viewModel.Selected?.ReadOnly == true ? Visibility.Visible : Visibility.Collapsed;
+            EditorPlaceholder.Visibility = blocks.Count == 0 && !sourceEditorActive && !blockEditorActive && !viewModel.BodyReadOnly ? Visibility.Visible : Visibility.Collapsed;
             BodyEditor.IsReadOnly = viewModel.BodyReadOnly;
             SourceBodyEditor.IsReadOnly = viewModel.BodyReadOnly;
             if (OutlineList.SelectedItem != viewModel.Selected) OutlineList.SelectedItem = viewModel.Selected;
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
         {
-            forceSourceEditor = true;
-            sourceEditorActive = true;
-            BodyEditor.Visibility = Visibility.Collapsed;
+            BodyEditor.Visibility = ObjectEditorScroll.Visibility = Visibility.Collapsed;
             SourceBodyEditor.Visibility = Visibility.Visible;
+            SourceBodyEditor.IsReadOnly = true;
             SourceBodyEditor.Text = viewModel.Body;
-            EditorModeNote.Text = "当前内容需要源码视图以完整保留格式。";
+            sourceEditorActive = true;
+            EditorModeNote.Text = "内容已保留，请检查对象信息。";
             viewModel.ShowError(ex);
         }
-        finally
-        {
-            loadingEditor = false;
-            UpdateEditorToolbar();
-        }
+        finally { loadingEditor = false; UpdateEditorToolbar(); }
     }
 
     private void BodyEditor_TextChanged(object sender, RoutedEventArgs e)
@@ -98,9 +101,9 @@ public sealed partial class MainWindow
         if (!loadingEditor && sourceEditorActive)
         {
             editorSyncTimer?.Stop(); editorSyncTimer?.Start();
-            var supportsRichText = RichMarkdownEditor.Supports(SourceBodyEditor.Text, out var reason);
+            var supportsRichText = ContentEditing.TryParseMarkdown(SourceBodyEditor.Text, out _);
             SourceModeButton.IsEnabled = supportsRichText;
-            EditorModeNote.Text = supportsRichText ? "源码视图" : reason;
+            EditorModeNote.Text = supportsRichText ? "Markdown 交换视图" : "当前内容包含保留语法，请在交换视图中编辑。";
             ToolTipService.SetToolTip(SourceModeButton, "返回富文本编辑");
         }
     }
@@ -109,8 +112,14 @@ public sealed partial class MainWindow
     {
         editorSyncTimer?.Stop();
         if (loadingEditor || !viewModel.HasProject || viewModel.BodyReadOnly) return;
-        var value = sourceEditorActive ? NormalizeSourceText(SourceBodyEditor.Text) : RichMarkdownEditor.ReadMarkdown(BodyEditor);
-        if (value != viewModel.Body) viewModel.Body = value;
+        if (sourceEditorActive)
+        {
+            var sourceValue = NormalizeSourceText(SourceBodyEditor.Text);
+            if (sourceValue != viewModel.Body) viewModel.Body = sourceValue;
+        }
+        else if (blockEditorActive) viewModel.SetEditorBlocks(ReadObjectEditor());
+        else viewModel.SetEditorBlocks(NativeContentEditor.ReadBlocks(BodyEditor));
+        var value = sourceEditorActive ? SourceBodyEditor.Text : viewModel.Body;
         EditorPlaceholder.Visibility = value.Length == 0 && !sourceEditorActive ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -124,8 +133,9 @@ public sealed partial class MainWindow
 
     private void SourceMode_Click(object sender, RoutedEventArgs e)
     {
-        FlushEditor();
-        if (sourceEditorActive && !RichMarkdownEditor.Supports(viewModel.Body, out _)) return;
+        if (sourceEditorActive) FlushEditor();
+        if (!viewModel.EditorUsesMarkdown) return;
+        if (sourceEditorActive && !ContentEditing.TryParseMarkdown(viewModel.Body, out _)) return;
         forceSourceEditor = !sourceEditorActive;
         LoadEditorFromViewModel();
         if (sourceEditorActive) SourceBodyEditor.Focus(FocusState.Programmatic);
@@ -135,7 +145,7 @@ public sealed partial class MainWindow
     private void EditorBlockStyle_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (loadingEditor || updatingToolbar || BodyEditor is null || sourceEditorActive || EditorBlockStyle.SelectedItem is not ComboBoxItem item) return;
-        var range = BodyEditor.Document.Selection;
+        var range = ActiveEditor.Document.Selection;
         range.ParagraphFormat.Style = (string)item.Tag switch
         {
             "heading1" => ParagraphStyle.Heading1,
@@ -146,40 +156,52 @@ public sealed partial class MainWindow
         QueueEditorSync();
     }
 
-    private enum EditorFormat { Bold, Italic, Strike }
+    private enum EditorFormat { Bold, Italic, Underline, Strike, Superscript, Subscript }
     private void FormatBold_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Bold);
     private void FormatItalic_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Italic);
+    private void FormatUnderline_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Underline);
     private void FormatStrike_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Strike);
+    private void FormatSuperscript_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Superscript);
+    private void FormatSubscript_Click(object sender, RoutedEventArgs e) => ToggleFormat(EditorFormat.Subscript);
 
     private void UndoEditor_Click(object sender, RoutedEventArgs e)
     {
-        if (sourceEditorActive || viewModel.BodyReadOnly || !BodyEditor.Document.CanUndo()) return;
-        BodyEditor.Document.Undo();
+        if (sourceEditorActive || viewModel.BodyReadOnly || !ActiveEditor.Document.CanUndo()) return;
+        ActiveEditor.Document.Undo();
         QueueEditorSync();
         UpdateEditorToolbar();
-        BodyEditor.Focus(FocusState.Programmatic);
+        ActiveEditor.Focus(FocusState.Programmatic);
     }
 
     private void RedoEditor_Click(object sender, RoutedEventArgs e)
     {
-        if (sourceEditorActive || viewModel.BodyReadOnly || !BodyEditor.Document.CanRedo()) return;
-        BodyEditor.Document.Redo();
+        if (sourceEditorActive || viewModel.BodyReadOnly || !ActiveEditor.Document.CanRedo()) return;
+        ActiveEditor.Document.Redo();
         QueueEditorSync();
         UpdateEditorToolbar();
-        BodyEditor.Focus(FocusState.Programmatic);
+        ActiveEditor.Focus(FocusState.Programmatic);
     }
 
     private void ToggleFormat(EditorFormat kind)
     {
         if (sourceEditorActive || viewModel.BodyReadOnly) return;
-        var format = BodyEditor.Document.Selection.CharacterFormat;
+        var format = ActiveEditor.Document.Selection.CharacterFormat;
         switch (kind)
         {
             case EditorFormat.Bold: format.Bold = format.Bold == FormatEffect.On ? FormatEffect.Off : FormatEffect.On; break;
             case EditorFormat.Italic: format.Italic = format.Italic == FormatEffect.On ? FormatEffect.Off : FormatEffect.On; break;
+            case EditorFormat.Underline: format.Underline = format.Underline == UnderlineType.Single ? UnderlineType.None : UnderlineType.Single; break;
             case EditorFormat.Strike: format.Strikethrough = format.Strikethrough == FormatEffect.On ? FormatEffect.Off : FormatEffect.On; break;
+            case EditorFormat.Superscript:
+                format.Superscript = format.Superscript == FormatEffect.On ? FormatEffect.Off : FormatEffect.On;
+                if (format.Superscript == FormatEffect.On) format.Subscript = FormatEffect.Off;
+                break;
+            case EditorFormat.Subscript:
+                format.Subscript = format.Subscript == FormatEffect.On ? FormatEffect.Off : FormatEffect.On;
+                if (format.Subscript == FormatEffect.On) format.Superscript = FormatEffect.Off;
+                break;
         }
-        BodyEditor.Focus(FocusState.Programmatic);
+        ActiveEditor.Focus(FocusState.Programmatic);
         QueueEditorSync();
         UpdateEditorToolbar();
     }
@@ -190,9 +212,9 @@ public sealed partial class MainWindow
     private void ToggleList(MarkerType marker)
     {
         if (sourceEditorActive || viewModel.BodyReadOnly) return;
-        var paragraph = BodyEditor.Document.Selection.ParagraphFormat;
+        var paragraph = ActiveEditor.Document.Selection.ParagraphFormat;
         paragraph.ListType = paragraph.ListType == marker ? MarkerType.None : marker;
-        BodyEditor.Focus(FocusState.Programmatic);
+        ActiveEditor.Focus(FocusState.Programmatic);
         QueueEditorSync();
         UpdateEditorToolbar();
     }
@@ -204,21 +226,25 @@ public sealed partial class MainWindow
         try
         {
             var editable = viewModel.HasProject && !viewModel.BodyReadOnly && !sourceEditorActive;
-            var canUndo = editable && BodyEditor.Document.CanUndo();
-            var canRedo = editable && BodyEditor.Document.CanRedo();
+            InsertObjectButton.IsEnabled = CanInsertObject();
+            var canUndo = editable && ActiveEditor.Document.CanUndo();
+            var canRedo = editable && ActiveEditor.Document.CanRedo();
             UndoEditorButton.IsEnabled = canUndo;
             RedoEditorButton.IsEnabled = canRedo;
             EditorBlockStyle.IsEnabled = editable;
-            foreach (var button in new[] { FormatBoldButton, FormatItalicButton, FormatStrikeButton, BulletListButton, NumberedListButton })
+            foreach (var button in new[] { FormatBoldButton, FormatItalicButton, FormatUnderlineButton, FormatStrikeButton, FormatSuperscriptButton, FormatSubscriptButton, BulletListButton, NumberedListButton })
                 button.IsEnabled = editable;
             if (!editable) return;
 
-            var character = BodyEditor.Document.Selection.CharacterFormat;
+            var character = ActiveEditor.Document.Selection.CharacterFormat;
             FormatBoldButton.IsChecked = FormatState(character.Bold);
             FormatItalicButton.IsChecked = FormatState(character.Italic);
+            FormatUnderlineButton.IsChecked = character.Underline switch { UnderlineType.Single => true, UnderlineType.None => false, _ => null };
             FormatStrikeButton.IsChecked = FormatState(character.Strikethrough);
+            FormatSuperscriptButton.IsChecked = FormatState(character.Superscript);
+            FormatSubscriptButton.IsChecked = FormatState(character.Subscript);
 
-            var paragraph = BodyEditor.Document.Selection.ParagraphFormat;
+            var paragraph = ActiveEditor.Document.Selection.ParagraphFormat;
             BulletListButton.IsChecked = paragraph.ListType is MarkerType.Bullet or MarkerType.BlackCircleWingding or MarkerType.WhiteCircleWingding;
             NumberedListButton.IsChecked = paragraph.ListType is not MarkerType.None and not MarkerType.Undefined
                 and not MarkerType.Bullet and not MarkerType.BlackCircleWingding and not MarkerType.WhiteCircleWingding;

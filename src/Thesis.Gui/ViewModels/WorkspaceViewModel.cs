@@ -8,7 +8,9 @@ using Thesis.Core;
 namespace Thesis.Gui.ViewModels;
 
 public sealed class OutlineItem(string id, string label, string kind, Func<string> readTitle,
-    Action<string> writeTitle, Func<string> readBody, Action<string> writeBody, bool readOnly = false) : INotifyPropertyChanged
+    Action<string> writeTitle, Func<string> readBody, Action<string> writeBody, bool readOnly = false,
+    Func<List<ThesisContentBlock>>? readBlocks = null, Action<List<ThesisContentBlock>>? writeBlocks = null,
+    Func<string?>? readMarkdown = null) : INotifyPropertyChanged
 {
     private string labelText = label;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -20,6 +22,9 @@ public sealed class OutlineItem(string id, string label, string kind, Func<strin
     public Action<string> WriteTitle { get; } = writeTitle;
     public Func<string> ReadBody { get; } = readBody;
     public Action<string> WriteBody { get; } = writeBody;
+    public Func<List<ThesisContentBlock>> ReadBlocks { get; } = readBlocks ?? (() => []);
+    public Action<List<ThesisContentBlock>> WriteBlocks { get; } = writeBlocks ?? (_ => { });
+    public Func<string?> ReadMarkdown { get; } = readMarkdown ?? (() => null);
 }
 
 /// <summary>UI state and editing intent; persistence and composition live in Application.</summary>
@@ -60,7 +65,10 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public string CharacterCount => $"当前 {Body.Count(c => !char.IsWhiteSpace(c)):N0} 字符";
     public string EditorHint => Selected?.ReadOnly == true
         ? "原稿中的图片、表格、公式和格式已保留。当前区域为原稿预览；新增章节可直接编辑。"
-        : "支持 Markdown：**粗体**、*斜体*、列表、表格和本地图片；快速预览随内容更新。";
+        : "正文以原生段落和行内格式保存；Markdown 可通过导入、导出与 Agent 工作流交换。";
+    public bool EditorUsesMarkdown => Selected?.ReadMarkdown() is not null;
+    public List<ThesisContentBlock> EditorBlocks => Selected?.Kind == "front"
+        ? Body.Split('\n').Select(text => new ThesisContentBlock { Text = text }).ToList() : Selected?.ReadBlocks() ?? [];
     public bool BodyReadOnly => Selected is null || Selected.ReadOnly || IsBusy;
     public bool HeadingReadOnly => Selected is null || Selected.Kind == "front" || Selected.ReadOnly || IsBusy;
     public bool CanDelete => Selected?.Kind is "chapter" or "section" && !Selected.ReadOnly && CanEdit;
@@ -85,6 +93,15 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
             Changed();
             Notify(nameof(CharacterCount));
         }
+    }
+    public void SetEditorBlocks(List<ThesisContentBlock> blocks)
+    {
+        if (Selected is null || BodyReadOnly) return;
+        if (Selected.Kind == "front") { Body = string.Join("\n", blocks.Select(ContentEditing.Text)); return; }
+        if (Selected.ReadMarkdown() is null && ThesisJson.Serialize(Selected.ReadBlocks()) == ThesisJson.Serialize(blocks)) return;
+        Selected.WriteBlocks(blocks);
+        Changed();
+        Notify(nameof(CharacterCount));
     }
     public OutlineItem? Selected
     {
@@ -374,14 +391,17 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         for (var i = 0; i < content.Chapters.Count; i++)
         {
             var chapter = content.Chapters[i];
-            var protectedContent = chapter.Markdown is null && (chapter.OrderedContentIncludesSections || chapter.Blocks.Count > 0 || chapter.Tables.Count > 0);
+            var protectedContent = chapter.OrderedContentIncludesSections || chapter.Blocks.Any(b => b.Type == "native");
             Outline.Add(new(chapter.Id, $"{i + 1}  {chapter.Title}", "chapter", () => chapter.Title, t => chapter.Title = t,
-                () => chapter.Markdown ?? Read(chapter.Paragraphs, chapter.Blocks), t => chapter.Markdown = t, protectedContent));
+                () => chapter.Markdown ?? Read(chapter.Paragraphs, chapter.Blocks, chapter.Tables), t => chapter.Markdown = t, protectedContent,
+                () => ContentEditing.Read(chapter.Paragraphs, chapter.Blocks, chapter.Tables), blocks => { chapter.Markdown = null; chapter.Paragraphs.Clear(); chapter.Tables.Clear(); chapter.Blocks = blocks; }, () => chapter.Markdown));
             for (var j = 0; j < chapter.Sections.Count; j++)
             {
                 var section = chapter.Sections[j];
                 Outline.Add(new(section.Id, $"    {i + 1}.{j + 1}  {section.Title}", "section", () => section.Title, t => section.Title = t,
-                    () => section.Markdown ?? Read(section.Paragraphs, section.Blocks), t => section.Markdown = t, protectedContent || section.Markdown is null && (section.Blocks.Count > 0 || section.Tables.Count > 0)));
+                    () => section.Markdown ?? Read(section.Paragraphs, section.Blocks, section.Tables), t => section.Markdown = t,
+                    protectedContent || section.Blocks.Any(b => b.Type == "native"),
+                    () => ContentEditing.Read(section.Paragraphs, section.Blocks, section.Tables), blocks => { section.Markdown = null; section.Paragraphs.Clear(); section.Tables.Clear(); section.Blocks = blocks; }, () => section.Markdown));
             }
         }
         Outline.Add(new("references", "参考文献", "front", () => "参考文献", _ => { }, () => string.Join("\n", content.References), t => content.References = Lines(t)));
@@ -389,8 +409,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         Selected = Outline.FirstOrDefault(i => i.Id == selectedId) ?? Outline.FirstOrDefault(i => i.Kind == "chapter") ?? Outline[0];
     }
 
-    private static string Read(List<string> paragraphs, List<ThesisContentBlock> blocks) => blocks.Count == 0
-        ? string.Join("\n", paragraphs) : string.Join("\n", blocks.Select(b => b.Text ?? b.Caption ?? $"[{b.Type}]"));
+    private static string Read(List<string> paragraphs, List<ThesisContentBlock> blocks, List<ThesisTableContent> tables) => MarkdownSupport.Body(paragraphs, blocks, tables);
     private static List<string> Lines(string text) => text.Split('\n').ToList();
     private static void Swap<T>(List<T> items, int index, int delta)
     {

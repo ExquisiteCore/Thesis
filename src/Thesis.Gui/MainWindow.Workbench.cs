@@ -19,6 +19,15 @@ public sealed partial class MainWindow
         if (Enum.TryParse<ElementTheme>(viewModel.Preferences.Theme, out var theme)) Root.RequestedTheme = theme;
         ShowPage("home");
         InitializeEditor();
+        viewModel.PropertyChanged += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            StatusStrip.Visibility = viewModel.IsBusy || viewModel.IsDirty || viewModel.HasError ? Visibility.Visible : Visibility.Collapsed;
+            CancelTaskButton.Visibility = viewModel.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+            ProgressIndicator.Visibility = viewModel.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+            StatusText.Text = viewModel.IsDirty && !viewModel.IsBusy ? "有未保存更改" : viewModel.Status;
+        });
+        StatusStrip.Visibility = Visibility.Collapsed;
+        CancelTaskButton.Visibility = ProgressIndicator.Visibility = Visibility.Collapsed;
         previewTimer = DispatcherQueue.CreateTimer(); previewTimer.Interval = TimeSpan.FromMilliseconds(650); previewTimer.IsRepeating = false;
         previewTimer.Tick += async (_, _) => { if ((currentPage == "preview" || LivePreviewToggle.IsChecked == true) && !viewModel.IsBusy) await RefreshQuickPreviewAsync(); };
         viewModel.Edited += (_, _) =>
@@ -113,14 +122,10 @@ public sealed partial class MainWindow
     });
     private async void InsertImage_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        if (viewModel.BodyReadOnly || viewModel.ProjectPath is null) return;
+        if (!CanInsertObject() || viewModel.ProjectPath is null) return;
         var path = await OpenFileAsync("插入本地图片", ".png", ".jpg", ".jpeg", ".gif", ".bmp"); if (path is null) return;
-        // Import through Markdown so the image becomes a fingerprinted, project-owned asset.
-        var markdown = Path.Combine(Path.GetDirectoryName(viewModel.ProjectPath)!, ".thesis", "image-import.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(markdown)!);
-        File.WriteAllText(markdown, "## 图片\n\n![图片说明](<" + path.Replace('\\', '/') + ">)");
-        try { var imported = MarkdownProjectFormat.Import(markdown, viewModel.ProjectPath); viewModel.Body += "\n\n" + imported.Chapters[0].Markdown; }
-        finally { File.Delete(markdown); }
+        var image = await Task.Run(() => ProjectAssetStore.ImportImage(path, viewModel.ProjectPath, Path.GetFileNameWithoutExtension(path)));
+        InsertObject(image);
     });
     private async void Find_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {

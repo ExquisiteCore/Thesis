@@ -73,10 +73,42 @@ public static class MarkdownSupport
                 "native" => NativeFence(block),
                 "image" => $"![{block.Caption ?? block.AltText}](<{block.Path?.Replace('\\', '/')}>)",
                 "table" when block.Table is not null => Table(block.Table),
-                _ => block.Text ?? ""
+                "equation" => "$$\n" + (block.Latex ?? block.Text) + "\n$$",
+                "paragraph" => Paragraph(block),
+                _ => NativeFence(block)
             });
         if (blocks.Count == 0) result.AddRange(tables.Select(Table));
         return string.Join("\n\n", result);
+    }
+
+    public static string Paragraph(ThesisContentBlock block)
+    {
+        // Markdown has no portable underline or nested-list format matching every native run.
+        if (block.Runs.Any(r => r.Underline) || block.ListLevel is > 0)
+            return "```thesis-block\n" + ThesisJson.Serialize(block) + "\n```";
+        string Escape(string value)
+        {
+            var result = new StringBuilder();
+            foreach (var c in value) { if ("\\`*_{}[]<>#|$~^!+-".Contains(c)) result.Append('\\'); result.Append(c); }
+            return result.ToString().Replace("\v", "  \n");
+        }
+        string Run(ThesisTextRun run)
+        {
+            var value = Escape(run.Text.Trim());
+            if (value.Length == 0) return run.Text;
+            if (run.Code) { var ticks = new string('`', run.Text.Split('`').Length); value = ticks + " " + run.Text.Trim() + " " + ticks; }
+            if (run.Superscript) value = "^" + value + "^";
+            if (run.Subscript) value = "~" + value + "~";
+            if (run.Strike) value = "~~" + value + "~~";
+            if (run.Italic) value = "*" + value + "*";
+            if (run.Bold) value = "**" + value + "**";
+            return run.Text[..(run.Text.Length - run.Text.TrimStart().Length)] + value + run.Text[(run.Text.TrimEnd().Length)..];
+        }
+        var text = block.Runs.Count > 0 ? string.Concat(block.Runs.Select(Run)) : Escape(block.Text ?? "");
+        var prefix = block.ParagraphStyle switch { "heading1" => "# ", "heading2" => "## ", "heading3" => "### ", _ => "" };
+        if (block.ListKind == "bullet") prefix = "- " + prefix;
+        if (block.ListKind == "numbered") prefix = "1. " + prefix;
+        return prefix + text;
     }
 
     public static string Table(ThesisTableContent table)

@@ -8,14 +8,16 @@
       </ResourceDictionary.MergedDictionaries>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FFF1F5F3" />
-          <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FFFFFEFB" />
-          <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FFD9E2DE" />
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FFF2F5F3" />
+          <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FFD8E0DC" />
           <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF08786E" />
           <SolidColorBrush x:Key="ThesisAccentTextBrush" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="#FFE5F1EE" />
           <SolidColorBrush x:Key="ThesisInkBrush" Color="#FF202B28" />
           <SolidColorBrush x:Key="ThesisMutedBrush" Color="#FF68756F" />
+          <SolidColorBrush x:Key="ThesisActionBrush" Color="#FFB9573F" />
+          <SolidColorBrush x:Key="ThesisActionSoftBrush" Color="#FFF8E8E3" />
           <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF08786E" />
           <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF0A6A61" />
           <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#FFB8DCD4" />
@@ -31,6 +33,8 @@
           <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="#FF293D37" />
           <SolidColorBrush x:Key="ThesisInkBrush" Color="#FFE6ECE9" />
           <SolidColorBrush x:Key="ThesisMutedBrush" Color="#FFA6B2AC" />
+          <SolidColorBrush x:Key="ThesisActionBrush" Color="#FFFF9A76" />
+          <SolidColorBrush x:Key="ThesisActionSoftBrush" Color="#FF402B27" />
           <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF69C7B7" />
           <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF55B3A3" />
           <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#FF35584F" />
