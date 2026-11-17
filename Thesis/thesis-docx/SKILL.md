@@ -31,6 +31,16 @@ dotnet build ThesisTool.slnx
 
 下方示例使用源码构建路径；在发布包内执行时，把 `.\src\Thesis.Cli\bin\Debug\net10.0\Thesis.Cli.exe` 替换为 `.\Thesis.Cli.exe`。
 
+## 接续桌面论文项目
+
+WinUI 3 桌面端与 CLI 共用 `.thesis.json` 项目。用户提供项目时，先执行 `project inspect --project <path>`，保留返回的 `projectFingerprint`；读取项目 `content` 后编辑正文，以 `project update --project <path> --expected-sha256 <fingerprint> --content <content.json>` 提交。指纹不一致时重新读取并合并，保留 GUI 中的改动。
+
+GUI 与 CLI 是两个独立入口：前者用于人类编辑/预览，后者配合 Agent。`project create/update --content` 也支持 Markdown，正文可以保存为章节/小节的 `markdown` 字段。`project export-markdown --project <path> --out <paper.md>` 导出正文和图片资产；`project pack --project <path> --out <paper.zip>` 打包迁移。保护 `assetDirectory` 与 `thesis-native` 片段的源路径、索引、指纹。GUI 模板设计通过 `templateDesignPath` 引用独立版本；替换模板后清除此字段并重新校准。
+
+GUI 快速预览基于 Open XML，不启动 COM。最终 PDF 才调用 WPS/Word；PDF 审计默认使用内置 .NET，`pythonPath` 仅用于兼容旧 PyMuPDF 检查。Markdown LaTeX 当前保留源码，原生 Word 公式通过 DOCX 片段迁移，须在导出 PDF 中复核。
+
+候选生成使用 `project compose --project <path> --out <candidate.docx> --render true --require-ready false`，排版设置取项目的 `renderConfigPath`；无渲染检查的候选可用 `--render false`。正式输出沿用默认交付门禁。正文更新会清除原有绑定方案；模板初次识别仍需检查封面、分节、样式、编号和学校要求。原生 DOCX 内容块保留 `sourcePath` 与指纹，编辑时不要把它们静默降为纯文本。
+
 ## 规则优先级
 
 ```text

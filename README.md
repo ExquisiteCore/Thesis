@@ -1,6 +1,74 @@
-# Thesis 论文 DOCX CLI
+# Thesis 论文工作台与 CLI
 
 这个工具的目标不是“凭空生成一个论文文件”，而是把学校模板或成品论文变成可执行规则，然后在模板副本上按语义写入正文、表格、图片、参考文献，并继续支持老师反馈后的微调。
+
+## Windows 论文工作台（WinUI 3）
+
+GUI 面向写作者，CLI + Skill 面向 Agent，是两个独立入口。它们共享 `.thesis.json`、模板设计和 `Thesis.Application`，不要求同时运行。Agent 更新项目后，处于已保存状态的 GUI 会自动刷新；本地有未保存内容时通过指纹保护，保留双方版本。
+
+```powershell
+dotnet build Thesis.Desktop.slnx --configuration Release
+.\src\Thesis.Gui\bin\Release\net10.0-windows10.0.19041.0\win-x64\Thesis.Gui.exe
+# 打开指定项目
+.\src\Thesis.Gui\bin\Release\net10.0-windows10.0.19041.0\win-x64\Thesis.Gui.exe --project "我的论文.thesis.json"
+# 生成无需另装 .NET 的便携包与校验清单
+.\tools\publish-desktop.ps1 -Archive
+# Windows 原生界面回归（独立测试构建，生产包不包含测试入口）
+.\tools\test-desktop.ps1
+```
+
+桌面端支持 Windows 10 1809 或更新版本。源码构建需要 Windows 和 .NET 10 SDK；发布包包含 .NET 和 Windows App SDK，解压后运行 `Thesis.Gui.exe`。可选执行包内 `install-desktop.ps1` 创建桌面快捷方式；`-RemoveShortcut` 仅移除快捷方式。包内附文件校验清单及第三方许可。跨平台 CLI 使用 `ThesisTool.slnx`，桌面构建使用 `Thesis.Desktop.slnx`。GitHub Release 分别提供 CLI 和 Windows GUI 包。
+
+工作流程：新建项目 → 导入或设计模板 → 导入 / 编辑 Markdown → 快速预览 → 检查 → 生成 DOCX；最终分页与 PDF 导出按需使用 WPS/Word。
+
+| 工作区 | 已实现能力 |
+| --- | --- |
+| 首页 | 最近项目、新建向导、打开项目、导入便携项目包 |
+| 写作 | 章节/小节增删排序，中文/英文摘要与关键词，Markdown 编辑、查找、本地图片，Ctrl+N/O/S |
+| 模板 | 通用 A4 模板、学校模板/合格论文识别、角色置信度和样本重选、字体/段落调整、页边距、封面替换、内容要求、可复用模板库 |
+| 快速预览 | 内置 Open XML 内容预览，文字/图表/主要样式/链接；24 个内容块分段呈现，避免一次创建长文全部控件；导出的 PDF 使用 Windows 原生 PDF API 显示 |
+| 检查 | 空章节/缺失素材/待确认模板规则/学校内容要求，点击内容问题定位章节；正式导出继续执行结构、内容、页码与越界检查 |
+| 历史 | 自动恢复记录、每五分钟合并一次自动保存检查点、导入与恢复前快照，历史/当前内容并列查看，恢复前保留当前版本 |
+
+编辑停止约一秒后自动保存。项目使用串行写入、指纹校验、文件事务；冲突可另存副本。模板修改须点击“保存并应用”。格式识别的确认不等于整篇论文已验收；候选文件保留 `ready=false` 及具体待审理由。任务取消在阶段边界生效，正在执行的 Office 调用结束或超时后停止。
+
+项目资源在 `assets/`，模板、历史、恢复和任务证据在 `.thesis/`。移动项目推荐“导出项目包”：它携带正文/模板/素材，导入到新目录；本机排版软件配置与已绑定旧方案不跨机复用。仅“另存项目副本”仍会引用原素材。删除项目目录前请先导出项目包；程序不自动清理历史或用户素材。
+
+### Markdown 范围与预览边界
+
+- 导入 `.md` / `.markdown`，一个 H1 为论文题目，H2 为章节，H3 为小节；摘要、Abstract、参考文献、致谢按名称识别。元信息可用 `thesis-metadata` JSON 代码块携带作者和关键词。
+- 正文章节保存 Markdown 原文，支持粗体、斜体、删除线、上/下标、列表、引用、链接、表格、代码和本地图片。图片复制到项目资产，并按 SHA-256 命名；导出 Markdown 时同时导出 `.assets` 目录。
+- Word 导入先保留原生内容，避免丢失复杂对象。选择整章后可转为 Markdown：普通段落可编辑，复杂对象保留为带源文件指纹的 `thesis-native` 片段。请勿改动片段的源路径、索引和指纹；完整富文本/公式可视编辑仍在后续路线中。
+- `$...$` / `$$...$$` LaTeX 当前保留源码并产生预检提示，尚未转换成 Word 数学排版；DOCX 原生公式按原结构迁移。HTML 不执行，远程图片需先下载到本地再导入。
+- 快速预览不是 Word 分页引擎：显示主体内容和主要样式，合并单元格、浮动对象、页眉页脚、自动编号、复杂公式和实际分页以最终 DOCX/PDF 为准。
+- 最终 PDF 页面显示使用 Windows 自带 API，PDF 文字/页码/越界审计默认使用纯 .NET PdfPig；日常编辑和快速预览均不启动 COM，也不依赖 Python。
+
+### 依赖与架构
+
+`Thesis.Gui`（WinUI 界面 / ViewModel）与 `Thesis.Cli`（命令协议）→ `Thesis.Application`（项目、模板库、导入导出、历史、预览编排、套版事务）→ `Core / Schema / OpenXml / Profile / Host`。复杂功能按模板、预览、工作区拆分；两端共享同一生成和校验服务。
+
+新增运行时依赖只有纯 .NET 的 Markdig 1.6.0（CommonMark 解析）和 PdfPig 0.1.16（PDF 读取）。继续使用既有 Open XML SDK 与 Windows App SDK，没有引入浏览器、Node、数据库或转换服务。旧 `pythonPath` 配置仍可选用 PyMuPDF 兼容审计器。
+
+预览方案参考：[docx-preview](https://github.com/VolodymyrBaydalka/docxjs)、[Mammoth](https://github.com/mwilliamson/mammoth.js)、[ONLYOFFICE](https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/)、[DeepSeek Harness 本地 Office 预览设计](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/archived/architecture/2026-09-10-local-office-preview.zh.md)。Harness 使用 LibreOffice WASM 转 PDF，再由 PDF.js 显示；本项目按轻量原生预览要求选择 Open XML 重绘，避免内嵌完整排版引擎的启动、内存与发布成本。
+
+### 后续路线
+
+- [ ] GUI 内集成 AI：围绕当前章节、大纲与模板规则提出编辑建议，差异确认后应用；CLI + Skill 继续独立运行。
+- [ ] 原生公式、脚注尾注、合并表格与浮动图形的逐块可视编辑，以及 LaTeX → OMML。
+- [ ] 更完整的模板封面/页眉页脚可视设计与章节分页对照；快速预览继续与正式分页明确区分。
+- [ ] 自动更新、签名安装包、多语言与键盘/屏幕阅读器实机验收。
+
+
+Agent 可以直接接续桌面项目：
+
+```powershell
+Thesis.Cli.exe project create --out "我的论文.thesis.json" --content "content.json" --template "模板.docx"
+Thesis.Cli.exe project inspect --project "我的论文.thesis.json"
+Thesis.Cli.exe project update --project "我的论文.thesis.json" --expected-sha256 "inspect 返回的 projectFingerprint" --content "修改后的content.json"
+Thesis.Cli.exe project compose --project "我的论文.thesis.json" --out "candidate.docx" --render false --require-ready false
+```
+
+`project update` 会检查读取时的指纹，并在替换正文后清除旧套版方案。`project compose` 默认要求完整交付门禁；预览候选请显式传 `--require-ready false`。同一正文、资产和模板规则复用经校验的源 DOCX 快照，绑定方案据此保持稳定；正文或模板改变后需重新校准。生成的报告、方案和成品通过同一事务提交。
 
 ## 构建与运行
 
@@ -121,7 +189,7 @@ CLI 参数适配
 
 ### 渲染与分页验收
 
-推荐选择最终阅读环境的 WPS/Office 完成更新、保存和 PDF 导出；也保留 LibreOffice 引擎。准备包含 PyMuPDF 的 Python 环境：
+推荐选择最终阅读环境的 WPS/Office 完成更新、保存和 PDF 导出；也保留 LibreOffice 引擎。默认 PDF 审计已经内置。仅使用旧 PyMuPDF 审计器时才准备以下环境：
 
 ```powershell
 uv venv .venv
@@ -133,13 +201,12 @@ uv pip install --python .venv/Scripts/python.exe PyMuPDF==2.0
 ```json
 {
   "engine": "wps",
-  "pythonPath": ".venv/Scripts/python.exe",
   "timeoutSeconds": 120,
   "maxPasses": 4
 }
 ```
 
-`engine` 支持 `wps`、`word`、`auto` 和 `libreoffice`。选择 LibreOffice 时另设 `libreOfficePath`。Office COM 通过 STA 工作进程运行，受 `timeoutSeconds` 限制；同一个引擎完成 DOCX 最终化和 PDF 导出。`doctor --render-config render.json` 检查基础依赖。WPS 目录刷新可能重建目录引用书签，因此页码验证使用独立目标书签，并对照 PDF 的真实页面。
+`pythonPath` 可省略，使用内置 .NET 审计；显式配置该路径时启用旧 PyMuPDF 审计器。`engine` 支持 `wps`、`word`、`auto` 和 `libreoffice`。选择 LibreOffice 时另设 `libreOfficePath`。Office COM 通过 STA 工作进程运行，受 `timeoutSeconds` 限制；同一个引擎完成 DOCX 最终化和 PDF 导出。`doctor --render-config render.json` 检查基础依赖。WPS 目录刷新可能重建目录引用书签，因此页码验证使用独立目标书签，并对照 PDF 的真实页面。
 
 ```powershell
 .\Thesis.Cli.exe apply-template --doc source.docx --template template.docx --plan bound-plan.json --out final.docx --report final.json --render-config render.json --pdf final.pdf --workdir render-evidence
