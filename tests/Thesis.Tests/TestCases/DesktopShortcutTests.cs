@@ -45,6 +45,21 @@ public sealed class DesktopShortcutTests
             Assert.Equal("Grid.KeyboardAccelerators", shortcut.Parent!.Name.LocalName));
     }
 
+    [Fact]
+    public void WritingWorkspaceUsesNativeRichTextWithCompactSourceFallback()
+    {
+        var markup = LoadMarkup();
+        var editor = Assert.Single(markup.Descendants(Presentation + "RichEditBox"));
+        Assert.Equal("BodyEditor", (string?)editor.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name"));
+        Assert.Equal("BodyEditor_SelectionChanged", (string?)editor.Attribute("SelectionChanged"));
+        Assert.Contains(markup.Descendants(Presentation + "TextBox"), element =>
+            (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name") == "SourceBodyEditor");
+        Assert.Contains(markup.Descendants(Presentation + "Button"), element =>
+            (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name") == "UndoEditorButton");
+        Assert.Contains(markup.Descendants(Presentation + "Button"), element =>
+            (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name") == "RedoEditorButton");
+    }
+
     private static XDocument LoadMarkup()
     {
         using var stream = typeof(DesktopShortcutTests).Assembly.GetManifestResourceStream("Desktop.MainWindow.xaml")!;
