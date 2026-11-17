@@ -123,7 +123,8 @@ public sealed partial class MainWindow
             Require(viewModel.Body == "CLI 外部更新正文", "GUI 载入外部已保存版本");
             await RefreshQuickPreviewAsync();
             Require(quickPreview!.Blocks.Any(b => b.Text.Contains("CLI 外部更新正文")), "外部更新进入快速预览");
-            ShowPage("checks"); await viewModel.CheckAsync(); Require(viewModel.Issues.Count > 0, "内容预检显示问题");
+            ShowPage("checks"); await RefreshChecksAsync();
+            Require(viewModel.Issues.Count > 0 && ChecksList.Visibility == Visibility.Visible && ChecksEmptyState.Visibility == Visibility.Collapsed, "内容预检显示问题条目");
             ShowPage("history"); Require(viewModel.Versions.Count > 0, "历史检查点已加载");
             HistoryBefore.Text = viewModel.HistoryText(viewModel.Versions[0].Path); Require(HistoryBefore.Text.Length > 0, "历史正文可查看");
             await viewModel.ExportMarkdownAsync(Path.Combine(directory, "paper.md"));

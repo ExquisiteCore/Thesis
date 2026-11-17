@@ -27,7 +27,7 @@ public static class ThesisDocumentGenerator
             var body = mainPart.Document.AppendChild(new Body());
 
             if (chaptersOnly) AppendChapters(mainPart, body, content.Chapters, rules, content.AssetDirectory);
-            else AppendThesisContent(mainPart, body, content, rules);
+            else AppendThesisContent(mainPart, body, content, rules, content.AssetDirectory);
             MarkDocumentFieldsDirty(mainPart);
             body.AppendChild(CreateSectionProperties(rules.PageSetup));
             mainPart.Document.Save();
@@ -61,7 +61,7 @@ public static class ThesisDocumentGenerator
                     ?? CreateSectionProperties(rules.PageSetup);
                 body.RemoveAllChildren();
                 AppendFrontMatterDocuments(mainPart, body, frontMatterDocPaths ?? []);
-                AppendThesisContent(mainPart, body, content, rules);
+                AppendThesisContent(mainPart, body, content, rules, content.AssetDirectory);
                 body.AppendChild(sectionProperties);
             }
 
@@ -93,7 +93,7 @@ public static class ThesisDocumentGenerator
         }
 
         var generatedBody = new Body();
-        AppendThesisContent(mainPart, generatedBody, content, rules);
+        AppendThesisContent(mainPart, generatedBody, content, rules, content.AssetDirectory);
         var generatedBlocks = generatedBody.Elements<OpenXmlElement>()
             .Select(block => block.CloneNode(deep: true))
             .ToList();
@@ -274,13 +274,13 @@ public static class ThesisDocumentGenerator
         return string.Concat(block.Descendants<Text>().Select(text => text.Text));
     }
 
-    private static void AppendThesisContent(MainDocumentPart mainPart, Body body, ThesisContent content, TemplateProfile rules)
+    private static void AppendThesisContent(MainDocumentPart mainPart, Body body, ThesisContent content, TemplateProfile rules, string assetDirectory)
     {
         AppendParagraph(body, RequiredTitle(content), ResolveParagraphFormat(rules, "title"), "Title");
         AppendOptionalParagraph(body, content.Author, ResolveParagraphFormat(rules, "body"), "Normal");
         AppendAbstracts(body, content, rules);
         AppendTableOfContents(body, rules);
-        AppendChapters(mainPart, body, content.Chapters, rules, content.AssetDirectory);
+        AppendChapters(mainPart, body, content.Chapters, rules, assetDirectory);
         AppendReferences(body, content.References, rules);
         AppendAcknowledgements(body, content.Acknowledgements, rules);
     }
@@ -315,20 +315,21 @@ public static class ThesisDocumentGenerator
 
     private static void AppendChapters(MainDocumentPart mainPart, Body body, List<ThesisChapterContent> chapters, TemplateProfile rules, string assetDirectory = ".")
     {
+        assetDirectory = Path.GetFullPath(assetDirectory);
         using var native = new NativeContentImporter(mainPart);
-        var markdown = new MarkdownDocxWriter(mainPart, body, Path.GetFullPath(assetDirectory),
+        var markdown = new MarkdownDocxWriter(mainPart, body, assetDirectory,
             (text, role) => AppendParagraph(body, text, ResolveParagraphFormat(rules, role, "body"), role.StartsWith("heading") ? "Heading" + role[^1] : "Normal"),
-            block => AppendImageBlock(mainPart, body, block, rules),
+            block => AppendImageBlock(mainPart, body, block, rules, assetDirectory),
             table => AppendTables(body, [table], rules),
             block => native.Import(block, ResolveParagraphFormat(rules, block.Role ?? "body", "body"), ResolveTableFormat(rules)),
-            block => AppendContentBlocks(mainPart, body, [block], [], [], rules, native));
+            block => AppendContentBlocks(mainPart, body, [block], [], [], rules, native, assetDirectory));
         for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
         {
             var chapter = chapters[chapterIndex];
             var chapterNumber = chapterIndex + 1;
             AppendParagraph(body, FormatChapterTitle(chapter.Title, chapterNumber), ResolveParagraphFormat(rules, "heading1"), "Heading1");
             if (chapter.Markdown is not null) markdown.Append(chapter.Markdown);
-            else AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules, native);
+            else AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules, native, assetDirectory);
             if (chapter.OrderedContentIncludesSections) continue; // Ordered chapter stream includes its subsection headings.
 
             for (var sectionIndex = 0; sectionIndex < chapter.Sections.Count; sectionIndex++)
@@ -336,7 +337,7 @@ public static class ThesisDocumentGenerator
                 var section = chapter.Sections[sectionIndex];
                 AppendParagraph(body, FormatSectionTitle(section.Title, chapterNumber, sectionIndex + 1), ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
                 if (section.Markdown is not null) markdown.Append(section.Markdown);
-                else AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules, native);
+                else AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules, native, assetDirectory);
             }
         }
     }
@@ -348,7 +349,8 @@ public static class ThesisDocumentGenerator
         List<string> legacyParagraphs,
         List<ThesisTableContent> legacyTables,
         TemplateProfile rules,
-        NativeContentImporter native)
+        NativeContentImporter native,
+        string assetDirectory)
     {
         if (blocks.Count == 0)
         {
@@ -378,7 +380,7 @@ public static class ThesisDocumentGenerator
             }
             else if (string.Equals(type, "image", StringComparison.OrdinalIgnoreCase))
             {
-                AppendImageBlock(mainPart, body, block, rules);
+                AppendImageBlock(mainPart, body, block, rules, assetDirectory);
             }
             else if (string.Equals(type, "table", StringComparison.OrdinalIgnoreCase) && block.Table is not null)
             {
@@ -453,14 +455,14 @@ public static class ThesisDocumentGenerator
         }
     }
 
-    private static void AppendImageBlock(MainDocumentPart mainPart, Body body, ThesisContentBlock block, TemplateProfile rules)
+    private static void AppendImageBlock(MainDocumentPart mainPart, Body body, ThesisContentBlock block, TemplateProfile rules, string assetDirectory)
     {
         if (string.IsNullOrWhiteSpace(block.Path))
         {
             return;
         }
 
-        var fullPath = Path.GetFullPath(block.Path);
+        var fullPath = Path.GetFullPath(block.Path, assetDirectory);
         if (!File.Exists(fullPath))
         {
             throw new InvalidDataException($"Image file not found: {fullPath}");

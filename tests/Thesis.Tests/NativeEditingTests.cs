@@ -83,6 +83,34 @@ public sealed class NativeEditingTests : IDisposable
         Assert.Single(Directory.GetFiles(Path.Combine(directory, "project", "assets")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GeneratedImagesResolveRelativeToProjectAssets(bool chaptersOnly)
+    {
+        var source = Path.Combine(directory, "source.png");
+        File.WriteAllBytes(source, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="));
+        var projectDirectory = Path.Combine(directory, "project");
+        var project = Path.Combine(projectDirectory, "paper.thesis.json");
+        var image = ProjectAssetStore.ImportImage(source, project, "实验图");
+        File.Delete(source);
+        var content = new ThesisContent
+        {
+            Title = "图片路径",
+            AssetDirectory = projectDirectory,
+            Chapters = [new() { Title = "正文", Blocks = [image] }]
+        };
+        var output = Path.Combine(directory, $"images-{chaptersOnly}.docx");
+
+        ThesisDocumentGenerator.Generate(content, new(), output, chaptersOnly);
+
+        using var doc = WordprocessingDocument.Open(output, false);
+        Assert.Single(doc.MainDocumentPart!.ImageParts);
+        Assert.Single(doc.MainDocumentPart.Document!.Descendants<DocumentFormat.OpenXml.Drawing.Blip>());
+        var preview = DocumentPreviewService.Content(content, cancellationToken: CancellationToken.None, chaptersOnly: chaptersOnly);
+        Assert.Contains(preview.Blocks, block => block.Kind == "image" && block.Image is { Length: > 0 });
+    }
+
     [Fact]
     public void LatexWritesValidatedNativeMathAndBoundsMalformedInput()
     {

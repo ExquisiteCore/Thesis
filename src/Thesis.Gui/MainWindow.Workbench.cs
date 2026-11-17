@@ -92,7 +92,7 @@ public sealed partial class MainWindow
             if (page == "theme") { Theme_Click(this, new RoutedEventArgs()); return; }
             ShowPage(page);
             if (page == "preview") await RefreshQuickPreviewAsync();
-            if (page == "checks") await viewModel.CheckAsync();
+            if (page == "checks") await RefreshChecksAsync();
         });
     }
     private async void Recent_Click(object sender, ItemClickEventArgs e) => await RunAsync(async () =>
@@ -165,7 +165,45 @@ public sealed partial class MainWindow
         viewModel.Preferences.ShowInspector = !viewModel.Preferences.ShowInspector; viewModel.Preferences.Save();
         InspectorColumn.Width = new GridLength(viewModel.Preferences.ShowInspector ? 280 : 0);
     }
-    private async void Check_Click(object sender, RoutedEventArgs e) => await RunAsync(viewModel.CheckAsync);
+    private async void Check_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshChecksAsync);
+    private async Task RefreshChecksAsync()
+    {
+        ChecksList.Visibility = Visibility.Collapsed;
+        ChecksEmptyState.Visibility = Visibility.Visible;
+        ChecksProgress.Visibility = Visibility.Visible;
+        ChecksProgress.IsActive = true;
+        ChecksStatusIcon.Visibility = Visibility.Collapsed;
+        ChecksEmptyTitle.Text = "正在检查…";
+        ChecksEmptyDetail.Text = "正在检查正文、项目素材和模板要求。";
+        try
+        {
+            await viewModel.CheckAsync();
+            if (viewModel.Issues.Count > 0)
+            {
+                ChecksList.Visibility = Visibility.Visible;
+                ChecksEmptyState.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ChecksStatusIcon.Symbol = Symbol.Accept;
+            ChecksStatusIcon.Visibility = Visibility.Visible;
+            ChecksEmptyTitle.Text = "检查完成，当前没有待处理项";
+            ChecksEmptyDetail.Text = "正式交付前仍请检查导出的 PDF 页面和真实分页。";
+        }
+        catch (Exception ex)
+        {
+            ChecksStatusIcon.Symbol = Symbol.Important;
+            ChecksStatusIcon.Visibility = Visibility.Visible;
+            ChecksEmptyTitle.Text = "检查未完成";
+            ChecksEmptyDetail.Text = ex.Message;
+            throw;
+        }
+        finally
+        {
+            ChecksProgress.IsActive = false;
+            ChecksProgress.Visibility = Visibility.Collapsed;
+        }
+    }
     private void Issue_Click(object sender, ItemClickEventArgs e)
     {
         FlushEditor(); viewModel.Locate((ProjectIssue)e.ClickedItem); OutlineList.SelectedItem = viewModel.Selected; LoadEditorFromViewModel(); ShowPage("write");
