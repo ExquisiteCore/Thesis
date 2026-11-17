@@ -3,9 +3,9 @@ using Thesis.Core;
 using Thesis.OpenXml;
 using Thesis.Schema;
 
-namespace Thesis.Cli;
+namespace Thesis.Application;
 
-internal static class ContentExtractBuilder
+public static class ContentExtractBuilder
 {
     public static (ThesisContent Content, ContentExtractReport Report) Build(
         DocumentMap map,

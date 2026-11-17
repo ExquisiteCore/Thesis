@@ -2,6 +2,8 @@ namespace Thesis.Schema;
 
 public sealed class CliResult
 {
+    public ThesisProject? Project { get; set; }
+    public string? ProjectFingerprint { get; set; }
     public string SchemaVersion { get; set; } = "1.0";
 
     public string Status { get; set; } = "success";

@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.6.0" />
     <ProjectReference Include="..\Thesis.Schema\Thesis.Schema.csproj" />
   </ItemGroup>
 </Project>

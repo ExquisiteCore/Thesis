@@ -43,6 +43,7 @@ public static class ThesisCli
 
     private static CliResult Dispatch(string[] args)
     {
+        if (args is ["project", .. var projectArgs]) return ProjectCommand.Execute(projectArgs);
         if (args is ["internal-host-finalize", .. var workerArgs]) return OfficeWorkerCommand.Execute(workerArgs);
         if (args is ["document-convert", .. var convertArgs]) return DocumentConvertCommand.Execute(convertArgs);
         if (args is ["doctor", .. var doctorArgs]) return DoctorCommand.Execute(doctorArgs);
@@ -884,6 +885,7 @@ public static class ThesisCli
             "  run --workspace <dir> --request <request.json>",
             "  apply --doc <source.docx> --profile <profile.json> --request <request.json> --out <output.docx>",
             "  apply-template --doc <source.docx> --template <template.docx> --plan <plan.json> --out <output.docx> [--report <report.json>] [--render-config <render.json> --pdf <output.pdf>] [--workdir <directory>]",
+            "  project (create|inspect|update|compose) --help    Shared desktop/Agent project workflow",
             "  compose (--doc <source.docx> | --content <content.json>) --template <template.docx> [--plan <plan.json>] --out <final.docx> [--render-config <render.json> --pdf <final.pdf>] [--require-ready true|false]",
             "  doctor --render-config <render.json>",
             "  document-convert --doc <source.doc> --out <converted.docx> [--host wps|word|auto]",

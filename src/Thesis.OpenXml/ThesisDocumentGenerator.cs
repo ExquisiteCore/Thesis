@@ -14,7 +14,7 @@ namespace Thesis.OpenXml;
 
 public static class ThesisDocumentGenerator
 {
-    public static void Generate(ThesisContent content, TemplateProfile rules, string outputPath)
+    public static void Generate(ThesisContent content, TemplateProfile rules, string outputPath, bool chaptersOnly = false)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(rules);
@@ -26,7 +26,8 @@ public static class ThesisDocumentGenerator
             mainPart.Document = new Document();
             var body = mainPart.Document.AppendChild(new Body());
 
-            AppendThesisContent(mainPart, body, content, rules);
+            if (chaptersOnly) AppendChapters(mainPart, body, content.Chapters, rules, content.AssetDirectory);
+            else AppendThesisContent(mainPart, body, content, rules);
             MarkDocumentFieldsDirty(mainPart);
             body.AppendChild(CreateSectionProperties(rules.PageSetup));
             mainPart.Document.Save();
@@ -279,7 +280,7 @@ public static class ThesisDocumentGenerator
         AppendOptionalParagraph(body, content.Author, ResolveParagraphFormat(rules, "body"), "Normal");
         AppendAbstracts(body, content, rules);
         AppendTableOfContents(body, rules);
-        AppendChapters(mainPart, body, content.Chapters, rules);
+        AppendChapters(mainPart, body, content.Chapters, rules, content.AssetDirectory);
         AppendReferences(body, content.References, rules);
         AppendAcknowledgements(body, content.Acknowledgements, rules);
     }
@@ -312,22 +313,29 @@ public static class ThesisDocumentGenerator
         AppendParagraph(body, prefix + string.Join(separator, keywords.Where(keyword => !string.IsNullOrWhiteSpace(keyword))), format, "Normal");
     }
 
-    private static void AppendChapters(MainDocumentPart mainPart, Body body, List<ThesisChapterContent> chapters, TemplateProfile rules)
+    private static void AppendChapters(MainDocumentPart mainPart, Body body, List<ThesisChapterContent> chapters, TemplateProfile rules, string assetDirectory = ".")
     {
         using var native = new NativeContentImporter(mainPart);
+        var markdown = new MarkdownDocxWriter(mainPart, body, Path.GetFullPath(assetDirectory),
+            (text, role) => AppendParagraph(body, text, ResolveParagraphFormat(rules, role, "body"), role.StartsWith("heading") ? "Heading" + role[^1] : "Normal"),
+            block => AppendImageBlock(mainPart, body, block, rules),
+            table => AppendTables(body, [table], rules),
+            block => native.Import(block, ResolveParagraphFormat(rules, block.Role ?? "body", "body"), ResolveTableFormat(rules)));
         for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
         {
             var chapter = chapters[chapterIndex];
             var chapterNumber = chapterIndex + 1;
             AppendParagraph(body, FormatChapterTitle(chapter.Title, chapterNumber), ResolveParagraphFormat(rules, "heading1"), "Heading1");
-            AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules, native);
+            if (chapter.Markdown is not null) markdown.Append(chapter.Markdown);
+            else AppendContentBlocks(mainPart, body, chapter.Blocks, chapter.Paragraphs, chapter.Tables, rules, native);
             if (chapter.OrderedContentIncludesSections) continue; // Ordered chapter stream includes its subsection headings.
 
             for (var sectionIndex = 0; sectionIndex < chapter.Sections.Count; sectionIndex++)
             {
                 var section = chapter.Sections[sectionIndex];
                 AppendParagraph(body, FormatSectionTitle(section.Title, chapterNumber, sectionIndex + 1), ResolveParagraphFormat(rules, "heading2", "heading1"), "Heading2");
-                AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules, native);
+                if (section.Markdown is not null) markdown.Append(section.Markdown);
+                else AppendContentBlocks(mainPart, body, section.Blocks, section.Paragraphs, section.Tables, rules, native);
             }
         }
     }

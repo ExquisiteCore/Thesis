@@ -7,6 +7,7 @@ public sealed class ThesisContent
     public string DocumentKind { get; set; } = "thesisContent";
 
     public string Title { get; set; } = "";
+    public string AssetDirectory { get; set; } = ".";
 
     public string? Author { get; set; }
 
@@ -27,6 +28,8 @@ public sealed class ThesisContent
 
 public sealed class ThesisChapterContent
 {
+    public string? Markdown { get; set; }
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public bool OrderedContentIncludesSections { get; set; }
     public string Title { get; set; } = "";
 
@@ -41,6 +44,8 @@ public sealed class ThesisChapterContent
 
 public sealed class ThesisSectionContent
 {
+    public string? Markdown { get; set; }
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "";
 
     public List<string> Paragraphs { get; set; } = [];

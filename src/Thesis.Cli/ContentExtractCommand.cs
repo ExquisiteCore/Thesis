@@ -3,6 +3,7 @@ using Thesis.Core;
 using Thesis.OpenXml;
 using Thesis.Schema;
 using Thesis.Session;
+using Thesis.Application;
 
 namespace Thesis.Cli;
 
