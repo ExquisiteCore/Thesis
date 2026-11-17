@@ -55,6 +55,7 @@ public sealed partial class MainWindow : Window
     private async Task RunAsync(Func<Task> action)
     {
         if (interactionInProgress || viewModel.IsBusy || closing) return;
+        FlushEditor();
         interactionInProgress = true;
         viewModel.HasError = false;
         try { await action(); }
@@ -67,6 +68,7 @@ public sealed partial class MainWindow : Window
         if (allowClose) return;
         args.Cancel = true;
         if (closing || interactionInProgress) return;
+        FlushEditor();
         closing = true;
         saveTimer.Stop();
         try

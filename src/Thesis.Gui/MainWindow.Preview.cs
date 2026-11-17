@@ -43,6 +43,7 @@ public sealed partial class MainWindow
     {
         var generation = ++previewGeneration;
         PreviewBlocks.Children.Clear();
+        LivePreviewBlocks.Children.Clear();
         if (pdfPreview is not null)
         {
             previewPage = Math.Clamp(previewPage, 0, (int)pdfPreview.PageCount - 1);
@@ -52,7 +53,11 @@ public sealed partial class MainWindow
             using var stream = new InMemoryRandomAccessStream();
             await page.RenderToStreamAsync(stream, new PdfPageRenderOptions { DestinationWidth = (uint)(1000 * PreviewZoom.Value / 100) });
             var bitmap = new BitmapImage(); await bitmap.SetSourceAsync(stream);
-            if (generation == previewGeneration) PreviewBlocks.Children.Add(new Image { Source = bitmap, Stretch = Stretch.Uniform });
+            if (generation == previewGeneration)
+            {
+                PreviewBlocks.Children.Add(new Image { Source = bitmap, Stretch = Stretch.Uniform });
+                if (LivePreviewToggle.IsChecked == true) LivePreviewBlocks.Children.Add(new Image { Source = bitmap, Stretch = Stretch.Uniform });
+            }
             return;
         }
         if (quickPreview is null) return;
@@ -60,7 +65,17 @@ public sealed partial class MainWindow
         previewPage = Math.Clamp(previewPage, 0, chunks - 1);
         PreviewPosition.Text = $"内容段 {previewPage + 1} / {chunks}";
         PreviewNotice.Text = string.Join(" ", quickPreview.Notes.Distinct());
-        foreach (var block in quickPreview.Blocks.Skip(previewPage * PreviewChunkSize).Take(PreviewChunkSize))
+        await DrawBlocksAsync(PreviewBlocks, quickPreview.Blocks.Skip(previewPage * PreviewChunkSize).Take(PreviewChunkSize), generation);
+        if (LivePreviewToggle.IsChecked == true && currentPage != "preview")
+            await DrawBlocksAsync(LivePreviewBlocks, quickPreview.Blocks, generation);
+    }
+
+    private async Task DrawBlocksAsync(StackPanel target, IEnumerable<PreviewBlock> blocks, long generation)
+    {
+        target.Children.Clear();
+        var foreground = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorPrimaryBrush"];
+        var border = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        foreach (var block in blocks)
         {
             if (generation != previewGeneration) return;
             if (block.Kind == "image" && block.Image is { } bytes)
@@ -71,9 +86,9 @@ public sealed partial class MainWindow
                     using (var writer = new DataWriter(stream.GetOutputStreamAt(0))) { writer.WriteBytes(bytes); await writer.StoreAsync(); await writer.FlushAsync(); writer.DetachStream(); }
                     stream.Seek(0); var bitmap = new BitmapImage { DecodePixelWidth = 1200 }; await bitmap.SetSourceAsync(stream);
                     if (generation != previewGeneration) return;
-                    PreviewBlocks.Children.Add(new Image { Source = bitmap, MaxHeight = 650, Stretch = Stretch.Uniform });
+                    target.Children.Add(new Image { Source = bitmap, MaxHeight = 650, Stretch = Stretch.Uniform });
                 }
-                catch (Exception) { PreviewBlocks.Children.Add(Text("[此图片格式请在成品 Word / PDF 中查看]", 14)); }
+                catch (Exception) { target.Children.Add(Text("[此图片格式请在成品 Word / PDF 中查看]", 14)); }
             }
             else if (block.Kind == "table")
             {
@@ -84,15 +99,15 @@ public sealed partial class MainWindow
                     table.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                     for (var c = 0; c < block.Rows[r].Count; c++)
                     {
-                        var cell = new Border { BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.LightGray), BorderThickness = new Thickness(.5), Padding = new Thickness(6), Child = Text(block.Rows[r][c], 14) };
+                        var cell = new Border { BorderBrush = border, BorderThickness = new Thickness(.5), Padding = new Thickness(6), Child = Text(block.Rows[r][c], 14) };
                         Grid.SetRow(cell, r); Grid.SetColumn(cell, c); table.Children.Add(cell);
                     }
                 }
-                PreviewBlocks.Children.Add(table);
+                target.Children.Add(table);
             }
             else
             {
-                var text = new RichTextBlock { FontFamily = new FontFamily(block.Font), FontSize = block.Size * 4 / 3, Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black), IsTextSelectionEnabled = true,
+                var text = new RichTextBlock { FontFamily = new FontFamily(block.Font), FontSize = block.Size * 4 / 3, Foreground = foreground, IsTextSelectionEnabled = true,
                     TextAlignment = block.Alignment switch { "center" => TextAlignment.Center, "right" => TextAlignment.Right, "both" or "distribute" => TextAlignment.Justify, _ => TextAlignment.Left } };
                 var paragraph = new Paragraph();
                 foreach (var piece in block.Runs)
@@ -102,11 +117,11 @@ public sealed partial class MainWindow
                     if (Uri.TryCreate(piece.Link, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http") { var link = new Hyperlink { NavigateUri = uri }; link.Inlines.Add(run); paragraph.Inlines.Add(link); }
                     else paragraph.Inlines.Add(run);
                 }
-                text.Blocks.Add(paragraph); PreviewBlocks.Children.Add(text);
+                text.Blocks.Add(paragraph); target.Children.Add(text);
             }
         }
     }
-    private static TextBlock Text(string value, double size) => new() { Text = value, FontSize = size, Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+    private static TextBlock Text(string value, double size) => new() { Text = value, FontSize = size, Foreground = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorPrimaryBrush"], TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private async void RefreshPreview_Click(object sender, RoutedEventArgs e) => await RefreshQuickPreviewAsync();
     private async void PreviewScope_Changed(object sender, RoutedEventArgs e)
     {

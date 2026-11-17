@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Text;
 using Thesis.Application;
 using Thesis.Core;
 using Thesis.Schema;
@@ -17,11 +18,12 @@ public sealed partial class MainWindow
     {
         if (Enum.TryParse<ElementTheme>(viewModel.Preferences.Theme, out var theme)) Root.RequestedTheme = theme;
         ShowPage("home");
+        InitializeEditor();
         previewTimer = DispatcherQueue.CreateTimer(); previewTimer.Interval = TimeSpan.FromMilliseconds(650); previewTimer.IsRepeating = false;
-        previewTimer.Tick += async (_, _) => { if (currentPage == "preview" && !viewModel.IsBusy) await RefreshQuickPreviewAsync(); };
+        previewTimer.Tick += async (_, _) => { if ((currentPage == "preview" || LivePreviewToggle.IsChecked == true) && !viewModel.IsBusy) await RefreshQuickPreviewAsync(); };
         viewModel.Edited += (_, _) =>
         {
-            if (currentPage != "preview") return;
+            if (currentPage != "preview" && LivePreviewToggle.IsChecked != true) return;
             if (pdfPreview is not null) { PreviewNotice.Text = "正文或模板已修改。当前 PDF 为先前导出版本，请重新导出。"; return; }
             previewTimer.Stop(); previewTimer.Start();
         };
@@ -44,7 +46,12 @@ public sealed partial class MainWindow
             finally { checkingExternal = false; }
         };
         externalTimer.Start();
-        WorkspaceGrid.SizeChanged += (_, _) => InspectorColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1100 && viewModel.Preferences.ShowInspector ? 280 : 0);
+        WorkspaceGrid.SizeChanged += (_, _) =>
+        {
+            if (LivePreviewToggle.IsChecked == true)
+                LivePreviewColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1300 ? 420 : 360);
+            else InspectorColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1100 && viewModel.Preferences.ShowInspector ? 280 : 0);
+        };
         viewModel.Recent.CollectionChanged += (_, _) => RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Closed += (_, _) => { externalTimer.Stop(); previewTimer.Stop(); previewJob?.Cancel(); };
@@ -125,7 +132,21 @@ public sealed partial class MainWindow
         {
             viewModel.Selected = item; ShowPage("write");
             var index = viewModel.Body.IndexOf(search.Text, StringComparison.OrdinalIgnoreCase);
-            if (index >= 0) { BodyEditor.Focus(FocusState.Programmatic); BodyEditor.Select(index, search.Text.Length); }
+            if (index >= 0)
+            {
+                if (sourceEditorActive)
+                {
+                    SourceBodyEditor.Focus(FocusState.Programmatic);
+                    SourceBodyEditor.Select(index, search.Text.Length);
+                }
+                else
+                {
+                    BodyEditor.Focus(FocusState.Programmatic);
+                    BodyEditor.Document.GetText(TextGetOptions.UseLf, out var editorText);
+                    var editorIndex = editorText.IndexOf(search.Text, StringComparison.OrdinalIgnoreCase);
+                    if (editorIndex >= 0) BodyEditor.Document.Selection.SetRange(editorIndex, editorIndex + search.Text.Length);
+                }
+            }
         }
     });
     private void Theme_Click(object sender, RoutedEventArgs e)
@@ -139,7 +160,10 @@ public sealed partial class MainWindow
         InspectorColumn.Width = new GridLength(viewModel.Preferences.ShowInspector ? 280 : 0);
     }
     private async void Check_Click(object sender, RoutedEventArgs e) => await RunAsync(viewModel.CheckAsync);
-    private void Issue_Click(object sender, ItemClickEventArgs e) { viewModel.Locate((ProjectIssue)e.ClickedItem); ShowPage("write"); }
+    private void Issue_Click(object sender, ItemClickEventArgs e)
+    {
+        FlushEditor(); viewModel.Locate((ProjectIssue)e.ClickedItem); OutlineList.SelectedItem = viewModel.Selected; LoadEditorFromViewModel(); ShowPage("write");
+    }
     private void Version_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         try { if (VersionList.SelectedItem is ProjectHistoryEntry entry) HistoryBefore.Text = viewModel.HistoryText(entry.Path); }

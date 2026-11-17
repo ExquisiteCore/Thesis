@@ -11,7 +11,7 @@
     <Grid Padding="20,8" ColumnSpacing="20" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
       <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-        <Border Width="32" Height="32" CornerRadius="8" Background="{ThemeResource AccentFillColorDefaultBrush}"><FontIcon Glyph="&#xE8A5;" FontSize="17" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/></Border>
+        <Border Width="32" Height="32" CornerRadius="8" Background="{StaticResource ThesisAccentBrush}"><FontIcon Glyph="&#xE8A5;" FontSize="17" Foreground="White"/></Border>
         <StackPanel><TextBlock Text="Thesis" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="论文工作台" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
       </StackPanel>
       <CommandBar Grid.Column="1" Background="Transparent" DefaultLabelPosition="Right" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsDynamicOverflowEnabled="True">
@@ -65,7 +65,7 @@
         </Grid>
         <InfoBar x:Name="OperationError" Grid.Row="1" Margin="24,0,24,12" Severity="Error" Title="操作未完成" Message="{Binding ErrorMessage}" IsOpen="{Binding HasError, Mode=TwoWay}" IsClosable="True"/>
     <Grid x:Name="WorkspaceGrid" Grid.Row="2" ColumnSpacing="1">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" MinWidth="300" /><ColumnDefinition x:Name="InspectorColumn" Width="280" /></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" MinWidth="340" /><ColumnDefinition x:Name="LivePreviewColumn" Width="0" /><ColumnDefinition x:Name="InspectorColumn" Width="280" /></Grid.ColumnDefinitions>
       <Grid Padding="16,22,12,16" Background="{ThemeResource LayerFillColorDefaultBrush}">
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
         <TextBlock Text="论文大纲" Style="{ThemeResource SubtitleTextBlockStyle}" Margin="8,0,0,16" />
@@ -73,7 +73,7 @@
           <Button Content="＋ 章节" Click="AddChapter_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="新增章节" />
           <Button Content="＋ 小节" Click="AddSection_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="在当前章新增小节" />
         </StackPanel>
-        <ListView Grid.Row="2" ItemsSource="{Binding Outline}" SelectedItem="{Binding Selected, Mode=TwoWay}" DisplayMemberPath="Label" SelectionMode="Single" IsEnabled="{Binding CanEdit}" AutomationProperties.Name="论文大纲" />
+        <ListView x:Name="OutlineList" Grid.Row="2" ItemsSource="{Binding Outline}" DisplayMemberPath="Label" SelectionChanged="Outline_SelectionChanged" SelectionMode="Single" IsEnabled="{Binding CanEdit}" AutomationProperties.Name="论文大纲" />
         <StackPanel Grid.Row="3" Spacing="8" Margin="0,12,0,0">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button Content="上移" Click="MoveUp_Click" IsEnabled="{Binding CanDelete}" />
@@ -84,16 +84,37 @@
         </StackPanel>
       </Grid>
       <Grid Grid.Column="1" Padding="28,16,28,24" RowSpacing="12" MaxWidth="960" HorizontalAlignment="Stretch">
-        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-        <Grid>
-          <TextBlock Text="内容编辑" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-          <TextBlock Text="{Binding CharacterCount}" HorizontalAlignment="Right" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid ColumnSpacing="12">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Orientation="Horizontal" Spacing="8"><Border Width="4" Height="20" CornerRadius="2" Background="{StaticResource ThesisAccentBrush}"/><TextBlock Text="写作台" FontWeight="SemiBold"/><TextBlock Text="当前章节" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"><TextBlock Text="{Binding CharacterCount}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><ToggleButton x:Name="LivePreviewToggle" Content="分屏预览" Checked="LivePreview_Changed" Unchecked="LivePreview_Changed" ToolTipService.ToolTip="在右侧实时查看正文"/></StackPanel>
         </Grid>
         <TextBox Grid.Row="1" Text="{Binding Heading, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding HeadingReadOnly}" FontSize="26" FontWeight="SemiBold" BorderThickness="0" Background="Transparent" Padding="0,6" PlaceholderText="章节标题" LostFocus="Heading_LostFocus" AutomationProperties.Name="章节标题" />
-        <TextBlock Grid.Row="2" Text="{Binding EditorHint}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
-        <TextBox x:Name="BodyEditor" Grid.Row="3" Text="{Binding Body, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontSize="17" Padding="28,24" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" VerticalContentAlignment="Top" PlaceholderText="写下你的思路…&#xA;&#xA;支持 Markdown，也可以从 Word 或 Markdown 导入正文。" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节正文" />
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+          <ComboBox x:Name="EditorBlockStyle" SelectedIndex="0" Width="112" ToolTipService.ToolTip="设置段落样式" SelectionChanged="EditorBlockStyle_Changed"><ComboBoxItem Content="正文" Tag="normal"/><ComboBoxItem Content="标题 1" Tag="heading1"/><ComboBoxItem Content="标题 2" Tag="heading2"/><ComboBoxItem Content="标题 3" Tag="heading3"/></ComboBox>
+          <Border Width="1" Height="24" Background="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center"/>
+          <Button x:Name="FormatBoldButton" Content="B" FontWeight="Bold" Width="36" Click="FormatBold_Click" ToolTipService.ToolTip="加粗 (Ctrl+B)"/>
+          <Button x:Name="FormatItalicButton" Content="I" FontStyle="Italic" Width="36" Click="FormatItalic_Click" ToolTipService.ToolTip="斜体 (Ctrl+I)"/>
+          <Button x:Name="FormatStrikeButton" Content="S" Width="36" Click="FormatStrike_Click" ToolTipService.ToolTip="删除线"/>
+          <Border Width="1" Height="24" Background="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center"/>
+          <Button x:Name="BulletListButton" Content="项目符号" Click="BulletList_Click" ToolTipService.ToolTip="切换项目符号列表"/>
+          <Button x:Name="NumberedListButton" Content="编号" Click="NumberedList_Click" ToolTipService.ToolTip="切换编号列表"/>
+          <Button x:Name="SourceModeButton" Grid.Column="1" Content="Markdown 源码" Click="SourceMode_Click" ToolTipService.ToolTip="切换 Markdown 源码视图"/>
+        </StackPanel>
+        <TextBlock x:Name="EditorModeNote" Grid.Row="3" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/>
+        <Grid Grid.Row="4">
+          <RichEditBox x:Name="BodyEditor" TextChanged="BodyEditor_TextChanged" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontSize="17" Padding="34,32" BorderThickness="1" CornerRadius="8" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节富文本正文"/>
+          <TextBox x:Name="SourceBodyEditor" TextChanged="SourceBody_TextChanged" Visibility="Collapsed" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="15" Padding="28,24" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节 Markdown 源码"/>
+          <TextBlock x:Name="EditorPlaceholder" Text="从这里开始写。&#xA;&#xA;按 Enter 开始新段落，选择文字后使用上方格式工具。" IsHitTestVisible="False" Margin="42,40,40,40" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+        </Grid>
       </Grid>
-      <ScrollViewer Grid.Column="2" Background="{ThemeResource LayerFillColorDefaultBrush}" VerticalScrollBarVisibility="Auto">
+      <Grid Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" Padding="18,16,18,24">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,12"><TextBlock Text="实时预览" FontWeight="SemiBold"/><TextBlock Text="内容视图 · 非分页样式" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+        <ScrollViewer Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="24"><StackPanel x:Name="LivePreviewBlocks" Spacing="14"/></ScrollViewer>
+      </Grid>
+      <ScrollViewer Grid.Column="3" Background="{ThemeResource LayerFillColorDefaultBrush}" VerticalScrollBarVisibility="Auto">
         <StackPanel Padding="20,22" Spacing="16">
           <TextBlock Text="论文与模板" Style="{ThemeResource SubtitleTextBlockStyle}" />
           <StackPanel Spacing="12">
