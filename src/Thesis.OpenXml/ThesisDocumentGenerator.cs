@@ -361,7 +361,18 @@ public static class ThesisDocumentGenerator
             var type = string.IsNullOrWhiteSpace(block.Type) ? "paragraph" : block.Type.Trim();
             if (string.Equals(type, "paragraph", StringComparison.OrdinalIgnoreCase))
             {
-                AppendOptionalParagraph(body, block.Text, ResolveParagraphFormat(rules, "body"), "Normal");
+                AppendContentParagraph(body, block, rules);
+            }
+            else if (string.Equals(type, "equation", StringComparison.OrdinalIgnoreCase))
+            {
+                var latex = block.Latex ?? block.Text ?? "";
+                if (string.IsNullOrWhiteSpace(latex)) throw new InvalidDataException("Equation blocks require LaTeX source.");
+                var paragraph = AppendParagraph(body, latex, ResolveParagraphFormat(rules, "equation", "body"), "Normal");
+                if (block.DisplayEquation)
+                {
+                    paragraph.ParagraphProperties ??= new ParagraphProperties();
+                    paragraph.ParagraphProperties!.Justification = new Justification { Val = JustificationValues.Center };
+                }
             }
             else if (string.Equals(type, "image", StringComparison.OrdinalIgnoreCase))
             {
@@ -377,6 +388,49 @@ public static class ThesisDocumentGenerator
             }
             else throw new InvalidDataException($"Unknown content block type: {type}");
         }
+    }
+
+    private static void AppendContentParagraph(Body body, ThesisContentBlock block, TemplateProfile rules)
+    {
+        var role = block.ParagraphStyle?.Trim().ToLowerInvariant() switch
+        {
+            "heading1" => "heading1",
+            "heading2" => "heading2",
+            "heading3" => "heading3",
+            _ => "body"
+        };
+        var fallbackStyle = role switch { "heading1" => "Heading1", "heading2" => "Heading2", "heading3" => "Heading3", _ => "Normal" };
+        var paragraph = new Paragraph();
+        var runs = block.Runs.Count > 0 ? block.Runs : [new ThesisTextRun { Text = block.Text ?? "" }];
+        foreach (var item in runs)
+        {
+            if (string.IsNullOrEmpty(item.Text)) continue;
+            var run = new Run();
+            var properties = new RunProperties();
+            if (item.Bold) properties.Append(new Bold());
+            if (item.Italic) properties.Append(new Italic());
+            if (item.Underline) properties.Append(new Underline { Val = UnderlineValues.Single });
+            if (item.Strike) properties.Append(new Strike());
+            if (item.Code) properties.Append(new RunFonts { Ascii = "Consolas", HighAnsi = "Consolas" });
+            if (item.Superscript || item.Subscript)
+                properties.Append(new VerticalTextAlignment { Val = item.Superscript ? VerticalPositionValues.Superscript : VerticalPositionValues.Subscript });
+            if (properties.HasChildren) run.Append(properties);
+            run.Append(new Text(item.Text) { Space = NeedsPreservedSpace(item.Text) ? SpaceProcessingModeValues.Preserve : null });
+            paragraph.Append(run);
+        }
+        var format = ResolveParagraphFormat(rules, role);
+        var effectiveFormat = format is null ? new ParagraphFormatSample { StyleId = fallbackStyle } : OpenXmlFormatMerger.Clone(format);
+        effectiveFormat.StyleId ??= fallbackStyle;
+        OpenXmlFormatApplier.ApplyParagraphFormat(paragraph, effectiveFormat);
+        if (block.ListKind is "bullet" or "numbered")
+        {
+            var marker = block.ListKind == "bullet" ? "• " : "1. ";
+            var prefix = new Run(new Text(marker));
+            paragraph.InsertAt(prefix, 0);
+            paragraph.ParagraphProperties ??= new ParagraphProperties();
+            paragraph.ParagraphProperties.Indentation = new Indentation { Left = "360", Hanging = "240" };
+        }
+        body.Append(paragraph);
     }
 
     private static void AppendBodyParagraphs(Body body, List<string> paragraphs, TemplateProfile rules)

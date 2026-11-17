@@ -7,6 +7,40 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 internal static partial class Program
 {
+    static void StructuredContentWritesFormattedRunsAndRetainsLatexSource()
+    {
+        using var temp = new TempDirectory();
+        var output = Path.Combine(temp.Path, "structured.docx");
+        var content = new ThesisContent
+        {
+            Title = "结构化内容",
+            Chapters =
+            [
+                new ThesisChapterContent
+                {
+                    Title = "绪论",
+                    Blocks =
+                    [
+                        new ThesisContentBlock
+                        {
+                            Type = "paragraph",
+                            Runs = [new ThesisTextRun { Text = "重点", Bold = true }, new ThesisTextRun { Text = "正文" }]
+                        },
+                        new ThesisContentBlock { Type = "equation", Latex = "E = mc^2", DisplayEquation = true }
+                    ]
+                }
+            ]
+        };
+
+        ThesisDocumentGenerator.Generate(content, new TemplateProfile(), output);
+        using var document = WordprocessingDocument.Open(output, false);
+        var body = document.MainDocumentPart!.Document!.Body!;
+        var paragraph = body.Elements<Paragraph>().Single(p => p.InnerText == "重点正文");
+        AssertEqual(true, paragraph.Elements<Run>().First().RunProperties?.GetFirstChild<Bold>() is not null);
+        AssertEqual("E = mc^2", body.Elements<Paragraph>().Single(p => p.InnerText == "E = mc^2").InnerText);
+        AssertEqual(true, body.Elements<Paragraph>().Single(p => p.InnerText == "E = mc^2").ParagraphProperties?.Justification?.Val?.Value == JustificationValues.Center);
+    }
+
     static void OutputTransactionKeepsExistingFileWhenStagingIsIncomplete()
     {
         using var temp = new TempDirectory();

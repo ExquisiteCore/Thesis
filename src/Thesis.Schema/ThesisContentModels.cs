@@ -61,6 +61,18 @@ public sealed class ThesisContentBlock
 
     public string? Text { get; set; }
 
+    public string? ParagraphStyle { get; set; }
+
+    public string? ListKind { get; set; }
+
+    public int? ListLevel { get; set; }
+
+    public List<ThesisTextRun> Runs { get; set; } = [];
+
+    public string? Latex { get; set; }
+
+    public bool DisplayEquation { get; set; }
+
     public string? Path { get; set; }
 
     public string? Caption { get; set; }
@@ -78,6 +90,25 @@ public sealed class ThesisContentBlock
     public string? SourceSha256 { get; set; }
     public int? SourceBodyElementIndex { get; set; }
     public string? Role { get; set; }
+}
+
+public sealed class ThesisTextRun
+{
+    public string Text { get; set; } = "";
+
+    public bool Bold { get; set; }
+
+    public bool Italic { get; set; }
+
+    public bool Underline { get; set; }
+
+    public bool Strike { get; set; }
+
+    public bool Code { get; set; }
+
+    public bool Superscript { get; set; }
+
+    public bool Subscript { get; set; }
 }
 
 public sealed class ThesisTableContent

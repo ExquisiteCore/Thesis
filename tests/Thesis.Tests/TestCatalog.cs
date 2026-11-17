@@ -8,6 +8,7 @@ internal static partial class Program
         ("Output transaction keeps existing file when staging is incomplete", OutputTransactionKeepsExistingFileWhenStagingIsIncomplete),
         ("Template preflight rejects changed fingerprint", TemplatePreflightRejectsChangedFingerprint),
         ("Ordered content roundtrip preserves mixed blocks and relative assets", OrderedContentRoundtripPreservesMixedBlocksAndRelativeAssets),
+        ("Structured content writes formatted runs and retains LaTeX source", StructuredContentWritesFormattedRunsAndRetainsLatexSource),
         ("Legacy chapter blocks retain separately supplied sections", LegacyChapterBlocksRetainSeparatelySuppliedSections),
         ("Template preflight validates coverage and unique anchors", TemplatePreflightValidatesCoverageAndUniqueAnchors),
         ("Finalize host failure preserves previous deliverable", FinalizeHostFailurePreservesPreviousDeliverable),
