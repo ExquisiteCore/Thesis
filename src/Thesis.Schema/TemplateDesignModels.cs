@@ -36,6 +36,9 @@ public sealed class TemplateDesignRole
     public bool Confirmed { get; set; }
 }
 
-public sealed record ProjectIssue(string Severity, string Title, string Message, string? NodeId = null);
+public sealed record ProjectIssue(string Severity, string Title, string Message, string? NodeId = null)
+{
+    public string SeverityLabel => Severity switch { "error" => "错误", "warning" => "待核对", _ => "提示" };
+}
 public sealed record ProjectHistoryEntry(string Path, DateTimeOffset CreatedAt, long Revision, string Title);
 public sealed record RecentProject(string Path, string Title, DateTimeOffset LastOpened);

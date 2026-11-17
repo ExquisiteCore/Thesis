@@ -74,6 +74,35 @@ public sealed class WorkbenchFeatureTests : IDisposable
     }
 
     [Fact]
+    public void TemplateCheckGroupsUnconfirmedRolesIntoOneActionableIssue()
+    {
+        var template = FilePath("check-template.docx"); TemplateDesigner.CreateDefault(template);
+        var design = TemplateDesigner.Inspect(template);
+        foreach (var role in design.Roles) { role.Confidence = .9; role.Confirmed = true; }
+        foreach (var role in design.Roles.Where(role => role.Role is "heading2" or "heading3"))
+        {
+            role.Confidence = .2;
+            role.Confirmed = false;
+        }
+        Assert.Contains(design.Roles, role => role.Role == "heading2" && role.Confidence < .5 && !role.Confirmed);
+        var designPath = TemplateLibraryStore.Save(design, FilePath("templates"));
+        Assert.Contains(TemplateLibraryStore.Load(designPath).Roles, role => role.Role == "heading2" && role.Confidence < .5 && !role.Confirmed);
+        var project = ThesisProjectStore.Create(FilePath("check-project.json"), new()
+        {
+            TemplatePath = template,
+            TemplateDesignPath = designPath,
+            Content = new() { Title = "论文", Chapters = [new() { Title = "绪论", Markdown = "正文" }] }
+        });
+
+        var issue = Assert.Single(ProjectChecks.Check(project), candidate => candidate.NodeId == "template:heading2");
+
+        Assert.Contains("2 项", issue.Title);
+        Assert.Contains("二级标题", issue.Message);
+        Assert.Contains("三级标题", issue.Message);
+        Assert.Contains("暂用正文格式", issue.Message);
+    }
+
+    [Fact]
     public void HistoryKeepsPreviousRevisionAndRecoveryDoesNotOverwriteConcurrentWriter()
     {
         var project = ThesisProjectStore.Create(FilePath("paper.json"), new() { Content = new() { Title = "原文" } });

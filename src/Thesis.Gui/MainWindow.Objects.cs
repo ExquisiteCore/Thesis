@@ -30,7 +30,7 @@ public sealed partial class MainWindow
             editor.IsReadOnly = viewModel.BodyReadOnly;
             editor.GotFocus += (_, _) => { focusedEditor = editor; UpdateEditorToolbar(); };
             editor.SelectionChanged += (_, _) => UpdateEditorToolbar();
-            editor.TextChanged += (_, _) => { if (!loadingEditor) QueueEditorSync(); };
+            editor.TextChanged += (_, _) => { if (!loadingEditor && !IgnoreUnchangedLoadNotification()) QueueEditorSync(); };
             editorSegments.Add(new(editor, null)); ObjectEditorPanel.Children.Add(editor); paragraphs.Clear();
         }
         foreach (var block in blocks)

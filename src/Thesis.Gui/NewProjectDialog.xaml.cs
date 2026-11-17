@@ -3,19 +3,21 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Thesis.Gui;
 
-internal sealed record NewProjectDetails(string Path, string Title, string Author);
+internal sealed record NewProjectDetails(string Path, string Title, string Author, string? TemplatePath);
 
 public sealed partial class NewProjectDialog : ContentDialog
 {
     private readonly Func<string, Task<string?>> choosePath;
+    private readonly Func<Task<string?>> chooseTemplate;
     private readonly Func<NewProjectDetails, Task> createProject;
     private readonly string initialDirectory;
     private bool customLocation;
     private string suggestedLocation = "";
+    private string? templatePath;
 
-    internal NewProjectDialog(string directory, Func<string, Task<string?>> choosePath, Func<NewProjectDetails, Task> createProject)
+    internal NewProjectDialog(string directory, Func<string, Task<string?>> choosePath, Func<NewProjectDetails, Task> createProject, Func<Task<string?>>? chooseTemplate = null)
     {
-        this.choosePath = choosePath; this.createProject = createProject; initialDirectory = directory;
+        this.choosePath = choosePath; this.createProject = createProject; this.chooseTemplate = chooseTemplate ?? (() => Task.FromResult<string?>(null)); initialDirectory = directory;
         InitializeComponent();
         UpdateLocation();
     }
@@ -52,10 +54,27 @@ public sealed partial class NewProjectDialog : ContentDialog
         finally { BrowseButton.IsEnabled = true; IsPrimaryButtonEnabled = true; }
     }
 
+    private async void SelectTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        ChooseTemplateButton.IsEnabled = false;
+        IsPrimaryButtonEnabled = false;
+        ValidationMessage.IsOpen = false;
+        try
+        {
+            var selected = await chooseTemplate();
+            if (selected is null) return;
+            templatePath = selected;
+            TemplateSelection.Text = Path.GetFileName(selected);
+            ToolTipService.SetToolTip(TemplateSelection, selected);
+        }
+        catch (Exception ex) { ShowError("读取模板失败", ex); }
+        finally { ChooseTemplateButton.IsEnabled = true; IsPrimaryButtonEnabled = true; }
+    }
+
     private async void Create_Click(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
         var deferral = args.GetDeferral();
-        IsPrimaryButtonEnabled = false; BrowseButton.IsEnabled = false;
+        IsPrimaryButtonEnabled = false; BrowseButton.IsEnabled = false; ChooseTemplateButton.IsEnabled = false;
         ValidationMessage.IsOpen = false; CreatingProgress.Visibility = Visibility.Visible;
         try
         {
@@ -66,13 +85,13 @@ public sealed partial class NewProjectDialog : ContentDialog
             if (File.Exists(path) && new FileInfo(path).Length > 0)
                 throw new IOException("这个位置已有文件，请换一个文件名或打开已有项目。");
             var title = string.IsNullOrWhiteSpace(PaperTitle.Text) ? "未命名论文" : PaperTitle.Text.Trim();
-            await createProject(new(path, title, PaperAuthor.Text.Trim()));
+            await createProject(new(path, title, PaperAuthor.Text.Trim(), templatePath));
         }
         catch (Exception ex) { args.Cancel = true; ShowError("论文尚未创建", ex); }
         finally
         {
             CreatingProgress.Visibility = Visibility.Collapsed;
-            IsPrimaryButtonEnabled = true; BrowseButton.IsEnabled = true;
+            IsPrimaryButtonEnabled = true; BrowseButton.IsEnabled = true; ChooseTemplateButton.IsEnabled = true;
             deferral.Complete();
         }
     }

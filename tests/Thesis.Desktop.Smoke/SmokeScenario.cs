@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Text;
 using Thesis.Application;
 using Thesis.Core;
+using Thesis.OpenXml;
 using Thesis.Schema;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
@@ -49,6 +50,7 @@ public sealed partial class MainWindow
             viewModel.Title = "论文工作台交互验证";
             viewModel.Author = "示例作者";
             viewModel.Body = "**Markdown 正文**和*斜体*。\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |\n\n- 第一项\n- 第二项";
+            Require(viewModel.Body.Contains("Markdown 正文", StringComparison.Ordinal), "新建后正文可立即编辑且不会被控件延迟事件清空");
             await viewModel.SaveAsync();
             ShowPage("write"); Root.UpdateLayout(); await Task.Delay(100);
             LoadEditorFromViewModel();
@@ -161,17 +163,24 @@ public sealed partial class MainWindow
     private async Task VerifyNewProjectDialogAsync(string directory, Action<bool, string> require)
     {
         var failPicker = false;
+        var selectTemplate = false;
         Exception? creationError = null;
+        var templatePath = Path.Combine(directory, "school-template.docx");
+        TemplateDesigner.CreateDefault(templatePath);
         var dialog = new NewProjectDialog(directory, _ => failPicker
                 ? Task.FromException<string?>(new IOException("位置选择器测试错误"))
                 : Task.FromResult<string?>(null),
             async details =>
             {
-                try { await viewModel.CreateAsync(details.Path, details.Title, details.Author); }
+                try { await viewModel.CreateAsync(details.Path, details.Title, details.Author, details.TemplatePath); }
                 catch (Exception ex) { creationError = ex; throw; }
-            }) { XamlRoot = Root.XamlRoot };
+            }, () => Task.FromResult<string?>(selectTemplate ? templatePath : null)) { XamlRoot = Root.XamlRoot };
         var pending = dialog.ShowAsync().AsTask();
         await Task.Delay(150);
+        require(dialog.FindName("ChooseTemplateButton") is Button, "新建论文支持在创建流程中选择 DOCX 模板");
+        selectTemplate = true;
+        InvokeButton((Button)dialog.FindName("ChooseTemplateButton")); await Task.Delay(60);
+        require(((TextBlock)dialog.FindName("TemplateSelection")).Text == "school-template.docx", "新建窗口显示已选学校模板");
         var title = (TextBox)dialog.FindName("PaperTitle");
         var location = (TextBox)dialog.FindName("ProjectLocation");
         title.Text = "测试论文"; await Task.Delay(80);
@@ -207,6 +216,8 @@ public sealed partial class MainWindow
             throw new TimeoutException($"新建操作超时。状态：{viewModel.Status}；忙碌：{viewModel.IsBusy}；校验：{validation.Message}");
         }
         require(await pending == ContentDialogResult.Primary && File.Exists(path), "新建窗口通过创建按钮生成项目");
+        require(viewModel.Outline.Any(item => item.Kind == "chapter" && item.ReadTitle() == "第1章 绪论")
+            && viewModel.Outline.Any(item => item.Kind == "section" && item.ReadTitle() == "1.1 研究背景"), "所选模板正文标题同步为可编辑大纲");
     }
 
     private static void InvokeButton(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Thesis.Application;
 using Thesis.Schema;
 using Thesis.Core;
+using Thesis.OpenXml;
 
 namespace Thesis.Gui.ViewModels;
 
@@ -36,6 +37,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     private bool dirty;
     private string status = "新建论文项目，或打开已有项目开始写作。";
     private string errorMessage = "";
+    private string errorDetails = "";
     private bool hasError;
     private CancellationTokenSource? job;
     private readonly SemaphoreSlim saveGate = new(1, 1);
@@ -55,6 +57,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public string ProjectLabel => opened is null ? "尚未打开项目" : $"{Path.GetFileName(opened.Path)} · 版本 {opened.Document.Revision}{(dirty ? " · 待保存" : " · 已保存")}";
     public string Status { get => status; private set { status = value; Notify(); } }
     public string ErrorMessage { get => errorMessage; private set { errorMessage = value; Notify(); } }
+    public string ErrorDetails { get => errorDetails; private set { errorDetails = value; Notify(); } }
     public bool HasError { get => hasError; set { hasError = value; Notify(); } }
     public string Title { get => opened?.Document.Content.Title ?? ""; set { if (!CanEdit || opened is null || Title == value) return; opened.Document.Content.Title = value; Changed(); } }
     public string Author { get => opened?.Document.Content.Author ?? ""; set { if (!CanEdit || opened is null || Author == value) return; opened.Document.Content.Author = value; Changed(); } }
@@ -117,16 +120,19 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public string? ProjectPath => opened?.Path;
     public LayoutRenderConfig? RenderSettings { get; private set; }
 
-    public async Task CreateAsync(string path, string title = "未命名论文", string author = "")
+    public async Task CreateAsync(string path, string title = "未命名论文", string author = "", string? templatePath = null)
     {
         if (IsBusy) return;
         IsBusy = true;
         try
         {
             await SaveAsync();
+            var design = templatePath is null
+                ? await Task.Run(() => TemplateLibraryStore.Default(userDataDirectory))
+                : await Task.Run(() => TemplateDesigner.Inspect(Path.GetFullPath(templatePath)));
             var project = new ThesisProject { Content = new() { Title = title, Author = author, Chapters = [new() { Title = "绪论" }] } };
             Accept(await Task.Run(() => ThesisProjectStore.Create(path, project)));
-            await AttachDesignAsync(await Task.Run(() => TemplateLibraryStore.Default(userDataDirectory)));
+            await AttachDesignAsync(design, initializeOutline: templatePath is not null);
             await SaveAsync();
         }
         finally { IsBusy = false; }
@@ -376,9 +382,18 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
 
     public void ShowError(Exception error)
     {
-        ErrorMessage = error.Message; HasError = true;
+        var message = error.GetBaseException().Message;
+        ErrorMessage = message.Contains("Structure audit failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Post-render structure audit failed", StringComparison.OrdinalIgnoreCase)
+                ? "Word 文档结构检查未通过，文件尚未交付。模板和论文项目都已保留；查看详情可定位具体问题。"
+            : message.Contains("Content requirements failed", StringComparison.OrdinalIgnoreCase)
+                ? "论文内容未满足模板中的一项或多项要求，请到“检查”页处理相关项目。"
+            : message.Contains("Image file not found", StringComparison.OrdinalIgnoreCase)
+                ? "正文引用的图片文件不存在，请在项目中重新插入或关联图片后再生成。"
+            : "操作没有完成。查看技术详情可定位问题后重试。";
+        ErrorDetails = error.ToString(); HasError = true;
         Status = "操作未完成，请查看页面上方提示。";
-        Findings.Insert(0, error.Message);
+        Findings.Insert(0, ErrorMessage);
     }
 
     private void RebuildOutline(string? selectedId = null)

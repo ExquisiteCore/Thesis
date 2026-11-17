@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Thesis.Core;
 using Thesis.Gui.ViewModels;
+using Thesis.Schema;
 
 namespace Thesis.Gui;
 
@@ -13,6 +14,7 @@ public sealed partial class MainWindow
     private bool sourceEditorActive;
     private bool forceSourceEditor;
     private bool updatingToolbar;
+    private string? loadedEditorState;
 
     private void InitializeEditor()
     {
@@ -39,7 +41,7 @@ public sealed partial class MainWindow
     private void LoadEditorFromViewModel()
     {
         if (loadingEditor || !viewModel.HasProject) return;
-        editorSyncTimer?.Stop(); loadingEditor = true;
+        editorSyncTimer?.Stop(); loadingEditor = true; loadedEditorState = null;
         try
         {
             var markdown = viewModel.Body;
@@ -75,9 +77,11 @@ public sealed partial class MainWindow
             BodyEditor.IsReadOnly = viewModel.BodyReadOnly;
             SourceBodyEditor.IsReadOnly = viewModel.BodyReadOnly;
             if (OutlineList.SelectedItem != viewModel.Selected) OutlineList.SelectedItem = viewModel.Selected;
+            loadedEditorState = CaptureEditorState();
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
         {
+            loadedEditorState = null;
             BodyEditor.Visibility = ObjectEditorScroll.Visibility = Visibility.Collapsed;
             SourceBodyEditor.Visibility = Visibility.Visible;
             SourceBodyEditor.IsReadOnly = true;
@@ -91,14 +95,14 @@ public sealed partial class MainWindow
 
     private void BodyEditor_TextChanged(object sender, RoutedEventArgs e)
     {
-        if (!loadingEditor) { editorSyncTimer?.Stop(); editorSyncTimer?.Start(); UpdateEditorToolbar(); }
+        if (!loadingEditor && !IgnoreUnchangedLoadNotification()) { editorSyncTimer?.Stop(); editorSyncTimer?.Start(); UpdateEditorToolbar(); }
     }
 
     private void BodyEditor_SelectionChanged(object sender, RoutedEventArgs e) => UpdateEditorToolbar();
 
     private void SourceBody_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (!loadingEditor && sourceEditorActive)
+        if (!loadingEditor && sourceEditorActive && !IgnoreUnchangedLoadNotification())
         {
             editorSyncTimer?.Stop(); editorSyncTimer?.Start();
             var supportsRichText = ContentEditing.TryParseMarkdown(SourceBodyEditor.Text, out _);
@@ -106,6 +110,20 @@ public sealed partial class MainWindow
             EditorModeNote.Text = supportsRichText ? "Markdown 交换视图" : "当前内容包含保留语法，请在交换视图中编辑。";
             ToolTipService.SetToolTip(SourceModeButton, "返回富文本编辑");
         }
+    }
+
+    private string CaptureEditorState() => sourceEditorActive
+        ? "source:" + SourceBodyEditor.Text
+        : blockEditorActive
+            ? "objects:" + ThesisJson.Serialize(ReadObjectEditor())
+            : "rich:" + ThesisJson.Serialize(NativeContentEditor.ReadBlocks(BodyEditor));
+
+    private bool IgnoreUnchangedLoadNotification()
+    {
+        if (loadedEditorState is null) return false;
+        if (string.Equals(loadedEditorState, CaptureEditorState(), StringComparison.Ordinal)) return true;
+        loadedEditorState = null;
+        return false;
     }
 
     private void FlushEditor()

@@ -9,6 +9,16 @@ namespace Thesis.OpenXml;
 /// <summary>Suggest mappings from semantic zones and actual template samples, never from style IDs alone.</summary>
 public static class TemplatePlanDraftBuilder
 {
+    public static IReadOnlyList<(string Title, int Level)> ExtractOutline(string templatePath)
+    {
+        using var template = WordprocessingDocument.Open(templatePath, false);
+        return Describe(template.MainDocumentPart!)
+            .Where(item => item.Zone == "body" && !item.IsToc && (item.Role is "heading1" or "heading2"))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Text))
+            .Select(item => (item.Text.Trim(), item.Role[^1] - '0'))
+            .ToArray();
+    }
+
     public static TemplateApplicationPlan Build(string sourcePath, string templatePath)
     {
         using var source = WordprocessingDocument.Open(sourcePath, false);

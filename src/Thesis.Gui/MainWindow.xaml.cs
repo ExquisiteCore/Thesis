@@ -98,7 +98,8 @@ public sealed partial class MainWindow : Window
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         var dialog = new NewProjectDialog(Path.Combine(documents, "Thesis"),
             name => SaveFileAsync("论文项目", ".thesis.json", name),
-            async details => await viewModel.CreateAsync(details.Path, details.Title, details.Author)) { XamlRoot = Root.XamlRoot };
+            async details => await viewModel.CreateAsync(details.Path, details.Title, details.Author, details.TemplatePath),
+            () => OpenFileAsync("选择学校模板或合格论文", ".docx")) { XamlRoot = Root.XamlRoot };
         if (await dialog.ShowAsync() == ContentDialogResult.Primary) ShowPage("write");
     }
 
@@ -216,6 +217,25 @@ public sealed partial class MainWindow : Window
         }
         if (!await Launcher.LaunchFileAsync(await Windows.Storage.StorageFile.GetFileFromPathAsync(path)))
             throw new IOException("系统尚未设置此类文件的默认打开程序。文件已保存到输出位置。");
+    }
+
+    private async void ErrorDetails_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(viewModel.ErrorDetails)) return;
+        var details = new ScrollViewer
+        {
+            MaxHeight = 560,
+            MinWidth = 520,
+            Content = new TextBlock { Text = viewModel.ErrorDetails, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }
+        };
+        await new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            Title = "技术诊断详情",
+            Content = details,
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close
+        }.ShowAsync();
     }
 
     private Task<ContentDialogResult> DialogAsync(string title, string message, string? primary) =>

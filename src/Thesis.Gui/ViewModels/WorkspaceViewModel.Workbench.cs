@@ -41,7 +41,7 @@ public sealed partial class WorkspaceViewModel
         }
         finally { IsBusy = false; }
     }
-    private async Task AttachDesignAsync(TemplateDesign design)
+    private async Task AttachDesignAsync(TemplateDesign design, bool initializeOutline = true)
     {
         if (opened is null) return;
         ProjectHistoryStore.Checkpoint(opened);
@@ -50,7 +50,28 @@ public sealed partial class WorkspaceViewModel
         opened.Document.TemplateDesignPath = Path.GetRelativePath(Path.GetDirectoryName(opened.Path)!, path);
         opened.Document.TemplatePath = Path.GetRelativePath(Path.GetDirectoryName(opened.Path)!, Design.SourcePath);
         opened.Document.PlanPath = null;
+        if (initializeOutline && TrySeedOutlineFromTemplate(Design)) RebuildOutline();
         Changed(); NotifyAll();
+    }
+
+    private bool TrySeedOutlineFromTemplate(TemplateDesign design)
+    {
+        if (opened is null) return false;
+        var content = opened.Document.Content;
+        if (content.Chapters.Count != 1 || content.Chapters[0] is not { Title: "绪论", Markdown: null, Sections.Count: 0, Paragraphs.Count: 0, Blocks.Count: 0, Tables.Count: 0 })
+            return false;
+
+        var headings = TemplatePlanDraftBuilder.ExtractOutline(design.SourcePath);
+        var chapters = new List<ThesisChapterContent>();
+        foreach (var (title, level) in headings)
+        {
+            if (level == 1) chapters.Add(new() { Title = title });
+            else if (level == 2 && chapters.Count > 0) chapters[^1].Sections.Add(new() { Title = title });
+        }
+        if (chapters.Count == 0) return false;
+        content.Chapters = chapters;
+        Status = $"已从模板识别出 {chapters.Count} 个正文一级标题；大纲可继续编辑。";
+        return true;
     }
     public void SetCoverFields(Dictionary<string, string> fields)
     {

@@ -7,6 +7,14 @@
     <TextBlock Text="先开始写作，模板和内容都可以稍后调整。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
     <TextBox x:Name="PaperTitle" Header="论文题目" PlaceholderText="例如：校园服务系统的设计与实现" TextChanged="Title_Changed" AutomationProperties.AutomationId="NewProjectTitle"/>
     <TextBox x:Name="PaperAuthor" Header="作者（选填）" PlaceholderText="你的姓名" AutomationProperties.AutomationId="NewProjectAuthor"/>
+    <StackPanel Spacing="6">
+      <TextBlock Text="论文模板（可选）" FontWeight="SemiBold"/>
+      <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock x:Name="TemplateSelection" Text="使用通用模板，之后可在模板工作台更换" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <Button x:Name="ChooseTemplateButton" Grid.Column="1" Content="选择 DOCX…" Click="SelectTemplate_Click"/>
+      </Grid>
+      <TextBlock Text="选择学校模板或合格论文后，程序会尝试识别版式与正文大纲；识别结果可在创建后逐项核对。" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+    </StackPanel>
     <StackPanel Spacing="8">
       <TextBlock Text="保存位置"/>
       <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

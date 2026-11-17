@@ -5,6 +5,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using Thesis.Application;
 using Thesis.Cli;
 using Thesis.Gui.ViewModels;
+using Thesis.OpenXml;
 using Thesis.Schema;
 using Xunit;
 
@@ -46,12 +47,46 @@ public sealed class ProjectWorkspaceTests : IDisposable
     {
         var vm = new WorkspaceViewModel(directory);
         await vm.CreateAsync(FilePath("新建论文.thesis.json"), "校园服务系统", "测试作者");
+        vm.Body = "**正文**\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |";
+        Assert.Contains("| 项目 | 结果 |", vm.Body);
+        await vm.SaveAsync();
         var project = ThesisProjectStore.Open(vm.ProjectPath!);
+        Assert.Contains("| 项目 | 结果 |", project.Document.Content.Chapters[0].Markdown);
         Assert.Equal("校园服务系统", project.Document.Content.Title);
         Assert.Equal("测试作者", project.Document.Content.Author);
         Assert.True(File.Exists(ThesisProjectStore.Resolve(project, project.Document.TemplateDesignPath)));
+        Assert.Equal("绪论", Assert.Single(project.Document.Content.Chapters).Title);
         Assert.False(vm.IsDirty);
         Assert.Equal("校园服务系统", Assert.Single(vm.Recent).Title);
+    }
+
+    [Fact]
+    public async Task NewProjectCanBindTemplateAndInitializeEditableOutline()
+    {
+        var template = FilePath("school-template.docx");
+        TemplateDesigner.CreateDefault(template);
+        using (var doc = WordprocessingDocument.Open(template, true))
+        {
+            var body = doc.MainDocumentPart!.Document!.Body!;
+            body.RemoveAllChildren();
+            body.Append(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Heading1" }), new Run(new Text("第一章 绪论"))));
+            body.Append(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Heading2" }), new Run(new Text("1.1 研究背景"))));
+            body.Append(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Normal" }), new Run(new Text("模板正文样本。"))));
+            body.Append(new SectionProperties(new PageSize { Width = 11906, Height = 16838 },
+                new PageMargin { Top = 1440, Bottom = 1440, Left = 1440, Right = 1440 }));
+            doc.MainDocumentPart.Document.Save();
+        }
+
+        var vm = new WorkspaceViewModel(directory);
+        await vm.CreateAsync(FilePath("带模板.thesis.json"), "测试论文", "测试作者", template);
+
+        var project = ThesisProjectStore.Open(vm.ProjectPath!);
+        var storedTemplate = ThesisProjectStore.Resolve(project, project.Document.TemplatePath)!;
+        Assert.True(File.Exists(storedTemplate));
+        Assert.Equal("测试论文", project.Document.Content.Title);
+        var chapter = Assert.Single(project.Document.Content.Chapters);
+        Assert.Equal("第一章 绪论", chapter.Title);
+        Assert.Equal("1.1 研究背景", Assert.Single(chapter.Sections).Title);
     }
 
     [Fact]
@@ -61,9 +96,10 @@ public sealed class ProjectWorkspaceTests : IDisposable
         preferences.Remember(FilePath("missing.thesis.json"), "旧项目");
         var vm = new WorkspaceViewModel(directory);
         Assert.Empty(vm.Recent);
-        vm.ShowError(new IOException("目标文件正在使用"));
+        vm.ShowError(new IOException("Structure audit failed: /word/document.xml contains a duplicate shape id"));
         Assert.True(vm.HasError);
-        Assert.Equal("目标文件正在使用", vm.ErrorMessage);
+        Assert.Contains("结构检查未通过", vm.ErrorMessage);
+        Assert.Contains("duplicate shape id", vm.ErrorDetails);
         vm.HasError = false;
         Assert.False(vm.HasError);
     }

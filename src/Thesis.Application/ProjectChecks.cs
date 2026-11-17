@@ -35,7 +35,22 @@ public static class ProjectChecks
             try
             {
                 var design = TemplateLibraryStore.Load(designPath);
-                foreach (var role in design.Roles.Where(r => r.Confidence < .5 && !r.Confirmed)) result.Add(new("warning", "模板规则待确认", role.Name + "：当前使用正文样本，请在模板工作台核对。"));
+                var bodyRole = design.Roles.FirstOrDefault(r => r.Role == "body");
+                var unconfirmed = design.Roles.Where(r => r.Confidence < .5 && !r.Confirmed).ToArray();
+                if (unconfirmed.Length > 0)
+                {
+                    var fallback = bodyRole is null ? "通用正文格式" : $"正文格式（{bodyRole.Font}，{bodyRole.Size:g} 磅）";
+                    var details = string.Join("；", unconfirmed.Select(role =>
+                    {
+                        var sample = role.SampleText?.Trim() ?? "";
+                        if (sample.Length > 36) sample = sample[..36] + "…";
+                        return $"{role.Name}：{(sample.Length == 0 ? "未找到匹配样本段落" : $"样本“{sample}”")}";
+                    }));
+                    var firstRole = unconfirmed[0];
+                    result.Add(new("warning", $"有 {unconfirmed.Length} 项模板格式需要核对",
+                        $"{details}。这些位置目前会暂用{fallback}。点击此项可跳转模板工作台，从样本段落重新指定格式。",
+                        "template:" + firstRole.Role));
+                }
                 var directory = Path.Combine(Path.GetTempPath(), "ThesisCheck", Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
                 try
                 {

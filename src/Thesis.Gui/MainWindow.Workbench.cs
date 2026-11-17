@@ -190,12 +190,12 @@ public sealed partial class MainWindow
             ChecksEmptyTitle.Text = "检查完成，当前没有待处理项";
             ChecksEmptyDetail.Text = "正式交付前仍请检查导出的 PDF 页面和真实分页。";
         }
-        catch (Exception ex)
+        catch
         {
             ChecksStatusIcon.Symbol = Symbol.Important;
             ChecksStatusIcon.Visibility = Visibility.Visible;
             ChecksEmptyTitle.Text = "检查未完成";
-            ChecksEmptyDetail.Text = ex.Message;
+            ChecksEmptyDetail.Text = "请查看页面上方的操作提示，点击“查看技术详情”定位问题。";
             throw;
         }
         finally
@@ -206,7 +206,19 @@ public sealed partial class MainWindow
     }
     private void Issue_Click(object sender, ItemClickEventArgs e)
     {
-        FlushEditor(); viewModel.Locate((ProjectIssue)e.ClickedItem); OutlineList.SelectedItem = viewModel.Selected; LoadEditorFromViewModel(); ShowPage("write");
+        var issue = (ProjectIssue)e.ClickedItem;
+        if (issue.NodeId?.StartsWith("template:", StringComparison.Ordinal) == true)
+        {
+            ShowPage("template");
+            var role = issue.NodeId["template:".Length..];
+            if (editingDesign?.Roles.FirstOrDefault(candidate => candidate.Role == role) is { } target)
+            {
+                RoleList.SelectedItem = target;
+                RoleList.ScrollIntoView(target);
+            }
+            return;
+        }
+        FlushEditor(); viewModel.Locate(issue); OutlineList.SelectedItem = viewModel.Selected; LoadEditorFromViewModel(); ShowPage("write");
     }
     private void Version_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
