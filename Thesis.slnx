@@ -1,16 +1,39 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+  </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Thesis.Application/Thesis.Application.csproj" />
-    <Project Path="src/Thesis.Cli/Thesis.Cli.csproj" />
-    <Project Path="src/Thesis.Core/Thesis.Core.csproj" />
-    <Project Path="src/Thesis.Gui/Thesis.Gui.csproj" />
-    <Project Path="src/Thesis.Host/Thesis.Host.csproj" />
-    <Project Path="src/Thesis.OpenXml/Thesis.OpenXml.csproj" />
-    <Project Path="src/Thesis.Profile/Thesis.Profile.csproj" />
-    <Project Path="src/Thesis.Schema/Thesis.Schema.csproj" />
-    <Project Path="src/Thesis.Session/Thesis.Session.csproj" />
+    <Project Path="src/Thesis.Application/Thesis.Application.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Cli/Thesis.Cli.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Core/Thesis.Core.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Gui/Thesis.Gui.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Thesis.Host/Thesis.Host.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.OpenXml/Thesis.OpenXml.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Profile/Thesis.Profile.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Schema/Thesis.Schema.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+    <Project Path="src/Thesis.Session/Thesis.Session.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Thesis.Tests/Thesis.Tests.csproj" />
+    <Project Path="tests/Thesis.Tests/Thesis.Tests.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
   </Folder>
 </Solution>
