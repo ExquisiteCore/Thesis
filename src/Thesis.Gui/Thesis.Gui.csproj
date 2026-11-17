@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EnableUiSmokeTests)' == 'true'">
+    <DefineConstants>$(DefineConstants);THESIS_UI_SMOKE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(EnableUiSmokeTests)' == 'true'">
+    <Compile Include="../../tests/Thesis.Desktop.Smoke/SmokeScenario.cs" Link="SmokeScenario.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <ProjectReference Include="../Thesis.Application/Thesis.Application.csproj" />
+    <Content Include="../Thesis.Cli/scripts/audit_layout.py" Link="scripts/audit_layout.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- Unpackaged publishing needs both loose XBF files and the merged theme resource index. -->
+  <Target Name="IncludeCompiledXamlInPublish" AfterTargets="ComputeFilesToPublish" DependsOnTargets="CopyGeneratedXaml">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(GeneratedXamlDest)">
+        <RelativePath>$([MSBuild]::MakeRelative('$(TargetDir)', '%(GeneratedXamlDest.FullPath)'))</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="$(TargetDir)$(AssemblyName).pri">
+        <RelativePath>$(AssemblyName).pri</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

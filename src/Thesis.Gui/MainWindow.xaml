@@ -1,0 +1,184 @@
+<Window x:Class="Thesis.Gui.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Thesis · 论文工作台">
+  <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Grid Padding="24,18" ColumnSpacing="24">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock Text="THESIS" FontSize="12" CharacterSpacing="180" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+        <TextBlock Text="论文工作台" Style="{ThemeResource TitleTextBlockStyle}" />
+      </StackPanel>
+      <CommandBar Grid.Column="1" Background="Transparent" DefaultLabelPosition="Right" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsDynamicOverflowEnabled="True">
+        <AppBarButton Label="新建" Icon="Add" Click="New_Click" AccessKey="N" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="新建论文项目 (Ctrl+N)">
+          <AppBarButton.KeyboardAccelerators>
+            <KeyboardAccelerator Key="N" Modifiers="Control" />
+          </AppBarButton.KeyboardAccelerators>
+        </AppBarButton>
+        <AppBarButton Label="打开" Icon="OpenFile" Click="Open_Click" AccessKey="O" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="打开论文项目 (Ctrl+O)">
+          <AppBarButton.KeyboardAccelerators>
+            <KeyboardAccelerator Key="O" Modifiers="Control" />
+          </AppBarButton.KeyboardAccelerators>
+        </AppBarButton>
+        <AppBarButton Label="保存" Icon="Save" Click="Save_Click" AccessKey="S" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="保存当前项目 (Ctrl+S)">
+          <AppBarButton.KeyboardAccelerators>
+            <KeyboardAccelerator Key="S" Modifiers="Control" />
+          </AppBarButton.KeyboardAccelerators>
+        </AppBarButton>
+        <AppBarSeparator />
+        <AppBarButton Label="导入正文" Icon="Import" Click="Import_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="从 Word 或正文文件导入内容" />
+        <AppBarButton Label="生成 DOCX" Icon="Download" Click="Compose_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="按当前模板生成论文候选 DOCX" />
+        <AppBarButton Label="导出 PDF" Icon="View" Click="Preview_Click" IsEnabled="{Binding CanEdit}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" ToolTipService.ToolTip="使用 WPS / Word 更新分页并导出 PDF" />
+        <CommandBar.SecondaryCommands>
+          <AppBarButton Label="另存项目副本" Icon="SaveLocal" Click="SaveCopy_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="将当前内容保存为独立项目副本" />
+          <AppBarButton Label="导出 Markdown" Icon="Download" Click="ExportMarkdown_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="导出 Markdown" />
+          <AppBarButton Label="导出项目包" Icon="Folder" Click="ExportPackage_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="导出项目包" />
+          <AppBarButton Label="导入项目包" Icon="Import" Click="ImportPackage_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="导入项目包" />
+          <AppBarButton Label="查找内容" Icon="Find" Click="Find_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="查找内容" />
+          <AppBarButton Label="切换主题" Icon="Switch" Click="Theme_Click" ToolTipService.ToolTip="切换主题" />
+          <AppBarButton Label="显示 / 隐藏属性" Icon="ShowResults" Click="Inspector_Click" ToolTipService.ToolTip="显示 / 隐藏属性" />
+          <AppBarButton Label="环境诊断" Icon="Help" Click="Diagnostics_Click" ToolTipService.ToolTip="环境诊断" />
+        </CommandBar.SecondaryCommands>
+      </CommandBar>
+    </Grid>
+    <Border Grid.Row="1" Padding="24,10" BorderThickness="0,1,0,1" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+      <Grid ColumnSpacing="18">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <StackPanel x:Name="NavigationButtons" Orientation="Horizontal" Spacing="6">
+          <Button Content="首页" Tag="home" Click="Navigate_Click"/>
+          <Button Content="写作" Tag="write" Click="Navigate_Click" IsEnabled="{Binding HasProject}"/>
+          <Button Content="模板" Tag="template" Click="Navigate_Click" IsEnabled="{Binding HasProject}"/>
+          <Button Content="快速预览" Tag="preview" Click="Navigate_Click" IsEnabled="{Binding HasProject}"/>
+          <Button Content="检查" Tag="checks" Click="Navigate_Click" IsEnabled="{Binding HasProject}"/>
+          <Button Content="历史" Tag="history" Click="Navigate_Click" IsEnabled="{Binding HasProject}"/>
+        </StackPanel>
+        <TextBlock Grid.Column="1" Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Right" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+      </Grid>
+    </Border>
+    <Grid x:Name="WorkspaceGrid" Grid.Row="2" ColumnSpacing="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" MinWidth="300" /><ColumnDefinition x:Name="InspectorColumn" Width="280" /></Grid.ColumnDefinitions>
+      <Grid Padding="16,22,12,16" Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <TextBlock Text="论文大纲" Style="{ThemeResource SubtitleTextBlockStyle}" Margin="8,0,0,16" />
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+          <Button Content="＋ 章节" Click="AddChapter_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="新增章节" />
+          <Button Content="＋ 小节" Click="AddSection_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="在当前章新增小节" />
+        </StackPanel>
+        <ListView Grid.Row="2" ItemsSource="{Binding Outline}" SelectedItem="{Binding Selected, Mode=TwoWay}" DisplayMemberPath="Label" SelectionMode="Single" IsEnabled="{Binding CanEdit}" AutomationProperties.Name="论文大纲" />
+        <StackPanel Grid.Row="3" Spacing="8" Margin="0,12,0,0">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="上移" Click="MoveUp_Click" IsEnabled="{Binding CanDelete}" />
+          <Button Content="下移" Click="MoveDown_Click" IsEnabled="{Binding CanDelete}" />
+          <Button Content="删除" Click="Delete_Click" IsEnabled="{Binding CanDelete}" />
+        </StackPanel>
+          <Button Content="恢复上次大纲快照" Click="UndoStructure_Click" IsEnabled="{Binding CanUndo}" />
+        </StackPanel>
+      </Grid>
+      <Grid Grid.Column="1" Padding="32,24" RowSpacing="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid>
+          <TextBlock Text="内容编辑" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          <TextBlock Text="{Binding CharacterCount}" HorizontalAlignment="Right" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Grid>
+        <TextBox Grid.Row="1" Text="{Binding Heading, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding HeadingReadOnly}" FontSize="26" FontWeight="SemiBold" BorderThickness="0" Background="Transparent" Padding="0,6" PlaceholderText="章节标题" LostFocus="Heading_LostFocus" AutomationProperties.Name="章节标题" />
+        <TextBlock Grid.Row="2" Text="{Binding EditorHint}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+        <TextBox x:Name="BodyEditor" Grid.Row="3" Text="{Binding Body, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontSize="17" Padding="20" BorderThickness="1" CornerRadius="8" VerticalContentAlignment="Top" PlaceholderText="开始写作，或导入 Markdown。" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节正文" />
+      </Grid>
+      <ScrollViewer Grid.Column="2" Background="{ThemeResource LayerFillColorDefaultBrush}" VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="20,22" Spacing="16">
+          <TextBlock Text="论文与模板" Style="{ThemeResource SubtitleTextBlockStyle}" />
+          <StackPanel Spacing="12">
+            <TextBox Header="论文题目" Text="{Binding Title, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" IsEnabled="{Binding CanEdit}" />
+            <TextBox Header="作者" Text="{Binding Author, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEdit}" />
+            <TextBox Header="中文关键词（分号分隔）" Text="{Binding Keywords, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" IsEnabled="{Binding CanEdit}" />
+            <TextBox Header="英文关键词（分号分隔）" Text="{Binding KeywordsEnglish, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" IsEnabled="{Binding CanEdit}" />
+            <Button Content="插入图片" Click="InsertImage_Click" IsEnabled="{Binding CanEdit}" />
+            <Button Content="将原稿章节转为 Markdown" Click="ConvertMarkdown_Click" IsEnabled="{Binding CanEdit}" />
+            <Button Click="Template_Click" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" ToolTipService.ToolTip="选择 .docx 学校模板或合格论文"><TextBlock Text="{Binding TemplateLabel}" TextTrimming="CharacterEllipsis" /></Button>
+            <Expander Header="套版与检查设置" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+              <StackPanel Spacing="12">
+                <TextBlock Text="初次使用保留自动识别的校准方案，确认后可载入已绑定方案。正文变更后请重新检查绑定关系。" TextWrapping="Wrap" FontSize="12" />
+                <Button Click="Plan_Click" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Stretch"><TextBlock Text="{Binding PlanLabel}" TextTrimming="CharacterEllipsis" /></Button>
+                <Button Click="Render_Click" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Stretch"><TextBlock Text="{Binding RenderLabel}" TextTrimming="CharacterEllipsis" /></Button>
+                <Button Content="配置 WPS / Word" Click="ConfigureRender_Click" IsEnabled="{Binding CanEdit}" />
+                <Button Content="载入学校要求" Click="Rules_Click" IsEnabled="{Binding CanEdit}" />
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+          <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+          <TextBlock Text="检查与待确认事项" FontWeight="SemiBold" />
+          <TextBlock Text="候选成品保留模板校准和人工检查状态。修改内容后，请重新生成预览。" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          <ItemsControl ItemsSource="{Binding Findings}">
+            <ItemsControl.ItemTemplate><DataTemplate><Border Padding="12" Margin="0,0,0,8" CornerRadius="6" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" IsTextSelectionEnabled="True" /></Border></DataTemplate></ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="打开 Word" Click="OpenDocument_Click" />
+            <Button Content="打开 PDF" Click="OpenPdf_Click" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+    <ScrollViewer x:Name="HomePanel" Grid.Row="2" Visibility="Collapsed">
+      <StackPanel MaxWidth="960" HorizontalAlignment="Stretch" Padding="48,36" Spacing="24">
+        <TextBlock Text="把注意力留给论文内容" FontSize="32" FontWeight="SemiBold" />
+        <TextBlock Text="选好模板，写作与预览并行。学校的格式要求会随项目保存。" FontSize="16" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="新建论文" Click="New_Click" Style="{StaticResource AccentButtonStyle}"/><Button Content="打开项目" Click="Open_Click"/><Button Content="导入项目包" Click="ImportPackage_Click"/></StackPanel>
+        <Border Padding="22" CornerRadius="10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"><StackPanel Spacing="10"><TextBlock Text="1  导入或设计模板     →     2  编辑 Markdown     →     3  检查并导出" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="内置预览直接读取文档结构。仅在导出最终 PDF 时使用本机 WPS / Office。项目自动保存，历史版本留在项目旁的 .thesis 目录。" TextWrapping="Wrap"/></StackPanel></Border>
+        <TextBlock Text="最近项目" Style="{ThemeResource SubtitleTextBlockStyle}"/>
+        <ListView ItemsSource="{Binding Recent}" IsItemClickEnabled="True" ItemClick="Recent_Click" SelectionMode="None">
+          <ListView.ItemTemplate><DataTemplate><StackPanel Padding="12" Spacing="6"><TextBlock Text="{Binding Title}" FontSize="18"/><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel></DataTemplate></ListView.ItemTemplate>
+        </ListView>
+      </StackPanel>
+    </ScrollViewer>
+    <Grid x:Name="TemplatePanel" Grid.Row="2" Padding="24" ColumnSpacing="24" Visibility="Collapsed">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
+      <Grid RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <TextBlock Text="模板工作台" Style="{ThemeResource SubtitleTextBlockStyle}"/>
+        <StackPanel Grid.Row="1" Spacing="8"><Button Content="导入学校模板 / 合格论文" Click="ImportTemplate_Click"/><Button Content="使用通用模板" Click="DefaultTemplate_Click"/><Button Content="从模板库选择" Click="Library_Click"/><Button Content="查看原模板" Click="TemplatePreview_Click"/></StackPanel>
+        <ListView x:Name="RoleList" Grid.Row="2" DisplayMemberPath="Name" SelectionChanged="Role_SelectionChanged"/>
+      </Grid>
+      <ScrollViewer Grid.Column="1"><StackPanel Spacing="16" Padding="0,0,12,24">
+        <TextBox x:Name="DesignName" Header="模板名称"/>
+        <TextBlock x:Name="RoleEvidence" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <Button Content="重新选择此角色的样本段落" Click="ChooseSample_Click"/>
+        <CheckBox x:Name="RoleOverride" Content="覆盖该角色的字体和段落格式"/>
+        <TextBox x:Name="RoleFont" Header="中文字体" TextChanged="RolePreview_Changed"/>
+        <TextBox x:Name="RoleLatinFont" Header="西文字体"/>
+        <StackPanel Orientation="Horizontal" Spacing="12"><NumberBox x:Name="RoleSize" Header="字号（磅）" Minimum="5" Maximum="72" Width="130" ValueChanged="RoleNumber_Changed"/><NumberBox x:Name="RoleLine" Header="行距（倍）" Minimum="0.5" Maximum="5" SmallChange="0.1" Width="130" ValueChanged="RoleNumber_Changed"/><NumberBox x:Name="RoleIndent" Header="首行（字符）" Minimum="0" Maximum="10" Width="130"/></StackPanel>
+        <ComboBox x:Name="RoleAlign" Header="对齐" HorizontalAlignment="Stretch" SelectionChanged="RolePreview_Changed"><x:String>left</x:String><x:String>center</x:String><x:String>right</x:String><x:String>both</x:String><x:String>distribute</x:String></ComboBox>
+        <CheckBox x:Name="RoleBold" Content="加粗" Checked="RolePreview_Changed" Unchecked="RolePreview_Changed"/>
+        <CheckBox x:Name="RoleConfirmed" Content="我已核对该规则及其识别样本"/>
+        <Border Background="White" BorderBrush="LightGray" BorderThickness="1" CornerRadius="8" Padding="24"><TextBlock x:Name="RoleSample" Foreground="Black" TextWrapping="Wrap" Text="排版样例：论文的内容、结构与格式。"/></Border>
+        <Expander Header="页面设置" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="10"><CheckBox x:Name="ApplyMargins" Content="将以下页边距应用于所有节"/><NumberBox x:Name="MarginTop" Header="上（毫米）" Minimum="0" Maximum="80"/><NumberBox x:Name="MarginBottom" Header="下（毫米）" Minimum="0" Maximum="80"/><NumberBox x:Name="MarginLeft" Header="左（毫米）" Minimum="0" Maximum="80"/><NumberBox x:Name="MarginRight" Header="右（毫米）" Minimum="0" Maximum="80"/></StackPanel></Expander>
+        <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="保存并应用" Click="SaveTemplate_Click" Style="{StaticResource AccentButtonStyle}"/><Button Content="保存到模板库" Click="SaveLibrary_Click"/></StackPanel>
+      </StackPanel></ScrollViewer>
+      <ScrollViewer Grid.Column="2"><StackPanel Spacing="14"><TextBlock Text="封面与学校要求" Style="{ThemeResource SubtitleTextBlockStyle}"/><Button Content="编辑封面字段" Click="CoverFields_Click"/><Button Content="编辑内容要求" Click="Requirements_Click"/><TextBlock Text="低置信度规则需人工核对。格式调整与确认状态分别保存；确认样式不等于确认整篇论文合格。" TextWrapping="Wrap"/><TextBlock x:Name="TemplateNotes" TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel></ScrollViewer>
+    </Grid>
+    <Grid x:Name="PreviewPanel" Grid.Row="2" Padding="24" RowSpacing="12" Visibility="Collapsed">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal" Spacing="12"><Button Content="刷新快速预览" Click="RefreshPreview_Click"/><CheckBox x:Name="PreviewCurrent" Content="只看当前章节" IsChecked="True" Checked="PreviewScope_Changed" Unchecked="PreviewScope_Changed"/><Button Content="查看已导出 PDF" Click="PdfPreview_Click"/><Button Content="上一段 / 页" Click="PreviewPrevious_Click"/><Button Content="下一段 / 页" Click="PreviewNext_Click"/><TextBlock x:Name="PreviewPosition" VerticalAlignment="Center"/><Slider x:Name="PreviewZoom" Width="150" Minimum="60" Maximum="150" Value="100" ValueChanged="PreviewZoom_Changed" AutomationProperties.Name="预览缩放"/></StackPanel></ScrollViewer>
+      <TextBlock x:Name="PreviewNotice" Grid.Row="1" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+      <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto"><Border x:Name="PreviewPaper" Width="794" HorizontalAlignment="Center" Background="White" Padding="60" Margin="0,8,0,24" CornerRadius="4"><StackPanel x:Name="PreviewBlocks" Spacing="14"/></Border></ScrollViewer>
+    </Grid>
+    <Grid x:Name="ChecksPanel" Grid.Row="2" Padding="32" RowSpacing="16" Visibility="Collapsed"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <StackPanel Orientation="Horizontal" Spacing="20"><TextBlock Text="内容与模板预检" Style="{ThemeResource SubtitleTextBlockStyle}"/><Button Content="重新检查" Click="Check_Click" IsEnabled="{Binding CanEdit}"/></StackPanel>
+      <ListView Grid.Row="1" ItemsSource="{Binding Issues}" IsItemClickEnabled="True" ItemClick="Issue_Click" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><StackPanel Padding="16" Spacing="8"><TextBlock Text="{Binding Title}" FontSize="18"/><TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+    </Grid>
+    <Grid x:Name="HistoryPanel" Grid.Row="2" Padding="24" ColumnSpacing="20" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid RowSpacing="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="版本与恢复" Style="{ThemeResource SubtitleTextBlockStyle}"/><Button Grid.Row="1" Content="恢复未保存记录" Click="Recover_Click" IsEnabled="{Binding HasRecovery}"/><ListView x:Name="VersionList" Grid.Row="2" ItemsSource="{Binding Versions}" SelectionChanged="Version_SelectionChanged"><ListView.ItemTemplate><DataTemplate><StackPanel Padding="8"><TextBlock Text="{Binding CreatedAt}"/><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView><Button Grid.Row="3" Content="恢复选中版本" Click="RestoreVersion_Click"/></Grid>
+      <TextBox x:Name="HistoryBefore" Grid.Column="1" Header="选中的历史内容" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto"/><TextBox x:Name="HistoryAfter" Grid.Column="2" Header="当前内容" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+    </Grid>
+    <Grid Grid.Row="3" Padding="24,12" ColumnSpacing="12" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <ProgressRing Width="18" Height="18" IsActive="{Binding IsBusy}" />
+      <TextBlock Grid.Column="1" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="12" />
+      <Button Grid.Column="2" Content="取消任务" Click="Cancel_Click" IsEnabled="{Binding IsBusy}" />
+    </Grid>
+  </Grid>
+</Window>
