@@ -6,7 +6,78 @@
       <ResourceDictionary.MergedDictionaries>
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
       </ResourceDictionary.MergedDictionaries>
-      <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF007C72" />
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FFF1F5F3" />
+          <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FFFFFEFB" />
+          <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FFD9E2DE" />
+          <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF08786E" />
+          <SolidColorBrush x:Key="ThesisAccentTextBrush" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="#FFE5F1EE" />
+          <SolidColorBrush x:Key="ThesisInkBrush" Color="#FF202B28" />
+          <SolidColorBrush x:Key="ThesisMutedBrush" Color="#FF68756F" />
+          <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF08786E" />
+          <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF0A6A61" />
+          <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#FFB8DCD4" />
+          <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF08786E" />
+          <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF075E56" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FF171D1B" />
+          <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FF222A27" />
+          <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FF3A4641" />
+          <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF69C7B7" />
+          <SolidColorBrush x:Key="ThesisAccentTextBrush" Color="#FF15221E" />
+          <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="#FF293D37" />
+          <SolidColorBrush x:Key="ThesisInkBrush" Color="#FFE6ECE9" />
+          <SolidColorBrush x:Key="ThesisMutedBrush" Color="#FFA6B2AC" />
+          <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF69C7B7" />
+          <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF55B3A3" />
+          <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#FF35584F" />
+          <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF7DD5C5" />
+          <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF91DDCF" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="{ThemeResource SystemColorWindowColor}" />
+          <SolidColorBrush x:Key="ThesisPaperBrush" Color="{ThemeResource SystemColorWindowColor}" />
+          <SolidColorBrush x:Key="ThesisRuleBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+          <SolidColorBrush x:Key="ThesisAccentBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+          <SolidColorBrush x:Key="ThesisAccentTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+          <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="{ThemeResource SystemColorWindowColor}" />
+          <SolidColorBrush x:Key="ThesisInkBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+          <SolidColorBrush x:Key="ThesisMutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+          <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+          <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+          <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+          <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+          <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <Color x:Key="SystemAccentColor">#FF08786E</Color>
+      <Style x:Key="ThesisPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+        <Setter Property="Background" Value="{ThemeResource ThesisAccentBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ThesisAccentTextBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ThesisAccentBrush}" />
+        <Setter Property="CornerRadius" Value="5" />
+      </Style>
+      <Style x:Key="ThesisEditorToolButtonStyle" TargetType="Button">
+        <Setter Property="MinWidth" Value="36" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{ThemeResource ThesisInkBrush}" />
+      </Style>
+      <Style x:Key="ThesisEditorToggleButtonStyle" TargetType="ToggleButton">
+        <Setter Property="MinWidth" Value="36" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{ThemeResource ThesisInkBrush}" />
+      </Style>
       <FontFamily x:Key="ContentControlThemeFontFamily">Microsoft YaHei UI</FontFamily>
     </ResourceDictionary>
   </Application.Resources>

@@ -59,6 +59,7 @@ public sealed partial class MainWindow
     private void ShowPage(string page)
     {
         currentPage = page;
+        PageHeader.Visibility = page == "write" ? Visibility.Collapsed : Visibility.Visible;
         NavigationMenu.SelectedItem = NavigationMenu.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item => (string)item.Tag == page);
         (PageHeading.Text, PageDescription.Text) = page switch
         {

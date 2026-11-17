@@ -8,6 +8,8 @@ namespace Thesis.Gui;
 
 internal static class RichMarkdownEditor
 {
+    private sealed record InlineFormat(bool Bold, bool Italic, bool Strike, bool Superscript, bool Subscript, bool Code);
+    private sealed record InlineRun(string Text, InlineFormat Format);
     private sealed record Span(int Start, int Length, bool Bold, bool Italic, bool Strike, bool Code = false);
     private sealed record Paragraph(int Start, int Length, ParagraphStyle Style, MarkerType List, int Depth);
     private sealed class DocumentBuilder
@@ -38,15 +40,17 @@ internal static class RichMarkdownEditor
                         AddText(codeInline.Content, bold, italic, strike, true);
                         break;
                     case EmphasisInline emphasis:
-                        AddInline(emphasis, bold || emphasis.DelimiterChar == '*' && emphasis.DelimiterCount >= 2,
-                            italic || emphasis.DelimiterChar == '*' && emphasis.DelimiterCount == 1,
+                        if (emphasis.DelimiterChar is not ('*' or '_' or '~') || emphasis.DelimiterChar == '~' && emphasis.DelimiterCount != 2)
+                            throw new InvalidDataException("本章包含特殊行内格式，请在源码视图中编辑。");
+                        AddInline(emphasis, bold || emphasis.DelimiterChar is '*' or '_' && emphasis.DelimiterCount >= 2,
+                            italic || emphasis.DelimiterChar is '*' or '_' && emphasis.DelimiterCount == 1,
                             strike || emphasis.DelimiterChar == '~' && emphasis.DelimiterCount >= 2, code);
                         break;
                     case LinkInline:
                     case AutolinkInline:
                         throw new InvalidDataException("本章包含超链接。请用 Markdown 源码视图编辑，以保留完整链接地址。");
-                    case LineBreakInline:
-                        AddText("\n", bold, italic, strike, code);
+                    case LineBreakInline lineBreak:
+                        AddText(lineBreak.IsHard ? "\v" : " ", bold, italic, strike, code);
                         break;
                     default:
                         throw new InvalidDataException("本章包含无法在富文本视图中保真编辑的内容。");
@@ -98,6 +102,7 @@ internal static class RichMarkdownEditor
             if (span.Code) range.CharacterFormat.Name = "Consolas";
         }
         document.Selection.SetRange(0, 0);
+        document.ClearUndoRedoHistory();
     }
 
     public static string ReadMarkdown(RichEditBox editor)
@@ -133,12 +138,19 @@ internal static class RichMarkdownEditor
 
     private static string ReadInline(RichEditBox editor, string text, int offset)
     {
-        var runs = new List<string>();
+        var runs = new List<InlineRun>();
         ReadRuns(editor, text, offset, 0, text.Length, runs);
-        return string.Concat(runs);
+        var merged = new List<InlineRun>();
+        foreach (var run in runs)
+        {
+            if (merged.Count > 0 && merged[^1].Format == run.Format)
+                merged[^1] = merged[^1] with { Text = merged[^1].Text + run.Text };
+            else merged.Add(run);
+        }
+        return string.Concat(merged.Select(WriteRun));
     }
 
-    private static void ReadRuns(RichEditBox editor, string text, int offset, int start, int length, List<string> output)
+    private static void ReadRuns(RichEditBox editor, string text, int offset, int start, int length, List<InlineRun> output)
     {
         if (length == 0) return;
         var range = editor.Document.GetRange(offset + start, offset + start + length);
@@ -147,26 +159,49 @@ internal static class RichMarkdownEditor
             || format.Italic is FormatEffect.Undefined or FormatEffect.Toggle
             || format.Strikethrough is FormatEffect.Undefined or FormatEffect.Toggle
             || format.Superscript is FormatEffect.Undefined or FormatEffect.Toggle
-            || format.Subscript is FormatEffect.Undefined or FormatEffect.Toggle;
+            || format.Subscript is FormatEffect.Undefined or FormatEffect.Toggle
+            || string.IsNullOrEmpty(format.Name);
         if (mixed && length > 1)
         {
             var half = length / 2;
             if (char.IsHighSurrogate(text[start + half - 1]) && char.IsLowSurrogate(text[start + half])) half--;
-            ReadRuns(editor, text, offset, start, half, output);
-            ReadRuns(editor, text, offset, start + half, length - half, output);
-            return;
+            if (half == 0) half = 2;
+            if (half < length)
+            {
+                ReadRuns(editor, text, offset, start, half, output);
+                ReadRuns(editor, text, offset, start + half, length - half, output);
+                return;
+            }
         }
 
-        var value = text.Substring(start, length);
-        var code = string.Equals(format.Name, "Consolas", StringComparison.OrdinalIgnoreCase);
-        if (code) value = "`" + value.Replace("`", "\\`") + "`";
-        else value = Escape(value);
-        if (format.Superscript == FormatEffect.On) value = "^" + value + "^";
-        if (format.Subscript == FormatEffect.On) value = "~" + value + "~";
-        if (format.Strikethrough == FormatEffect.On) value = "~~" + value + "~~";
-        if (format.Italic == FormatEffect.On) value = "*" + value + "*";
-        if (format.Bold == FormatEffect.On) value = "**" + value + "**";
-        output.Add(value);
+        output.Add(new(text.Substring(start, length), new(format.Bold == FormatEffect.On,
+            format.Italic == FormatEffect.On, format.Strikethrough == FormatEffect.On,
+            format.Superscript == FormatEffect.On, format.Subscript == FormatEffect.On,
+            string.Equals(format.Name, "Consolas", StringComparison.OrdinalIgnoreCase))));
+    }
+
+    private static string WriteRun(InlineRun run)
+    {
+        var format = run.Format;
+        if (format.Code)
+        {
+            var maxTicks = run.Text.Split('`').Length - 1;
+            var delimiter = new string('`', maxTicks + 1);
+            var padding = run.Text.StartsWith('`') || run.Text.EndsWith('`') || run.Text.StartsWith(' ') && run.Text.EndsWith(' ') ? " " : "";
+            return delimiter + padding + run.Text + padding + delimiter;
+        }
+        // Emphasis delimiters must touch non-whitespace; preserve edge spaces outside them.
+        var trimmed = run.Text.Trim();
+        if (trimmed.Length == 0) return run.Text;
+        var before = run.Text.Length - run.Text.TrimStart().Length;
+        var after = run.Text.Length - run.Text.TrimEnd().Length;
+        var value = Escape(trimmed);
+        if (format.Superscript) value = "^" + value + "^";
+        if (format.Subscript) value = "~" + value + "~";
+        if (format.Strike) value = "~~" + value + "~~";
+        if (format.Italic) value = "*" + value + "*";
+        if (format.Bold) value = "**" + value + "**";
+        return run.Text[..before] + value + (after == 0 ? "" : run.Text[^after..]);
     }
 
     private static string Escape(string text)
@@ -174,7 +209,8 @@ internal static class RichMarkdownEditor
         var result = new System.Text.StringBuilder(text.Length);
         foreach (var character in text)
         {
-            if (character is '\\' or '*' or '_' or '~' or '^' or '[' or ']') result.Append('\\');
+            if (character == '\v') { result.Append("  \n"); continue; }
+            if (character is '\\' or '*' or '_' or '~' or '^' or '[' or ']' or '#' or '>' or '!' or '`' or '|' or '+' or '-' or '.' or '$') result.Append('\\');
             result.Append(character);
         }
         return result.ToString();
@@ -189,6 +225,7 @@ internal static class RichMarkdownEditor
             switch (block)
             {
                 case HeadingBlock heading:
+                    if (heading.Level > 3) throw new InvalidDataException("本章包含四级以上标题，请在源码视图中编辑。");
                     model.AddParagraph(heading.Inline, heading.Level switch
                     {
                         1 => ParagraphStyle.Heading1,
@@ -212,6 +249,8 @@ internal static class RichMarkdownEditor
 
     private static void AddList(DocumentBuilder model, ListBlock list, int depth)
     {
+        if (depth > 0 || list.IsOrdered && list.OrderedStart != "1")
+            throw new InvalidDataException("本章包含多级列表或自定义起始编号，请在源码视图中编辑。");
         foreach (var item in list.OfType<ListItemBlock>())
         foreach (var block in item)
         {

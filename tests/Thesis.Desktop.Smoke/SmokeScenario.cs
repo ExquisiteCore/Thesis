@@ -57,14 +57,35 @@ public sealed partial class MainWindow
             BodyEditor.Document.GetText(TextGetOptions.UseLf, out var richText);
             Require(BodyEditor.Visibility == Visibility.Visible && richText.Contains("Markdown 正文") && !richText.Contains("**"), "富文本视图隐藏 Markdown 标记");
             var roundTrip = RichMarkdownEditor.ReadMarkdown(BodyEditor);
+            File.WriteAllText(Path.Combine(directory, "rich-roundtrip.md"), roundTrip);
             Require(roundTrip.Contains("# 编辑体验") && roundTrip.Contains("**Markdown 正文**") && roundTrip.Contains("- 第一项"), "富文本与 Markdown 往返保留结构");
             var boldStart = richText.IndexOf("Markdown 正文", StringComparison.Ordinal);
             var boldRange = BodyEditor.Document.GetRange(boldStart, boldStart + "Markdown 正文".Length);
             Require(boldRange.CharacterFormat.Bold == FormatEffect.On, "富文本格式映射到原生字符格式");
+            BodyEditor.Document.Selection.SetRange(boldStart, boldStart + "Markdown 正文".Length);
+            UpdateEditorToolbar();
+            Require(FormatBoldButton.IsChecked == true && !UndoEditorButton.IsEnabled, "工具栏同步文字格式，载入章节后撤销记录为空");
+            FormatBold_Click(this, new RoutedEventArgs()); FlushEditor();
+            Require(!viewModel.Body.Contains("**Markdown 正文**"), "工具栏取消加粗并保存正文");
+            UndoEditor_Click(this, new RoutedEventArgs()); FlushEditor();
+            Require(viewModel.Body.Contains("**Markdown 正文**"), "撤销恢复格式并同步保存");
+            RedoEditor_Click(this, new RoutedEventArgs()); FlushEditor();
+            Require(!viewModel.Body.Contains("**Markdown 正文**"), "重做恢复修改并同步保存");
+            BodyEditor.Document.Selection.SetRange(0, 0);
+            UpdateEditorToolbar();
+            await CaptureSmokeAsync(directory, "writing-rich");
+            Require(EditorModeNote.Visibility == Visibility.Collapsed && !sourceEditorActive, "隐藏源码控件的延迟事件不会覆盖富文本模式状态");
             viewModel.Body = "**Markdown 正文**和*斜体*。\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |\n\n- 第一项\n- 第二项";
             LoadEditorFromViewModel();
             FlushEditor();
             Require(viewModel.Body.Contains("| 项目 | 结果 |"), "源码视图编辑后仍保留复杂块");
+            SourceBodyEditor.Text = "# 简化内容\n\n普通正文";
+            await Task.Delay(350); FlushEditor();
+            Require(SourceModeButton.IsEnabled, "源码内容简化后可切回富文本");
+            SourceMode_Click(this, new RoutedEventArgs());
+            Require(BodyEditor.Visibility == Visibility.Visible, "富文本与源码模式可以往返切换");
+            viewModel.Body = "**Markdown 正文**和*斜体*。\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |\n\n- 第一项\n- 第二项";
+            LoadEditorFromViewModel(); FlushEditor();
             await CaptureSmokeAsync(directory, "writing");
             ShowPage("template"); Root.UpdateLayout();
             Require(RoleList.Items.Count > 0 && editingRole is not null, "模板角色与样本已加载");
@@ -74,10 +95,10 @@ public sealed partial class MainWindow
             await CaptureSmokeAsync(directory, "template");
             ShowPage("preview"); await RefreshQuickPreviewAsync(); Root.UpdateLayout();
             Require(PreviewBlocks.Children.Count > 0 && quickPreview?.Blocks.Any(b => b.Kind == "table") == true, "原生快速预览显示内容与表格");
-            LivePreviewToggle.IsChecked = true; await Task.Delay(350); Root.UpdateLayout();
+            await CaptureSmokeAsync(directory, "preview");
+            ShowPage("write"); LivePreviewToggle.IsChecked = true; await RefreshQuickPreviewAsync(); Root.UpdateLayout();
             Require(LivePreviewBlocks.Children.Count > 0, "正文分屏预览显示内容");
             LivePreviewToggle.IsChecked = false;
-            await CaptureSmokeAsync(directory, "preview");
             var external = ThesisProjectStore.Open(viewModel.ProjectPath!); external.Document.Content.Chapters[0].Markdown = "CLI 外部更新正文";
             ThesisProjectStore.Save(external); await viewModel.ReloadExternalAsync();
             Require(viewModel.Body == "CLI 外部更新正文", "GUI 载入外部已保存版本");
@@ -120,10 +141,15 @@ public sealed partial class MainWindow
     private async Task VerifyNewProjectDialogAsync(string directory, Action<bool, string> require)
     {
         var failPicker = false;
+        Exception? creationError = null;
         var dialog = new NewProjectDialog(directory, _ => failPicker
                 ? Task.FromException<string?>(new IOException("位置选择器测试错误"))
                 : Task.FromResult<string?>(null),
-            details => viewModel.CreateAsync(details.Path, details.Title, details.Author)) { XamlRoot = Root.XamlRoot };
+            async details =>
+            {
+                try { await viewModel.CreateAsync(details.Path, details.Title, details.Author); }
+                catch (Exception ex) { creationError = ex; throw; }
+            }) { XamlRoot = Root.XamlRoot };
         var pending = dialog.ShowAsync().AsTask();
         await Task.Delay(150);
         var title = (TextBox)dialog.FindName("PaperTitle");
@@ -147,7 +173,20 @@ public sealed partial class MainWindow
         require(!pending.IsCompleted && File.ReadAllText(existingPath) == "existing project", "创建论文保护已有文件");
         File.WriteAllText(path, ""); // The native save picker reserves an empty file.
         location.Text = path; InvokeButton(primary);
-        require(await pending.WaitAsync(TimeSpan.FromSeconds(15)) == ContentDialogResult.Primary && File.Exists(path), "新建窗口通过创建按钮生成项目");
+        await Task.Delay(500);
+        if (creationError is not null)
+        {
+            await CaptureSmokeAsync(directory, "new-project-create-error");
+            throw new InvalidOperationException("新建项目回调失败。", creationError);
+        }
+        var completed = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(45)));
+        if (completed != pending)
+        {
+            await CaptureSmokeAsync(directory, "new-project-create-timeout");
+            var validation = (InfoBar)dialog.FindName("ValidationMessage");
+            throw new TimeoutException($"新建操作超时。状态：{viewModel.Status}；忙碌：{viewModel.IsBusy}；校验：{validation.Message}");
+        }
+        require(await pending == ContentDialogResult.Primary && File.Exists(path), "新建窗口通过创建按钮生成项目");
     }
 
     private static void InvokeButton(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();

@@ -6,23 +6,28 @@ public sealed class DesktopShortcutTests
     private static readonly XNamespace Presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
     [Theory]
-    [InlineData("新建", "N", "New_Click", "{Binding IsIdle}")]
-    [InlineData("打开", "O", "Open_Click", "{Binding IsIdle}")]
-    [InlineData("保存", "S", "Save_Click", "{Binding CanEdit}")]
-    public void ShortcutBelongsToItsCommandButton(string label, string key, string handler, string enabledBinding)
+    [InlineData("新建", "N", "New_Click", "NewShortcut_Invoked", "{Binding IsIdle}")]
+    [InlineData("打开", "O", "Open_Click", "OpenShortcut_Invoked", "{Binding IsIdle}")]
+    [InlineData("保存", "S", "Save_Click", "SaveShortcut_Invoked", "{Binding CanEdit}")]
+    public void ShortcutIsScopedToTheWindowAndRunsItsCommand(string label, string key, string clickHandler, string shortcutHandler, string enabledBinding)
     {
         var markup = LoadMarkup();
         var shortcut = Assert.Single(markup.Descendants(Presentation + "KeyboardAccelerator"),
             element => (string?)element.Attribute("Key") == key);
         Assert.Equal("Control", (string?)shortcut.Attribute("Modifiers"));
-        Assert.Equal(Presentation + "AppBarButton.KeyboardAccelerators", shortcut.Parent!.Name);
-        var button = shortcut.Parent.Parent!;
+        Assert.Equal("Grid.KeyboardAccelerators", shortcut.Parent!.Name.LocalName);
+        var root = shortcut.Parent.Parent!;
+        Assert.Equal(Presentation + "Grid", root.Name);
+        Assert.Equal("Hidden", (string?)root.Attribute("KeyboardAcceleratorPlacementMode"));
+        Assert.Equal("Root", (string?)root.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name"));
+        Assert.Equal(shortcutHandler, (string?)shortcut.Attribute("Invoked"));
+
+        var button = Assert.Single(markup.Descendants(Presentation + "AppBarButton"), element => (string?)element.Attribute("Label") == label);
         Assert.Equal(Presentation + "AppBarButton", button.Name);
-        Assert.Equal(label, (string?)button.Attribute("Label"));
-        Assert.Equal(handler, (string?)button.Attribute("Click"));
+        Assert.Equal(clickHandler, (string?)button.Attribute("Click"));
         Assert.Equal(enabledBinding, (string?)button.Attribute("IsEnabled"));
         Assert.Contains("Ctrl+" + key, (string?)button.Attribute("ToolTipService.ToolTip") ?? "");
-        Assert.Null(shortcut.Attribute("ScopeOwner"));
+        Assert.Empty(button.Descendants(Presentation + "KeyboardAccelerator"));
     }
 
     [Fact]
@@ -33,11 +38,11 @@ public sealed class DesktopShortcutTests
         {
             var tooltip = (string?)button.Attribute("ToolTipService.ToolTip");
             Assert.False(string.IsNullOrWhiteSpace(tooltip));
-            if (!button.Descendants(Presentation + "KeyboardAccelerator").Any())
+            if ((string?)button.Attribute("Label") is not ("新建" or "打开" or "保存"))
                 Assert.DoesNotContain("Ctrl+", tooltip!);
         }
         Assert.All(markup.Descendants(Presentation + "KeyboardAccelerator"), shortcut =>
-            Assert.Equal(Presentation + "AppBarButton", shortcut.Parent!.Parent!.Name));
+            Assert.Equal("Grid.KeyboardAccelerators", shortcut.Parent!.Name.LocalName));
     }
 
     private static XDocument LoadMarkup()

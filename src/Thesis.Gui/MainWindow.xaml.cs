@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Thesis.Gui.ViewModels;
 using Thesis.Schema;
@@ -112,6 +113,21 @@ public sealed partial class MainWindow : Window
     private async void New_Click(object sender, RoutedEventArgs e) => await RunAsync(NewAsync);
     private async void Open_Click(object sender, RoutedEventArgs e) => await RunAsync(OpenAsync);
     private async void Save_Click(object sender, RoutedEventArgs e) => await RunAsync(SaveAsync);
+    private async void NewShortcut_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        await RunAsync(NewAsync);
+    }
+    private async void OpenShortcut_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        await RunAsync(OpenAsync);
+    }
+    private async void SaveShortcut_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        await RunAsync(SaveAsync);
+    }
     private async void SaveCopy_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         var path = await SaveFileAsync("论文项目副本", ".thesis.json");
