@@ -1,11 +1,11 @@
 ---
 name: thesis-docx
-description: Use when using Thesis DOCX CLI to extract thesis template rules, merge project rule JSON, write thesis content into template DOCX files, validate formatting, or apply teacher feedback edits.
+description: Use from any Agent that can run local CLI tools when extracting thesis template rules, sharing a Thesis project, composing DOCX, validating formatting, or applying reviewer feedback.
 ---
 
 # thesis-docx
 
-这是 Thesis DOCX CLI 的封装 skill。核心原则：正式论文优先在模板副本上装配或增量写入，而不是从空白文档重新生成。
+这是面向多种 Agent 的纯 Markdown `SKILL.md` 工作流说明，仅依赖本地 Thesis CLI 与文件系统，不绑定特定厂商的工具 API。核心原则：正式论文优先在模板副本上装配或增量写入，而不是从空白文档重新生成。
 
 ## CLI
 
@@ -35,9 +35,11 @@ dotnet build Thesis.Cli.slnf
 
 WinUI 3 桌面端与 CLI 共用 `.thesis.json` 项目。用户提供项目时，先执行 `project inspect --project <path>`，保留返回的 `projectFingerprint`；读取项目 `content` 后编辑正文，以 `project update --project <path> --expected-sha256 <fingerprint> --content <content.json>` 提交。指纹不一致时重新读取并合并，保留 GUI 中的改动。
 
-GUI 与 CLI 是两个独立入口：前者用于人类编辑/预览，后者配合 Agent。`project create/update --content` 也支持 Markdown，正文可以保存为章节/小节的 `markdown` 字段。`project export-markdown --project <path> --out <paper.md>` 导出正文和图片资产；`project pack --project <path> --out <paper.zip>` 打包迁移。保护 `assetDirectory` 与 `thesis-native` 片段的源路径、索引、指纹。GUI 模板设计通过 `templateDesignPath` 引用独立版本；替换模板后清除此字段并重新校准。
+GUI 与 CLI 是两个独立入口：前者用于人类编辑/预览，后者供 Agent 自动化。两端共享 `.thesis.json`、有序结构化内容块、`Thesis.Application` 和模板链路。规范正文块包括段落及行内 run、表格、项目图片、LaTeX 源式和有指纹的原生 DOCX 片段；Markdown 只作为导入/导出交换格式。`project create/update --content` 兼容 Markdown 和结构化 `thesisContent` JSON。`project export-markdown --project <path> --out <paper.md>` 导出正文和图片资产；`project pack --project <path> --out <paper.zip>` 打包迁移。保护 `assetDirectory` 与 `thesis-native` 片段的源路径、索引、指纹。GUI 模板设计通过 `templateDesignPath` 引用独立版本；替换模板后清除此字段并重新校准。
 
-GUI 快速预览基于 Open XML，不启动 COM。最终 PDF 才调用 WPS/Word；PDF 审计默认使用内置 .NET，`pythonPath` 仅用于兼容旧 PyMuPDF 检查。Markdown LaTeX 当前保留源码，原生 Word 公式通过 DOCX 片段迁移，须在导出 PDF 中复核。
+GUI 快速预览基于 Open XML，不启动 COM。最终 PDF 才调用 WPS/Word；PDF 审计默认使用内置 .NET，`pythonPath` 仅用于兼容旧 PyMuPDF 检查。公式块的规范源式为 LaTeX；常用表达式由共享 .NET 解析器生成 Office Math Markup Language (OMML)，未知命令保留原式，最终 PDF 需复核。原稿中的完整原生公式仍按带指纹的 DOCX 片段迁移。
+
+Agent 自动化遵循 `inspect → edit → update/compose → validate`：先记录项目指纹，尽量修改对应的原生块；提交更新时回传期望指纹，冲突后重新读取并合并。创建或修改文档资源时复制到项目 `assets/`。保真片段只通过专用解锁流程转换。
 
 候选生成使用 `project compose --project <path> --out <candidate.docx> --render true --require-ready false`，排版设置取项目的 `renderConfigPath`；无渲染检查的候选可用 `--render false`。正式输出沿用默认交付门禁。正文更新会清除原有绑定方案；模板初次识别仍需检查封面、分节、样式、编号和学校要求。原生 DOCX 内容块保留 `sourcePath` 与指纹，编辑时不要把它们静默降为纯文本。
 
