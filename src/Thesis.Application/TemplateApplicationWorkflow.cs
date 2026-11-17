@@ -7,7 +7,7 @@ namespace Thesis.Application;
 public static class TemplateApplicationWorkflow
 {
     public static TemplateApplicationReport Execute(string source, string template, TemplateApplicationPlan plan, string stagedDocument,
-        LayoutRenderConfig? config, string workingDirectory, string? stagedPdf)
+        LayoutRenderConfig? config, string workingDirectory, string? stagedPdf, CancellationToken cancellationToken = default)
     {
         var current = ThesisJson.Deserialize<TemplateApplicationPlan>(ThesisJson.Serialize(plan));
         var engine = config is null ? null : DocumentLayoutEngines.Create(config);
@@ -16,6 +16,7 @@ public static class TemplateApplicationWorkflow
         Dictionary<string, string>? previousPages = null;
         for (var pass = 1; pass <= (config?.MaxPasses ?? 1); pass++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (pass == 1 || !engine!.UpdatesDocument)
                 report = OpenXmlTemplateApplicator.Apply(source, template, current, stagedDocument);
             TemplateStructureAudit.Check(stagedDocument, report);
@@ -30,10 +31,12 @@ public static class TemplateApplicationWorkflow
                 return report;
             }
             var passDirectory = Path.Combine(workingDirectory, "pass-" + pass);
+            cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(passDirectory);
             var pdf = Path.Combine(passDirectory, "document.pdf");
             report.LayoutEngine = engine!.Name;
             report.HostApplication = engine.Render(stagedDocument, pdf, passDirectory, config);
+            cancellationToken.ThrowIfCancellationRequested();
             // A renderer that saves the DOCX must pass exactly the same integrity/structure gates.
             TemplateStructureAudit.Check(stagedDocument, report);
             if (!report.StructurePassed) throw new InvalidDataException("Post-render structure audit failed: " + string.Join("; ", report.StructuralErrors));
@@ -41,7 +44,11 @@ public static class TemplateApplicationWorkflow
             var manifest = Path.Combine(passDirectory, "manifest.json");
             File.WriteAllText(manifest, ThesisJson.Serialize(LayoutManifestBuilder.Build(stagedDocument, report.Headings, report.HostApplication)));
             var factsPath = Path.Combine(passDirectory, "layout.json");
-            ExternalProcessRunner.Run(config.PythonPath, [Path.Combine(AppContext.BaseDirectory, "scripts", "audit_layout.py"), pdf, manifest, factsPath], passDirectory, config.TimeoutSeconds);
+            if (string.IsNullOrWhiteSpace(config.PythonPath))
+                File.WriteAllText(factsPath, ThesisJson.Serialize(PdfLayoutAudit.Analyze(pdf, ThesisJson.Deserialize<PdfLayoutAudit.Manifest>(File.ReadAllText(manifest)), cancellationToken)));
+            else
+                ExternalProcessRunner.Run(config.PythonPath, [Path.Combine(AppContext.BaseDirectory, "scripts", "audit_layout.py"), pdf, manifest, factsPath], passDirectory, config.TimeoutSeconds);
+            cancellationToken.ThrowIfCancellationRequested();
             var facts = ThesisJson.Deserialize<LayoutFacts>(File.ReadAllText(factsPath));
             report.LayoutExecuted = true;
             report.RenderPasses = pass;

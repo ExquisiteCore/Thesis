@@ -48,7 +48,7 @@ def run(cli, office, engine, artifact_dir):
             "blocks": [{"type": "templateRange", "start": 0, "end": 1}, {"type": "toc"}, {"type": "sourceRange", "start": 0, "end": 1, "role": "heading1"},
                        {"type": "sourceRange", "start": 1, "end": 3, "role": "body"}, {"type": "section", "finalSection": True}]}
     (artifact_dir / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
-    config = {"engine": engine, "libreOfficePath": str(office), "pythonPath": sys.executable, "timeoutSeconds": 90, "maxPasses": 4}
+    config = {"engine": engine, "libreOfficePath": str(office), "timeoutSeconds": 90, "maxPasses": 4}
     (artifact_dir / "render.json").write_text(json.dumps(config), encoding="utf-8")
     command = ["dotnet", str(cli), "compose", "--doc", str(source), "--template", str(template),
                "--plan", str(artifact_dir / "plan.json"), "--render-config", str(artifact_dir / "render.json"),

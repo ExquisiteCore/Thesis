@@ -21,12 +21,14 @@ internal static class OfficeProcessRunner
             var request = Path.Combine(directory, "request.json");
             var report = Path.Combine(directory, "report.json");
             File.WriteAllText(request, ThesisJson.Serialize(new OfficeWorkerRequest { Document = document, Options = options }));
-            var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Thesis.Cli.exe" : "Thesis.Cli");
+            var entry = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name;
+            var worker = entry == "Thesis.Gui" ? "Thesis.Gui" : "Thesis.Cli";
+            var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? worker + ".exe" : worker);
             var arguments = new List<string>();
             if (!File.Exists(executable))
             {
                 executable = "dotnet";
-                arguments.Add(Path.Combine(AppContext.BaseDirectory, "Thesis.Cli.dll"));
+                arguments.Add(Path.Combine(AppContext.BaseDirectory, worker + ".dll"));
             }
             arguments.AddRange(["internal-host-finalize", "--request", request, "--report", report]);
             ExternalProcessRunner.Run(executable, arguments, directory, timeoutSeconds);

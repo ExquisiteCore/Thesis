@@ -10,9 +10,12 @@ internal static class DoctorCommand
     {
         var options = new CommandOptions(args, "--render-config");
         var config = RenderConfiguration.Load(options.Path("--render-config"));
-        ExternalProcessRunner.Run(config.PythonPath, ["-c", "import pymupdf; print(pymupdf.__version__)"], AppContext.BaseDirectory, config.TimeoutSeconds);
-        var script = Path.Combine(AppContext.BaseDirectory, "scripts", "audit_layout.py");
-        if (!File.Exists(script)) throw new IOException("PDF audit script is missing from this installation.");
+        if (!string.IsNullOrWhiteSpace(config.PythonPath))
+        {
+            ExternalProcessRunner.Run(config.PythonPath, ["-c", "import pymupdf; print(pymupdf.__version__)"], AppContext.BaseDirectory, config.TimeoutSeconds);
+            var script = Path.Combine(AppContext.BaseDirectory, "scripts", "audit_layout.py");
+            if (!File.Exists(script)) throw new IOException("PDF audit script is missing from this installation.");
+        }
         if (config.Engine == "libreoffice") ExternalProcessRunner.Run(config.LibreOfficePath, ["--version"], AppContext.BaseDirectory, config.TimeoutSeconds);
         else if (OperatingSystem.IsWindows())
         {
@@ -23,6 +26,6 @@ internal static class DoctorCommand
             if (!registered) throw new ArgumentException("No requested Office COM host is registered.");
         }
         return new CliResult { Status = "success", Diagnostics = [new Diagnostic { Severity = "info", Code = "environment_ready",
-            Message = $"Engine={config.Engine}; Python/PyMuPDF and PDF audit script verified. Template fonts still need verification on the rendering host." }] };
+            Message = $"Engine={config.Engine}; PDF audit={(string.IsNullOrWhiteSpace(config.PythonPath) ? "managed .NET" : "Python/PyMuPDF")}. Template fonts still need verification on the rendering host." }] };
     }
 }

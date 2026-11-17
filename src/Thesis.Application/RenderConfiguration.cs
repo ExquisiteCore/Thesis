@@ -12,8 +12,8 @@ public static class RenderConfiguration
         _ = DocumentLayoutEngines.Create(config);
         var directory = Path.GetDirectoryName(path)!;
         if (config.Engine == "libreoffice") config.LibreOfficePath = Path.GetFullPath(config.LibreOfficePath, directory);
-        config.PythonPath = Path.GetFullPath(config.PythonPath, directory);
-        if ((config.Engine == "libreoffice" && !File.Exists(config.LibreOfficePath)) || !File.Exists(config.PythonPath)
+        if (!string.IsNullOrWhiteSpace(config.PythonPath)) config.PythonPath = Path.GetFullPath(config.PythonPath, directory);
+        if ((config.Engine == "libreoffice" && !File.Exists(config.LibreOfficePath)) || (!string.IsNullOrWhiteSpace(config.PythonPath) && !File.Exists(config.PythonPath))
             || config.TimeoutSeconds is < 1 or > 600 || config.MaxPasses is < 2 or > 6)
             throw new ArgumentException("Render config requires existing executables, timeoutSeconds 1–600 and maxPasses 2–6.");
         if (config.Engine != "libreoffice" && !OperatingSystem.IsWindows()) throw new ArgumentException("Office COM rendering requires Windows.");
