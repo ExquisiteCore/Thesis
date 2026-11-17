@@ -360,6 +360,35 @@ public sealed class QualityPipelineTests : IDisposable
     }
 
     [Fact]
+    public void TemplateAssemblyRepairsDuplicateVmlShapeIdsWithoutChangingTemplate()
+    {
+        var duplicateId = "_x0000_s1026";
+        var first = new Paragraph(new Run(new Picture(new DocumentFormat.OpenXml.Vml.Shape { Id = duplicateId })));
+        var second = new Paragraph(new Run(new Picture(new DocumentFormat.OpenXml.Vml.Shape { Id = duplicateId })));
+        var template = Create("template-with-duplicate-vml.docx", first, second, P("Template body"));
+        var source = Create("vml-source.docx", P("Body"));
+        var plan = Plan(1);
+        plan.Blocks.Insert(0, new() { Type = "templateRange", Start = 0, End = 2 });
+        var originalIds = File.ReadAllBytes(template);
+        var output = PathFor("vml-output.docx");
+
+        OpenXmlTemplateApplicator.Apply(source, template, plan, output);
+
+        using var result = WordprocessingDocument.Open(output, false);
+        var ids = result.MainDocumentPart!.Document!.Descendants()
+            .Where(element => element.LocalName == "shape" && element.NamespaceUri == "urn:schemas-microsoft-com:vml")
+            .Select(element => element.GetAttributes().First(attribute => attribute.LocalName == "id" && attribute.NamespaceUri.Length == 0).Value)
+            .ToArray();
+        Assert.Equal(2, ids.Length);
+        Assert.Equal(ids.Length, ids.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(originalIds, File.ReadAllBytes(template));
+        Assert.Empty(DocumentIntegrityAudit.Check(output));
+        var audit = new TemplateApplicationReport();
+        TemplateStructureAudit.Check(output, audit);
+        Assert.True(audit.StructurePassed, string.Join("; ", audit.StructuralErrors));
+    }
+
+    [Fact]
     public void HeaderStyleReferencesFollowMigratedHeadingStyles()
     {
         var source = Create("source.docx", P("第1章 绪论"), P("正文"));

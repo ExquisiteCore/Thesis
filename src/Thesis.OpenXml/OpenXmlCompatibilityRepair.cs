@@ -6,6 +6,38 @@ namespace Thesis.OpenXml;
 
 public static class OpenXmlCompatibilityRepair
 {
+    private const string VmlNamespace = "urn:schemas-microsoft-com:vml";
+
+    public static bool NormalizeVmlShapeIds(string path)
+    {
+        using var document = WordprocessingDocument.Open(path, true);
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var changed = false;
+        if (document.MainDocumentPart is null) return false;
+        foreach (var part in Parts(document.MainDocumentPart))
+        {
+            var root = part.RootElement;
+            if (root is null) continue;
+            var partChanged = false;
+            foreach (var shape in root.Descendants().Where(element => element.NamespaceUri == VmlNamespace && element.LocalName == "shape"))
+            {
+                var attribute = shape.GetAttributes().FirstOrDefault(candidate => candidate.LocalName == "id" && candidate.NamespaceUri.Length == 0);
+                if (string.IsNullOrWhiteSpace(attribute.Value)) continue;
+                var original = attribute.Value;
+                if (used.Add(original)) continue;
+
+                var suffix = 2;
+                string unique;
+                do unique = $"{original}_thesis_{suffix++}"; while (!used.Add(unique));
+                shape.SetAttribute(new OpenXmlAttribute(string.Empty, "id", string.Empty, unique));
+                changed = true;
+                partChanged = true;
+            }
+            if (partChanged) root.Save();
+        }
+        return changed;
+    }
+
     /// <summary>Restore schema property order after Office saves without changing property values.</summary>
     public static bool NormalizeStyleOrder(string path)
     {

@@ -195,6 +195,7 @@ public static class OpenXmlTemplateApplicator
             }
             // Reopen before promotion, so an unreadable package never replaces an existing output.
             OpenXmlCompatibilityRepair.NormalizeStyleOrder(temp);
+            OpenXmlCompatibilityRepair.NormalizeVmlShapeIds(temp);
             using (var verification = WordprocessingDocument.Open(temp, false))
                 _ = verification.MainDocumentPart?.Document?.Body ?? throw new InvalidDataException("Generated document is unreadable.");
             File.Move(temp, outputFull, overwrite: true);
