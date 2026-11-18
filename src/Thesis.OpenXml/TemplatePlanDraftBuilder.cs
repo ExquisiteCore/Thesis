@@ -31,11 +31,12 @@ public static class TemplatePlanDraftBuilder
             .Any(box => Regex.IsMatch(box.InnerText, @"每章标题.{0,12}另起一页"));
         var samples = to.Where(d => d.Role != "cover" && (d.Text.Length > 0 || d.Role == "image") && d.IsParagraph && !d.IsToc)
             .Where(d => !TemplateSampleText.IsInstruction(d.Text))
+            .Where(d => d.Role != "backMatter" || Regex.IsMatch(d.Text, "[。！？.!?]$"))
             .GroupBy(d => d.Role).ToDictionary(g => g.Key, SelectSample);
         if (!samples.TryGetValue("body", out var body)) throw new InvalidDataException("Template needs a recognizable body paragraph; inspect its structure before drafting a plan.");
         foreach (var role in from.Select(d => d.Role).Concat(["body", "table", "image", "toc1", "toc2", "toc3"]).Distinct())
         {
-            var sample = samples.GetValueOrDefault(role, body);
+            var sample = samples.GetValueOrDefault(role) ?? body;
             int? level = role is "heading1" or "heading2" or "heading3" ? role[^1] - '1'
                 : role is "referencesHeading" or "backMatterHeading" or "conclusionHeading" ? 0
                 : role is "abstractHeading" or "abstractEnglishHeading" && to.Where(d => d.IsToc).Any(d => Regex.Replace(d.Text, @"\s+", "").Contains(Regex.Replace(sample.Text, @"\s+", ""), StringComparison.OrdinalIgnoreCase)) ? 0 : null;
@@ -50,12 +51,11 @@ public static class TemplatePlanDraftBuilder
         if (sourceStart > 0 && templateStart > 0)
         {
             AddFrontMatter(plan, to, templateStart);
-            var sourceTitle = source.MainDocumentPart!.Document!.Body!.Elements<Paragraph>()
-                .FirstOrDefault(p => p.ParagraphProperties?.ParagraphStyleId?.Val?.Value == "Title");
+            var sourceTitle = ReadCoverTitle(source.MainDocumentPart!.Document!.Body!, sourceStart);
             coverTitle = to.Take(templateStart).Select(item => Regex.Match(item.Text, @"^论文题目[：:]\s*(?<title>\S.*)$"))
                 .FirstOrDefault(match => match.Success)?.Groups["title"].Value;
             if (sourceTitle is not null && !string.IsNullOrWhiteSpace(coverTitle))
-                plan.TemplateTextReplacements[coverTitle] = TemplateSampleText.FlowText(sourceTitle);
+                plan.TemplateTextReplacements[coverTitle] = sourceTitle;
             plan.SkippedSourceRanges.Add(new() { Start = 0, End = sourceStart, Reason = "Source cover replaced by template front matter; review identity fields." });
             plan.PendingReviews.Add("Replace the template cover's title, author, student ID, department, supervisor and dates; confirm declaration text.");
         }
@@ -69,13 +69,16 @@ public static class TemplatePlanDraftBuilder
         }
         var templateSections = template.MainDocumentPart!.Document!.Body!.Descendants<SectionProperties>().ToArray();
         if (templateSections.Length == 0) throw new InvalidDataException("Template has no section layout.");
+        var staticPageLabels = templateSections.Select(section => StaticPageFooter.Read(template.MainDocumentPart!, section)).ToArray();
         plan.TemplateTableIndex = to.FirstOrDefault(d => d.Index >= templateStart && d.Role == "table")?.Index;
         var zones = to.Where(d => d.Role != "cover").GroupBy(d => d.Zone).ToDictionary(g => g.Key, g => g.First().Section);
         var currentSection = to.Where(d => d.Index < templateStart).LastOrDefault()?.Section ?? 0;
-        var chapterSamples = to.Where(d => d.Role == "heading1" && d.Zone == "body").ToArray();
+        var chapterSamples = to.Where(d => d.Role == "heading1" && d.Zone == "body" && !TemplateSampleText.IsInstruction(d.Text)).ToArray();
         var chapter = -1;
         var usedSections = plan.Blocks.Where(b => b.Type == "section").Select(b => b.SectionTemplateIndex).ToHashSet();
         var previousZone = "cover";
+        var tocMarkerAdded = plan.Blocks.Any(block => block.Type == "toc");
+        var continueNumbering = false;
         foreach (var descriptor in from.Where(d => d.Index >= sourceStart))
         {
             if (descriptor.IsSection) continue;
@@ -84,12 +87,21 @@ public static class TemplatePlanDraftBuilder
             var section = descriptor.Zone == "body" && chapterSample is not null ? chapterSample.Section : zones.GetValueOrDefault(descriptor.Zone, currentSection);
             if (section != currentSection && plan.Blocks.Count > 0)
             {
-                plan.Blocks.Add(new() { Type = "section", SectionTemplateIndex = currentSection, ContinuePageNumbering = !usedSections.Add(currentSection) });
+                plan.Blocks.Add(SectionBlock(currentSection));
+                var previousFormat = staticPageLabels[currentSection]?.Format
+                    ?? ReadPageFormat(templateSections[currentSection]);
+                // A sampled TOC can start at a fixed page after several pages of example abstracts.
+                // Our TOC follows the actual abstracts, regardless of their length.
+                continueNumbering = descriptor.Zone == "toc" && previousZone is ("abstract" or "abstractEnglish")
+                    && (previousFormat is "upperRoman" or "lowerRoman")
+                    && (staticPageLabels[section]?.Format
+                        ?? ReadPageFormat(templateSections[section])) == previousFormat;
                 currentSection = section;
             }
             if (descriptor.IsToc)
             {
-                plan.Blocks.Add(new() { Type = "toc" });
+                if (!tocMarkerAdded) plan.Blocks.Add(new() { Type = "toc" });
+                tocMarkerAdded = true;
                 plan.SkippedSourceRanges.Add(new() { Start = descriptor.Index, End = descriptor.Index + 1, Reason = "Regenerate source table of contents from migrated headings." });
                 continue;
             }
@@ -105,9 +117,68 @@ public static class TemplatePlanDraftBuilder
             plan.Blocks.Add(new() { Type = "sourceRange", Start = descriptor.Index, End = descriptor.Index + 1, Role = descriptor.Role, PageBreakBefore = startNewPage });
             if (descriptor.Text.Length > 0) previousZone = descriptor.Zone;
         }
-        plan.Blocks.Add(new() { Type = "section", SectionTemplateIndex = Math.Min(currentSection, templateSections.Length - 1), FinalSection = true, ContinuePageNumbering = !usedSections.Add(currentSection) });
+        var final = SectionBlock(currentSection);
+        final.FinalSection = true;
+        plan.Blocks.Add(final);
+        // Front-matter ranges retain their original paragraphs, but section properties are
+        // rebuilt from template samples. Carry the detected static page labels into those
+        // boundaries too, so pagination audits see the same Roman/Arabic scheme as readers.
+        string? previousPageFormat = null;
+        foreach (var block in plan.Blocks.Where(block => block.Type == "section"))
+        {
+            var index = block.SectionTemplateIndex;
+            var label = staticPageLabels[index];
+            var format = label?.Format ?? ReadPageFormat(templateSections[index]);
+            if (format is null) continue;
+            block.PageNumberFormat = format;
+            var continues = string.Equals(previousPageFormat, format, StringComparison.Ordinal);
+            block.ContinuePageNumbering = continues;
+            block.PageNumberStart = continues ? null : label?.Number ?? templateSections[index].GetFirstChild<PageNumberType>()?.Start?.Value;
+            previousPageFormat = format;
+        }
         plan.PendingReviews.Add("Review all zone boundaries, template sample indexes, section transitions, numbering and school requirements before binding.");
         return plan;
+
+        TemplateApplicationBlock SectionBlock(int index)
+        {
+            var repeated = !usedSections.Add(index);
+            var label = staticPageLabels[index];
+            var previous = plan.Blocks.LastOrDefault(block => block.Type == "section");
+            var format = label?.Format ?? ReadPageFormat(templateSections[index]);
+            var continues = repeated || continueNumbering
+                || format is not null && string.Equals(format, previous?.PageNumberFormat, StringComparison.Ordinal);
+            continueNumbering = false;
+            return new()
+            {
+                Type = "section", SectionTemplateIndex = index,
+                PageNumberFormat = format,
+                PageNumberStart = continues ? null : label?.Number ?? templateSections[index].GetFirstChild<PageNumberType>()?.Start?.Value,
+                ContinuePageNumbering = continues
+            };
+        }
+    }
+
+    private static string? ReadCoverTitle(Body body, int end)
+    {
+        var paragraphs = body.ChildElements.Take(end).OfType<Paragraph>()
+            .Select(p => (Properties: p.ParagraphProperties, Text: TemplateSampleText.FlowText(p)))
+            .Where(p => p.Text.Length > 0).ToArray();
+        var styled = paragraphs.Where(p => p.Properties?.ParagraphStyleId?.Val?.Value == "Title").ToArray();
+        if (styled.Length == 1) return styled[0].Text;
+        var labeled = paragraphs.Select(p => Regex.Match(p.Text, @"^(?:论文)?题\s*目\s*[：:]\s*(?<title>\S.*)$"))
+            .Where(match => match.Success).Select(match => match.Groups["title"].Value).Distinct().ToArray();
+        if (labeled.Length == 1) return labeled[0];
+        // Manually formatted covers often use direct center alignment instead of the Title style.
+        var centered = paragraphs.Where(p => p.Properties?.Justification?.Val?.Value == JustificationValues.Center
+            && p.Text.Length >= 10 && !TemplateSampleText.IsInstruction(p.Text)
+            && !Regex.IsMatch(p.Text, @"[：:]|^(?:本科|专科|硕士|博士)?毕业(?:设计|论文)|(?:学院|大学|学校)$"))
+            .Select(p => p.Text).Distinct().ToArray();
+        return centered.Length == 1 ? centered[0] : null;
+    }
+
+    private static string? ReadPageFormat(SectionProperties section)
+    {
+        return section.GetFirstChild<PageNumberType>()?.Format?.InnerText;
     }
 
     private static void AddFrontMatter(TemplateApplicationPlan plan, List<Descriptor> template, int end)
@@ -164,6 +235,10 @@ public static class TemplatePlanDraftBuilder
                 section++;
             }
         var result = new List<Descriptor>();
+        // WPS uses numeric style IDs; the built-in style name is still "toc 1", etc.
+        var tocStyleIds = main.StyleDefinitionsPart?.Styles?.Elements<Style>()
+            .Where(style => IsTocStyle(style.StyleName?.Val?.Value))
+            .Select(style => style.StyleId?.Value).ToHashSet(StringComparer.Ordinal);
         var zone = "cover";
         var pageBoundary = false;
         var previousSection = 0;
@@ -172,11 +247,16 @@ public static class TemplatePlanDraftBuilder
             var block = blocks[i];
             var text = TemplateSampleText.FlowText(block);
             var compact = Regex.Replace(text, @"\s+", "");
+            var headingText = Regex.Replace(text, @"[（(](?:宋体|黑体|楷体|Times New Roman)[^（）()]*[）)]$", "", RegexOptions.IgnoreCase).TrimEnd();
+            var paragraph = block as Paragraph;
+            var paragraphStyle = paragraph?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             var toc = block.Descendants<FieldCode>().Any(f => Regex.IsMatch(f.Text, @"^\s*TOC\b", RegexOptions.IgnoreCase))
                 || block.Descendants<SimpleField>().Any(f => Regex.IsMatch(f.Instruction?.Value ?? "", @"^\s*TOC\b", RegexOptions.IgnoreCase))
-                || block is SdtBlock sdt && sdt.SdtProperties?.Descendants<DocPartGallery>().Any(g => g.Val?.Value == "Table of Contents") == true;
+                || block is SdtBlock sdt && sdt.SdtProperties?.Descendants<DocPartGallery>().Any(g => g.Val?.Value == "Table of Contents") == true
+                || IsTocStyle(paragraphStyle) || paragraphStyle is not null && tocStyleIds?.Contains(paragraphStyle) == true
+                || zone == "toc" && sections[i] == previousSection && Regex.IsMatch(text, @"[.．…·]{3,}\s*(?:[0-9IVXLCDMⅠ-ⅿ]+)?\s*$", RegexOptions.IgnoreCase);
             var role = zone;
-            var p = block as Paragraph;
+            var p = paragraph;
             var level = p is null ? null : NumberedOutline(main, p) ?? Outline(main, p);
             pageBoundary |= sections[i] != previousSection || p?.ParagraphProperties?.PageBreakBefore?.Val?.Value == true
                 || p?.ParagraphProperties?.PageBreakBefore is { Val: null };
@@ -187,9 +267,9 @@ public static class TemplatePlanDraftBuilder
             else if (Regex.IsMatch(text, @"^(关键词|关键字|key\s*words?)\s*[:：]", RegexOptions.IgnoreCase)) role = "keywords";
             else if (Regex.IsMatch(compact, @"^(参考文献|References)$", RegexOptions.IgnoreCase)) { role = "referencesHeading"; zone = "references"; }
             else if (Regex.IsMatch(compact, @"^(致谢|Acknowledg(e)?ments?|附录.*|Appendix.*)$", RegexOptions.IgnoreCase)) { role = "backMatterHeading"; zone = "backMatter"; }
-            else if (zone != "cover" && Regex.IsMatch(compact, @"(原创承诺书|原创性声明|诚信声明|授权书)$")) { role = "backMatterHeading"; zone = "backMatter"; }
+            else if (zone != "cover" && Regex.IsMatch(compact, @"(原创承诺书|原创性声明|诚信声明|授权书)$")) { role = "declarationHeading"; zone = "declaration"; }
             else if (Regex.IsMatch(compact, @"^(结论|结论与展望|总结|结语|结束语)$") && level is not (1 or 2)) { role = "conclusionHeading"; zone = "conclusion"; }
-            else if (text.Length < 80 && !Regex.IsMatch(text, "[，。；]") && Regex.IsMatch(compact, @"^(第[一二三四五六七八九十百\d]+[章节]|Chapter\d+)", RegexOptions.IgnoreCase)) { role = "heading1"; zone = "body"; }
+            else if (headingText.Length < 80 && !Regex.IsMatch(headingText, "[，。；]") && Regex.IsMatch(Regex.Replace(headingText, @"\s+", ""), @"^(第[一二三四五六七八九十百\d]+[章节]|Chapter\d+)", RegexOptions.IgnoreCase)) { role = "heading1"; zone = "body"; }
             else if (text.Length < 80 && !Regex.IsMatch(text, "[，。；]") && Regex.IsMatch(text, @"^\d{1,2}\s+\S")) { role = "heading1"; zone = "body"; }
             else if (Regex.IsMatch(text, @"^\d+\.\d+\.\d+\s*\S")) { role = "heading3"; zone = "body"; }
             else if (Regex.IsMatch(text, @"^\d+\.\d+\s*\S")) { role = "heading2"; zone = "body"; }
@@ -222,6 +302,9 @@ public static class TemplatePlanDraftBuilder
         }
         return null;
     }
+
+    private static bool IsTocStyle(string? name)
+        => name is not null && Regex.IsMatch(name, @"^(?:TOC|目录)\s*[1-9]?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static int? NumberedOutline(MainDocumentPart main, Paragraph paragraph)
     {

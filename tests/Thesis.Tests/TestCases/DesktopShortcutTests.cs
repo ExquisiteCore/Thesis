@@ -27,6 +27,7 @@ public sealed class DesktopShortcutTests
         Assert.Equal(clickHandler, (string?)button.Attribute("Click"));
         Assert.Equal(enabledBinding, (string?)button.Attribute("IsEnabled"));
         Assert.Contains("Ctrl+" + key, (string?)button.Attribute("ToolTipService.ToolTip") ?? "");
+        Assert.Equal("Hidden", (string?)button.Attribute("KeyboardAcceleratorPlacementMode"));
         Assert.Empty(button.Descendants(Presentation + "KeyboardAccelerator"));
     }
 

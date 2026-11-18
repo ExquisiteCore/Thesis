@@ -47,6 +47,8 @@ public sealed partial class MainWindow
             var picker = ProjectFilePicker.Save(this, "论文项目", ".thesis.json", "示例论文");
             Require(picker.DefaultFileExtension == ".json" && picker.SuggestedFileName == "示例论文.thesis", "系统保存选择器接受项目扩展名");
             await VerifyNewProjectDialogAsync(directory, Require);
+            Require(StatusStrip.Visibility == Visibility.Visible && CancelTaskButton.Visibility == Visibility.Collapsed, "状态条位置固定，空闲时不出现取消按钮");
+            Require(viewModel.Outline.Any(i => i.Label == "第1章 绪论") && viewModel.Outline.Any(i => i.Label.Trim() == "1.1 研究背景"), "模板自带编号在大纲里只显示一次");
             viewModel.Title = "论文工作台交互验证";
             viewModel.Author = "示例作者";
             viewModel.Body = "**Markdown 正文**和*斜体*。\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |\n\n- 第一项\n- 第二项";
@@ -91,7 +93,7 @@ public sealed partial class MainWindow
             LoadEditorFromViewModel(); FlushEditor();
             Require(ObjectEditorScroll.Visibility == Visibility.Visible && editorSegments.Count(s => s.Object is not null) == 2, "GUI 显示有序表格与 LaTeX 公式对象");
             await viewModel.SaveAsync(); await viewModel.OpenAsync(viewModel.ProjectPath!);
-            Require(viewModel.EditorBlocks.Select(b => b.Type).SequenceEqual(["paragraph", "table", "paragraph", "equation"]), "保存、重开后正文对象顺序保持");
+            Require(viewModel.EditorBlocks.Select(b => b.Type).SequenceEqual(new[] { "paragraph", "table", "paragraph", "equation" }), "保存、重开后正文对象顺序保持");
             viewModel.Body = "**Markdown 正文**和*斜体*。\n\n| 项目 | 结果 |\n| --- | --- |\n| 预览 | 正常 |\n\n- 第一项\n- 第二项";
             LoadEditorFromViewModel();
             FlushEditor();

@@ -8,7 +8,8 @@
       </ResourceDictionary.MergedDictionaries>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FFF2F5F3" />
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FFF5F6F5" />
+          <SolidColorBrush x:Key="ThesisPaneBrush" Color="#FFEEF1EF" />
           <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FFD8E0DC" />
           <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF08786E" />
@@ -25,7 +26,8 @@
           <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF075E56" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FF171D1B" />
+          <SolidColorBrush x:Key="ThesisCanvasBrush" Color="#FF191C1C" />
+          <SolidColorBrush x:Key="ThesisPaneBrush" Color="#FF242928" />
           <SolidColorBrush x:Key="ThesisPaperBrush" Color="#FF222A27" />
           <SolidColorBrush x:Key="ThesisRuleBrush" Color="#FF3A4641" />
           <SolidColorBrush x:Key="ThesisAccentBrush" Color="#FF69C7B7" />
@@ -43,6 +45,7 @@
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
           <SolidColorBrush x:Key="ThesisCanvasBrush" Color="{ThemeResource SystemColorWindowColor}" />
+          <SolidColorBrush x:Key="ThesisPaneBrush" Color="{ThemeResource SystemColorWindowColor}" />
           <SolidColorBrush x:Key="ThesisPaperBrush" Color="{ThemeResource SystemColorWindowColor}" />
           <SolidColorBrush x:Key="ThesisRuleBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
           <SolidColorBrush x:Key="ThesisAccentBrush" Color="{ThemeResource SystemColorHighlightColor}" />
@@ -50,6 +53,8 @@
           <SolidColorBrush x:Key="ThesisAccentSoftBrush" Color="{ThemeResource SystemColorWindowColor}" />
           <SolidColorBrush x:Key="ThesisInkBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
           <SolidColorBrush x:Key="ThesisMutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+          <SolidColorBrush x:Key="ThesisActionBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+          <SolidColorBrush x:Key="ThesisActionSoftBrush" Color="{ThemeResource SystemColorWindowColor}" />
           <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{ThemeResource SystemColorHighlightColor}" />
           <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />
           <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{ThemeResource SystemColorHighlightColor}" />

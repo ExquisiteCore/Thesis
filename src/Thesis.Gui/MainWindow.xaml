@@ -13,23 +13,22 @@
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
-    <Grid Padding="20,8" ColumnSpacing="20" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Grid Padding="18,6" ColumnSpacing="12" Background="{ThemeResource ThesisPaperBrush}" BorderBrush="{ThemeResource ThesisRuleBrush}" BorderThickness="0,0,0,1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-        <Border Width="32" Height="32" CornerRadius="8" Background="{ThemeResource ThesisAccentBrush}"><FontIcon Glyph="&#xE8A5;" FontSize="17" Foreground="White"/></Border>
-        <StackPanel><TextBlock Text="Thesis" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="论文工作台" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+        <Border Width="32" Height="32" CornerRadius="7" Background="{ThemeResource ThesisAccentBrush}"><FontIcon Glyph="&#xE8A5;" FontSize="17" Foreground="{ThemeResource ThesisAccentTextBrush}"/></Border>
+        <TextBlock Text="Thesis" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
       </StackPanel>
-      <CommandBar Grid.Column="1" Background="Transparent" DefaultLabelPosition="Right" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsDynamicOverflowEnabled="True">
-        <AppBarButton Label="新建" Icon="Add" Click="New_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="新建论文项目 (Ctrl+N)" />
-        <AppBarButton Label="打开" Icon="OpenFile" Click="Open_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="打开论文项目 (Ctrl+O)" />
-        <AppBarButton Label="保存" Icon="Save" Click="Save_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="保存当前项目 (Ctrl+S)" />
+      <CommandBar Grid.Column="1" Background="Transparent" DefaultLabelPosition="Right" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsDynamicOverflowEnabled="True" KeyboardAcceleratorPlacementMode="Hidden">
+        <AppBarButton Label="新建" Icon="Add" Click="New_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="新建论文项目 (Ctrl+N)" KeyboardAcceleratorPlacementMode="Hidden" />
+        <AppBarButton Label="打开" Icon="OpenFile" Click="Open_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="打开论文项目 (Ctrl+O)" KeyboardAcceleratorPlacementMode="Hidden" />
+        <AppBarButton Label="保存" Icon="Save" Click="Save_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="保存当前项目 (Ctrl+S)" KeyboardAcceleratorPlacementMode="Hidden" />
         <AppBarSeparator />
         <AppBarButton Label="导入正文" Icon="Import" Click="Import_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="从 Word 或正文文件导入内容" />
-        <AppBarButton Label="生成 DOCX" Icon="Download" Click="Compose_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="按当前模板生成论文候选 DOCX" />
-        <AppBarButton Label="导出 PDF" Icon="View" Click="Preview_Click" IsEnabled="{Binding CanEdit}" Foreground="{ThemeResource ThesisActionBrush}" ToolTipService.ToolTip="使用 WPS / Word 更新分页并导出 PDF" />
         <CommandBar.SecondaryCommands>
           <AppBarButton Label="另存项目副本" Icon="SaveLocal" Click="SaveCopy_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="将当前内容保存为独立项目副本" />
           <AppBarButton Label="导出 Markdown" Icon="Download" Click="ExportMarkdown_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="导出 Markdown" />
+          <AppBarButton Label="将本章转换为 Markdown" Icon="Edit" Click="ConvertMarkdown_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="将兼容原稿转换为 Markdown 编辑内容" />
           <AppBarButton Label="导出项目包" Icon="Folder" Click="ExportPackage_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="导出项目包" />
           <AppBarButton Label="导入项目包" Icon="Import" Click="ImportPackage_Click" IsEnabled="{Binding IsIdle}" ToolTipService.ToolTip="导入项目包" />
           <AppBarButton Label="查找内容" Icon="Find" Click="Find_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="查找内容" />
@@ -38,6 +37,15 @@
           <AppBarButton Label="环境诊断" Icon="Help" Click="Diagnostics_Click" ToolTipService.ToolTip="环境诊断" />
         </CommandBar.SecondaryCommands>
       </CommandBar>
+      <Button x:Name="ExportButton" Grid.Column="2" Style="{StaticResource ThesisPrimaryButtonStyle}" VerticalAlignment="Center" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="导出论文" KeyboardAcceleratorPlacementMode="Hidden">
+        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Download"/><TextBlock Text="导出论文"/><FontIcon Glyph="&#xE70D;" FontSize="10"/></StackPanel>
+        <Button.Flyout>
+          <MenuFlyout Placement="BottomEdgeAlignedRight">
+            <MenuFlyoutItem Text="导出校样（DOCX 和 PDF）" Click="Preview_Click" Icon="Page"/>
+            <MenuFlyoutItem Text="仅生成未分页 DOCX" Click="Compose_Click" Icon="Document"/>
+          </MenuFlyout>
+        </Button.Flyout>
+      </Button>
     </Grid>
     <NavigationView x:Name="NavigationMenu" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="184" CompactPaneLength="48" ExpandedModeThresholdWidth="1400" CompactModeThresholdWidth="900" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsTitleBarAutoPaddingEnabled="False" ItemInvoked="Navigation_Invoked">
       <NavigationView.MenuItems>
@@ -60,15 +68,17 @@
           <InfoBar.ActionButton><Button Content="查看技术详情" Click="ErrorDetails_Click"/></InfoBar.ActionButton>
         </InfoBar>
     <Grid x:Name="WorkspaceGrid" Grid.Row="2" ColumnSpacing="1">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" MinWidth="340" /><ColumnDefinition x:Name="LivePreviewColumn" Width="0" /><ColumnDefinition x:Name="InspectorColumn" Width="280" /></Grid.ColumnDefinitions>
-      <Grid Padding="16,22,12,16" Background="{ThemeResource LayerFillColorDefaultBrush}">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="216" /><ColumnDefinition Width="*" /><ColumnDefinition x:Name="LivePreviewColumn" Width="0" /><ColumnDefinition x:Name="InspectorColumn" Width="0" /></Grid.ColumnDefinitions>
+      <Grid Padding="12,18,12,14" Background="{ThemeResource ThesisPaneBrush}" BorderBrush="{ThemeResource ThesisRuleBrush}" BorderThickness="0,0,1,0">
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-        <TextBlock Text="论文大纲" Style="{ThemeResource SubtitleTextBlockStyle}" Margin="8,0,0,16" />
+        <TextBlock Text="论文大纲" FontSize="16" FontWeight="SemiBold" Margin="8,0,0,14" />
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
           <Button Content="＋ 章节" Click="AddChapter_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="新增章节" />
           <Button Content="＋ 小节" Click="AddSection_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="在当前章新增小节" />
         </StackPanel>
-        <ListView x:Name="OutlineList" Grid.Row="2" ItemsSource="{Binding Outline}" DisplayMemberPath="Label" SelectionChanged="Outline_SelectionChanged" SelectionMode="Single" IsEnabled="{Binding CanEdit}" AutomationProperties.Name="论文大纲" />
+        <ListView x:Name="OutlineList" Grid.Row="2" ItemsSource="{Binding Outline}" SelectionChanged="Outline_SelectionChanged" SelectionMode="Single" IsEnabled="{Binding CanEdit}" AutomationProperties.Name="论文大纲">
+          <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Margin="0,5"/></DataTemplate></ListView.ItemTemplate>
+        </ListView>
         <StackPanel Grid.Row="3" Spacing="8" Margin="0,12,0,0">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button Content="上移" Click="MoveUp_Click" IsEnabled="{Binding CanDelete}" />
@@ -78,16 +88,16 @@
           <Button Content="恢复上次大纲快照" Click="UndoStructure_Click" IsEnabled="{Binding CanUndo}" />
         </StackPanel>
       </Grid>
-      <Grid Grid.Column="1" Padding="28,16,28,24" RowSpacing="12" MaxWidth="960" HorizontalAlignment="Stretch" Background="{ThemeResource ThesisCanvasBrush}">
+      <Grid Grid.Column="1" Padding="20,14,20,18" RowSpacing="8" MaxWidth="960" HorizontalAlignment="Stretch" Background="{ThemeResource ThesisCanvasBrush}">
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
         <Grid ColumnSpacing="12">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <StackPanel Orientation="Horizontal" Spacing="8"><Border Width="4" Height="20" CornerRadius="2" Background="{ThemeResource ThesisAccentBrush}"/><TextBlock Text="写作" FontWeight="SemiBold"/><TextBlock Text="·" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock Text="当前章节" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"><TextBlock Text="{Binding CharacterCount}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><ToggleButton x:Name="LivePreviewToggle" Content="分屏预览" Checked="LivePreview_Changed" Unchecked="LivePreview_Changed" ToolTipService.ToolTip="在右侧实时查看正文"/></StackPanel>
+          <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource ThesisMutedBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+          <ToggleButton x:Name="LivePreviewToggle" Grid.Column="1" Checked="LivePreview_Changed" Unchecked="LivePreview_Changed" ToolTipService.ToolTip="分屏预览" AutomationProperties.Name="分屏预览"><FontIcon Glyph="&#xE89F;" FontSize="16"/></ToggleButton>
         </Grid>
         <TextBox Grid.Row="1" Text="{Binding Heading, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding HeadingReadOnly}" FontSize="26" FontWeight="SemiBold" BorderThickness="0" Background="Transparent" Padding="0,6" PlaceholderText="章节标题" LostFocus="Heading_LostFocus" AutomationProperties.Name="章节标题" />
-        <Grid Grid.Row="2" ColumnSpacing="8">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid Grid.Row="2" ColumnSpacing="4" Padding="4" Background="{ThemeResource ThesisPaneBrush}">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
               <ComboBox x:Name="EditorBlockStyle" SelectedIndex="0" Width="112" ToolTipService.ToolTip="段落样式" SelectionChanged="EditorBlockStyle_Changed"><ComboBoxItem Content="正文" Tag="normal"/><ComboBoxItem Content="标题 1" Tag="heading1"/><ComboBoxItem Content="标题 2" Tag="heading2"/><ComboBoxItem Content="标题 3" Tag="heading3"/></ComboBox>
@@ -104,22 +114,22 @@
               <Border Width="1" Height="24" Margin="4,0" Background="{ThemeResource ThesisRuleBrush}" VerticalAlignment="Center"/>
               <ToggleButton x:Name="BulletListButton" Content="•" FontSize="18" Style="{StaticResource ThesisEditorToggleButtonStyle}" Click="BulletList_Click" ToolTipService.ToolTip="项目符号列表" AutomationProperties.Name="项目符号列表"/>
               <ToggleButton x:Name="NumberedListButton" Content="1." Style="{StaticResource ThesisEditorToggleButtonStyle}" Click="NumberedList_Click" ToolTipService.ToolTip="编号列表" AutomationProperties.Name="编号列表"/>
-              <Border Width="1" Height="24" Margin="4,0" Background="{ThemeResource ThesisRuleBrush}" VerticalAlignment="Center"/>
-              <Button x:Name="InsertObjectButton" Content="插入" Foreground="{ThemeResource ThesisActionBrush}" Style="{StaticResource ThesisEditorToolButtonStyle}" ToolTipService.ToolTip="插入图片、表格或公式">
-                <Button.Flyout><MenuFlyout><MenuFlyoutItem Text="图片" Click="InsertImage_Click"/><MenuFlyoutItem Text="表格" Click="InsertTable_Click"/><MenuFlyoutItem Text="公式 · LaTeX" Click="InsertEquation_Click"/></MenuFlyout></Button.Flyout>
-              </Button>
             </StackPanel>
           </ScrollViewer>
-          <Button x:Name="SourceModeButton" Grid.Column="1" Content="Markdown" Click="SourceMode_Click" Style="{StaticResource ThesisEditorToolButtonStyle}" ToolTipService.ToolTip="Markdown 导入 / 导出视图" AutomationProperties.Name="打开 Markdown 视图" Visibility="Collapsed"/>
+          <Button x:Name="InsertObjectButton" Grid.Column="1" VerticalAlignment="Top" Foreground="{ThemeResource ThesisActionBrush}" Style="{StaticResource ThesisEditorToolButtonStyle}" ToolTipService.ToolTip="插入图片、表格或公式" AutomationProperties.Name="插入对象">
+            <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE710;" FontSize="14"/><TextBlock Text="插入"/></StackPanel>
+            <Button.Flyout><MenuFlyout><MenuFlyoutItem Text="图片" Click="InsertImage_Click"/><MenuFlyoutItem Text="表格" Click="InsertTable_Click"/><MenuFlyoutItem Text="公式 · LaTeX" Click="InsertEquation_Click"/></MenuFlyout></Button.Flyout>
+          </Button>
+          <Button x:Name="SourceModeButton" Grid.Column="2" VerticalAlignment="Top" Content="Markdown" Click="SourceMode_Click" Style="{StaticResource ThesisEditorToolButtonStyle}" ToolTipService.ToolTip="Markdown 导入 / 导出视图" AutomationProperties.Name="打开 Markdown 视图" Visibility="Collapsed"/>
         </Grid>
         <TextBlock x:Name="EditorModeNote" Grid.Row="3" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/>
         <Grid Grid.Row="4">
           <Border Background="{ThemeResource ThesisPaperBrush}" BorderBrush="{ThemeResource ThesisRuleBrush}" BorderThickness="1" CornerRadius="6">
             <Grid>
-              <RichEditBox x:Name="BodyEditor" TextChanged="BodyEditor_TextChanged" SelectionChanged="BodyEditor_SelectionChanged" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontSize="17" Padding="48,38" BorderThickness="0" Background="Transparent" Foreground="{ThemeResource ThesisInkBrush}" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节富文本正文"/>
+              <RichEditBox x:Name="BodyEditor" TextChanged="BodyEditor_TextChanged" SelectionChanged="BodyEditor_SelectionChanged" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontSize="17" Padding="32,30" BorderThickness="0" Background="Transparent" Foreground="{ThemeResource ThesisInkBrush}" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节富文本正文"/>
               <TextBox x:Name="SourceBodyEditor" TextChanged="SourceBody_TextChanged" Visibility="Collapsed" IsReadOnly="{Binding BodyReadOnly}" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="15" Padding="36,32" BorderThickness="0" Background="Transparent" Foreground="{ThemeResource ThesisInkBrush}" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="当前章节 Markdown 源码"/>
               <ScrollViewer x:Name="ObjectEditorScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="40,26"><StackPanel x:Name="ObjectEditorPanel"/></ScrollViewer>
-              <TextBlock x:Name="EditorPlaceholder" Text="从这里开始写。" IsHitTestVisible="False" Margin="56,46,48,40" Foreground="{ThemeResource ThesisMutedBrush}" TextWrapping="Wrap"/>
+              <TextBlock x:Name="EditorPlaceholder" Text="正文" IsHitTestVisible="False" Margin="36,34,32,32" Foreground="{ThemeResource ThesisMutedBrush}" TextWrapping="Wrap"/>
             </Grid>
           </Border>
         </Grid>
@@ -129,7 +139,7 @@
         <StackPanel Margin="0,0,0,12"><TextBlock Text="实时预览" FontWeight="SemiBold"/><TextBlock Text="内容视图 · 非分页样式" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
         <ScrollViewer Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="24"><StackPanel x:Name="LivePreviewBlocks" Spacing="14"/></ScrollViewer>
       </Grid>
-      <ScrollViewer Grid.Column="3" Background="{ThemeResource LayerFillColorDefaultBrush}" VerticalScrollBarVisibility="Auto">
+      <ScrollViewer Grid.Column="3" Background="{ThemeResource ThesisPaneBrush}" VerticalScrollBarVisibility="Auto">
         <StackPanel Padding="20,22" Spacing="16">
           <TextBlock Text="论文与模板" Style="{ThemeResource SubtitleTextBlockStyle}" />
           <StackPanel Spacing="12">
@@ -137,7 +147,6 @@
             <TextBox Header="作者" Text="{Binding Author, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEdit}" />
             <TextBox Header="中文关键词（分号分隔）" Text="{Binding Keywords, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" IsEnabled="{Binding CanEdit}" />
             <TextBox Header="英文关键词（分号分隔）" Text="{Binding KeywordsEnglish, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" IsEnabled="{Binding CanEdit}" />
-            <Button Content="将原稿章节转为 Markdown" Click="ConvertMarkdown_Click" IsEnabled="{Binding CanEdit}" />
             <Button Click="Template_Click" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" ToolTipService.ToolTip="选择 .docx 学校模板或合格论文"><TextBlock Text="{Binding TemplateLabel}" TextTrimming="CharacterEllipsis" /></Button>
             <Expander Header="套版与检查设置" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
               <StackPanel Spacing="12">
@@ -257,11 +266,12 @@
     </Grid>
       </Grid>
     </NavigationView>
-    <Grid x:Name="StatusStrip" Grid.Row="2" Height="34" Padding="20,4" ColumnSpacing="12" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Visibility="Collapsed">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-      <ProgressRing x:Name="ProgressIndicator" Width="18" Height="18" IsActive="{Binding IsBusy}" />
-      <TextBlock x:Name="StatusText" Grid.Column="1" Text="{Binding Status}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="12" />
-      <Button x:Name="CancelTaskButton" Grid.Column="2" Content="取消" Click="Cancel_Click" IsEnabled="{Binding IsBusy}" ToolTipService.ToolTip="取消当前操作" />
+    <Grid x:Name="StatusStrip" Grid.Row="2" Height="36" Padding="18,0" ColumnSpacing="12" Background="{ThemeResource ThesisPaperBrush}" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource ThesisRuleBrush}">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <ProgressRing x:Name="ProgressIndicator" Width="16" Height="16" IsActive="{Binding IsBusy}" Visibility="Collapsed" />
+      <TextBlock x:Name="StatusText" Grid.Column="1" Text="{Binding Status}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{ThemeResource ThesisMutedBrush}" FontSize="12" AutomationProperties.LiveSetting="Polite"/>
+      <TextBlock Grid.Column="2" Text="{Binding SaveState}" VerticalAlignment="Center" Foreground="{ThemeResource ThesisMutedBrush}" FontSize="12"/>
+      <Button x:Name="CancelTaskButton" Grid.Column="3" Content="取消导出" Click="Cancel_Click" Visibility="Collapsed" Padding="10,4" VerticalAlignment="Center" ToolTipService.ToolTip="取消当前导出"/>
     </Grid>
   </Grid>
 </Window>

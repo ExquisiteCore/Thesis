@@ -161,7 +161,8 @@ public static class OpenXmlTemplateApplicator
                             }
                             if (block.ContinuePageNumbering && section.GetFirstChild<PageNumberType>() is PageNumberType pageNumbers) pageNumbers.Start = null;
                             if (block.NoPageNumber) section.RemoveAllChildren<FooterReference>();
-                            else if (plan.NormalizePageFooters) NormalizeFooter(main, section, block.PageNumberFormat == "upperRoman");
+                            else if (block.PageNumberFormat is not null) StaticPageFooter.Promote(main, section);
+                            if (!block.NoPageNumber && plan.NormalizePageFooters) NormalizeFooter(main, section, block.PageNumberFormat == "upperRoman");
                             if (block.FinalSection) body.Append(section);
                             else
                             {
@@ -197,6 +198,7 @@ public static class OpenXmlTemplateApplicator
             // Reopen before promotion, so an unreadable package never replaces an existing output.
             OpenXmlCompatibilityRepair.NormalizeStyleOrder(temp);
             OpenXmlCompatibilityRepair.NormalizeVmlShapeIds(temp);
+            OpenXmlCompatibilityRepair.NormalizeBookmarkIds(temp);
             using (var verification = WordprocessingDocument.Open(temp, false))
                 _ = verification.MainDocumentPart?.Document?.Body ?? throw new InvalidDataException("Generated document is unreadable.");
             File.Move(temp, outputFull, overwrite: true);

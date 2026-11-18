@@ -38,6 +38,51 @@ public static class OpenXmlCompatibilityRepair
         return changed;
     }
 
+    /// <summary>Repair legacy Word packages that reuse bookmark IDs.</summary>
+    public static bool NormalizeBookmarkIds(string path)
+    {
+        using var document = WordprocessingDocument.Open(path, true);
+        if (document.MainDocumentPart?.Document?.Body is not Body body) return false;
+        var starts = body.Descendants<BookmarkStart>().ToArray();
+        var endNodes = body.Descendants<BookmarkEnd>().ToArray();
+        var ends = endNodes.GroupBy(end => end.Id?.Value ?? "", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => new Queue<BookmarkEnd>(group), StringComparer.Ordinal);
+        var ids = starts.Select(start => long.TryParse(start.Id?.Value, out var id) ? id : 0)
+            .Concat(endNodes.Select(end => long.TryParse(end.Id?.Value, out var id) ? id : 0));
+        var next = ids.DefaultIfEmpty(0).Max() + 1;
+        var changed = false;
+        foreach (var group in starts.GroupBy(start => start.Id?.Value ?? "", StringComparer.Ordinal))
+        {
+            var originalId = group.Key;
+            ends.TryGetValue(originalId, out var queue);
+            foreach (var start in group)
+            {
+                if (queue is null || queue.Count == 0)
+                {
+                    // A start without a matching end is not a usable bookmark.
+                    start.Remove();
+                    changed = true;
+                    continue;
+                }
+
+                // Always allocate a fresh ID. This also separates unique IDs that
+                // collide with a legacy range copied from another document part.
+                var id = next++.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                start.Id = id;
+                queue.Dequeue().Id = id;
+                changed = true;
+            }
+        }
+        // Any end nodes left in the queues had no corresponding start node.
+        foreach (var orphan in ends.Values.SelectMany(queue => queue).ToArray())
+        {
+            orphan.Remove();
+            changed = true;
+        }
+        if (changed) document.MainDocumentPart.Document.Save();
+        return changed;
+    }
+
     /// <summary>Restore schema property order after Office saves without changing property values.</summary>
     public static bool NormalizeStyleOrder(string path)
     {

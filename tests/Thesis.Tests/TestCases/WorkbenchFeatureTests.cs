@@ -100,6 +100,25 @@ public sealed class WorkbenchFeatureTests : IDisposable
         Assert.Contains("二级标题", issue.Message);
         Assert.Contains("三级标题", issue.Message);
         Assert.Contains("暂用正文格式", issue.Message);
+        Assert.Contains(ProjectChecks.Check(project), candidate => candidate.NodeId == "template:requirements"
+            && candidate.Title == "学校内容要求尚未配置");
+    }
+
+    [Fact]
+    public void ProjectChecksFlagsOutlineOnlyChapterAndTemplatePlaceholder()
+    {
+        var section = new ThesisSectionContent { Title = "1.1 **方案", Blocks = [new() { ParagraphStyle = "heading3", Text = "1.1.1 设计" }] };
+        var chapter = new ThesisChapterContent { Title = "第1章 系统设计", Sections = [section] };
+        var project = ThesisProjectStore.Create(FilePath("outline-only.thesis.json"), new()
+        {
+            Content = new() { Title = "论文", Chapters = [chapter] }
+        });
+        var issues = ProjectChecks.Check(project);
+        Assert.Contains(issues, issue => issue.NodeId == chapter.Id && issue.Title == "章节只有标题，尚未填写正文");
+        Assert.Contains(issues, issue => issue.NodeId == section.Id && issue.Title == "小节标题有待替换的文字");
+        section.Blocks.Add(new() { Type = "table", Table = new() { Headers = ["结果"] } });
+        project.Document.Content.Chapters[0] = chapter;
+        Assert.DoesNotContain(ProjectChecks.Check(project), issue => issue.Title == "章节只有标题，尚未填写正文");
     }
 
     [Fact]

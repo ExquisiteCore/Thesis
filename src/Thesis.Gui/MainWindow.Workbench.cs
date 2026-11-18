@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Thesis.Application;
 using Thesis.Core;
 using Thesis.Schema;
+using Thesis.Gui.ViewModels;
 using Microsoft.Windows.Storage.Pickers;
 
 namespace Thesis.Gui;
@@ -19,15 +20,17 @@ public sealed partial class MainWindow
         if (Enum.TryParse<ElementTheme>(viewModel.Preferences.Theme, out var theme)) Root.RequestedTheme = theme;
         ShowPage("home");
         InitializeEditor();
-        viewModel.PropertyChanged += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        viewModel.PropertyChanged += (_, args) =>
         {
-            StatusStrip.Visibility = viewModel.IsBusy || viewModel.IsDirty || viewModel.HasError ? Visibility.Visible : Visibility.Collapsed;
-            CancelTaskButton.Visibility = viewModel.IsBusy ? Visibility.Visible : Visibility.Collapsed;
-            ProgressIndicator.Visibility = viewModel.IsBusy ? Visibility.Visible : Visibility.Collapsed;
-            StatusText.Text = viewModel.IsDirty && !viewModel.IsBusy ? "有未保存更改" : viewModel.Status;
-        });
-        StatusStrip.Visibility = Visibility.Collapsed;
-        CancelTaskButton.Visibility = ProgressIndicator.Visibility = Visibility.Collapsed;
+            if (args.PropertyName is null or nameof(WorkspaceViewModel.CanCancelTask))
+                CancelTaskButton.Visibility = viewModel.CanCancelTask ? Visibility.Visible : Visibility.Collapsed;
+            if (args.PropertyName is null or nameof(WorkspaceViewModel.IsBusy))
+                ProgressIndicator.Visibility = viewModel.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+            if (args.PropertyName is null or nameof(WorkspaceViewModel.Status) or nameof(WorkspaceViewModel.IsDirty)
+                or nameof(WorkspaceViewModel.IsBusy) or nameof(WorkspaceViewModel.HasError))
+                StatusText.Text = viewModel.IsDirty && !viewModel.IsBusy && !viewModel.HasError ? "正在自动保存…" : viewModel.Status;
+        };
+        StatusText.Text = viewModel.Status;
         previewTimer = DispatcherQueue.CreateTimer(); previewTimer.Interval = TimeSpan.FromMilliseconds(650); previewTimer.IsRepeating = false;
         previewTimer.Tick += async (_, _) => { if ((currentPage == "preview" || LivePreviewToggle.IsChecked == true) && !viewModel.IsBusy) await RefreshQuickPreviewAsync(); };
         viewModel.Edited += (_, _) =>
@@ -55,12 +58,7 @@ public sealed partial class MainWindow
             finally { checkingExternal = false; }
         };
         externalTimer.Start();
-        WorkspaceGrid.SizeChanged += (_, _) =>
-        {
-            if (LivePreviewToggle.IsChecked == true)
-                LivePreviewColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1300 ? 420 : 360);
-            else InspectorColumn.Width = new GridLength(WorkspaceGrid.ActualWidth >= 1100 && viewModel.Preferences.ShowInspector ? 280 : 0);
-        };
+        WorkspaceGrid.SizeChanged += (_, _) => UpdateWritingPanes();
         viewModel.Recent.CollectionChanged += (_, _) => RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RecentEmpty.Visibility = viewModel.Recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Closed += (_, _) => { externalTimer.Stop(); previewTimer.Stop(); previewJob?.Cancel(); };
@@ -163,7 +161,7 @@ public sealed partial class MainWindow
     private void Inspector_Click(object sender, RoutedEventArgs e)
     {
         viewModel.Preferences.ShowInspector = !viewModel.Preferences.ShowInspector; viewModel.Preferences.Save();
-        InspectorColumn.Width = new GridLength(viewModel.Preferences.ShowInspector ? 280 : 0);
+        UpdateWritingPanes();
     }
     private async void Check_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshChecksAsync);
     private async Task RefreshChecksAsync()
@@ -211,6 +209,11 @@ public sealed partial class MainWindow
         {
             ShowPage("template");
             var role = issue.NodeId["template:".Length..];
+            if (role == "requirements")
+            {
+                Requirements_Click(this, new RoutedEventArgs());
+                return;
+            }
             if (editingDesign?.Roles.FirstOrDefault(candidate => candidate.Role == role) is { } target)
             {
                 RoleList.SelectedItem = target;

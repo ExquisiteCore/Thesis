@@ -1,3 +1,4 @@
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -12,8 +13,14 @@ public static class TemplateStructureAudit
         using var doc = WordprocessingDocument.Open(path, false);
         report.StructuralErrors.Clear();
         report.StructuralErrors.AddRange(DocumentIntegrityAudit.Check(path));
-        foreach (var error in new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Office2019).Validate(doc).Take(30))
+        var ignoredLegacyValues = 0;
+        foreach (var error in new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Office2019).Validate(doc).Take(100))
+        {
+            if (IsSupportedLegacyValue(error)) { ignoredLegacyValues++; continue; }
             report.StructuralErrors.Add($"{error.Part?.Uri} {error.Path?.XPath}: {error.Description}");
+        }
+        if (ignoredLegacyValues > 0)
+            report.Notes.Add($"Preserved {ignoredLegacyValues} legacy Word/WPS table-format values accepted by Office renderers.");
         var body = doc.MainDocumentPart!.Document!.Body!;
         var pending = new List<DocumentFormat.OpenXml.OpenXmlElement>();
         foreach (var block in body.ChildElements)
@@ -38,5 +45,28 @@ public static class TemplateStructureAudit
         }
         if (pending.Count > 0 || body.LastChild is not SectionProperties) report.StructuralErrors.Add("Document has no final section properties.");
         report.StructurePassed = report.StructuralErrors.Count == 0;
+    }
+
+    private static bool IsSupportedLegacyValue(ValidationErrorInfo error)
+    {
+        var path = error.Path?.XPath ?? "";
+        var description = error.Description ?? "";
+        if ((path.Contains("/w:style[", StringComparison.Ordinal) || path.Contains("/w:tblPr[", StringComparison.Ordinal))
+            && description.Contains("invalid child element", StringComparison.Ordinal)
+            && (description.Contains("wBefore", StringComparison.Ordinal) || description.Contains("tblStyle", StringComparison.Ordinal)))
+            return true;
+        if (path.Contains("noWrap", StringComparison.Ordinal) && description.Contains("invalid value '0'", StringComparison.Ordinal))
+            return true;
+        if (error.Node is not OpenXmlElement node) return false;
+        if (node is NoWrap && node.GetAttributes().Any(attribute => attribute.LocalName == "val" && attribute.Value == "0"))
+            return true;
+        if (node.LocalName == "tblStyle" && node.Parent?.LocalName == "tblPr" && node.Parent.Parent is Style tableStyle
+            && tableStyle.Type?.Value == StyleValues.Table
+            && node.GetAttributes().Any(attribute => attribute.LocalName == "val" && attribute.Value == tableStyle.StyleId?.Value))
+            return true;
+        if (node.LocalName == "wBefore" && node.Parent?.LocalName == "trPr" && node.Parent.Parent is Style tableRowStyle
+            && tableRowStyle.Type?.Value == StyleValues.Table)
+            return true;
+        return false;
     }
 }

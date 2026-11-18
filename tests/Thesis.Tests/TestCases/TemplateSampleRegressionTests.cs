@@ -149,6 +149,181 @@ public sealed class TemplateSampleRegressionTests : IDisposable
     }
 
     [Fact]
+    public void DraftContinuesRomanTocPagesAndSkipsExampleChapterSections()
+    {
+        var abstractBody = P("摘要样本。");
+        abstractBody.ParagraphProperties!.SectionProperties = new SectionProperties(new PageNumberType { Format = NumberFormatValues.UpperRoman, Start = 1 });
+        var toc = P("目录");
+        toc.ParagraphProperties!.SectionProperties = new SectionProperties(new PageNumberType { Format = NumberFormatValues.UpperRoman, Start = 5 });
+        var chapter = P("第1章 绪论", 0);
+        var chapterBody = P("正文样本。");
+        chapterBody.ParagraphProperties!.SectionProperties = new SectionProperties(new PageNumberType { Format = NumberFormatValues.Decimal, Start = 1 });
+        var example = P("【举例】", 0);
+        example.ParagraphProperties!.SectionProperties = new SectionProperties(new Columns { ColumnCount = 2 });
+        var template = Create("sections.docx", P("摘要"), abstractBody, toc, chapter, chapterBody, example, P("第2章 技术", 0), P("第二章正文。"));
+        var source = Create("section-source.docx", P("摘要"), P("新摘要。"), P("目录"), P("第1章 绪论", 0), P("新正文。"), P("第2章 技术", 0));
+        var plan = TemplatePlanDraftBuilder.Build(source, template);
+        Assert.True(plan.Blocks.Single(block => block.Type == "section" && block.SectionTemplateIndex == 1).ContinuePageNumbering);
+        Assert.DoesNotContain(plan.Blocks, block => block.Type == "section" && block.SectionTemplateIndex == 3);
+        Assert.Equal(4, plan.Blocks.Last().SectionTemplateIndex);
+    }
+
+    [Theory]
+    [InlineData("Ⅱ", "upperRoman", 2, "II")]
+    [InlineData("3", "decimal", 3, "3")]
+    public void StaticPageFooterIsDetectedAndPromotedToPageFieldWithoutLosingLayout(string label, string format, int number, string cached)
+    {
+        var template = Create("static-roman-template.docx", P("摘要"), P("模板摘要内容。"),
+            P("第1章 绪论", 0), P("这是一段足够长的正文模板内容，用于识别正文段落格式并验证页码转换。"));
+        using (var document = WordprocessingDocument.Open(template, true))
+        {
+            var main = document.MainDocumentPart!;
+            var footer = main.AddNewPart<FooterPart>();
+            footer.Footer = new Footer(
+                new Paragraph(new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
+                    new Run(new RunProperties(new RunFonts { EastAsia = "宋体" }, new FontSize { Val = "20" }), new Text(label))),
+                new Paragraph(new ParagraphProperties()), new Paragraph(new ParagraphProperties()));
+            footer.Footer.Save();
+            var section = main.Document!.Body!.GetFirstChild<SectionProperties>()!;
+            section.AddChild(new PageNumberType { Start = 46 }, true);
+            section.AddChild(new FooterReference { Id = main.GetIdOfPart(footer) }, true);
+            main.Document.Save();
+        }
+
+        var plan = TemplatePlanDraftBuilder.Build(template, template);
+        var pageSection = Assert.Single(plan.Blocks, block => block.Type == "section");
+        Assert.Equal(format, pageSection.PageNumberFormat);
+        Assert.Equal(number, pageSection.PageNumberStart);
+        Assert.False(pageSection.ContinuePageNumbering);
+
+        var output = Path.Combine(directory, "static-roman-output.docx");
+        OpenXmlTemplateApplicator.Apply(template, template, plan, output);
+        using var result = WordprocessingDocument.Open(output, false);
+        var resultSection = result.MainDocumentPart!.Document!.Body!.GetFirstChild<SectionProperties>()!;
+        Assert.Equal(format, resultSection.GetFirstChild<PageNumberType>()!.Format!.InnerText);
+        Assert.Equal(number, resultSection.GetFirstChild<PageNumberType>()!.Start!.Value);
+        var resultFooter = (FooterPart)result.MainDocumentPart.GetPartById(resultSection.Elements<FooterReference>().Single().Id!);
+        Assert.Contains(resultFooter.Footer!.Descendants<FieldCode>(), field => field.Text.Contains("PAGE", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(cached, resultFooter.Footer.Descendants<Text>().Single(text => !string.IsNullOrWhiteSpace(text.Text)).Text);
+        Assert.Equal("20", resultFooter.Footer.Descendants<RunProperties>().First().GetFirstChild<FontSize>()?.Val?.Value);
+        Assert.Equal(3, resultFooter.Footer.Elements<Paragraph>().Count());
+    }
+
+    [Fact]
+    public void BackMatterInstructionDoesNotStealDeclarationHeadingFormat()
+    {
+        var source = Create("back-matter-source.docx", P("摘要"), P("摘要正文样本。"),
+            P("第1章 绪论", 0), P("正文内容样本。"), P("致谢"),
+            P("感谢导师和同学的帮助。"));
+        var template = Create("back-matter-template.docx", P("摘要"), P("摘要正文模板。"),
+            P("第1章 绪论", 0), P("正文内容模板，这是一段足够长的正文示例，用来识别正文样式。"),
+            P("致谢"), P("说明：在致谢中填写对导师和相关人员的感谢。"), P("大连东软信息学院"),
+            P("毕业设计（论文）原创承诺书"), P("本人承诺，文中的引用均已注明来源。"));
+
+        var plan = TemplatePlanDraftBuilder.Build(source, template);
+
+        Assert.Equal(3, plan.Roles["body"].TemplateParagraphIndex);
+        Assert.Equal(plan.Roles["body"].TemplateParagraphIndex, plan.Roles["backMatter"].TemplateParagraphIndex);
+        Assert.Equal(4, plan.Roles["backMatterHeading"].TemplateParagraphIndex);
+        Assert.Contains(plan.PendingReviews, review => review.Contains("'backMatter'"));
+    }
+
+    [Fact]
+    public void NumberingTransferPreservesCompatibilityDeclarations()
+    {
+        const string extensionNamespace = "http://schemas.microsoft.com/office/word/2016/wordml/cid";
+        var item = P("列表正文。");
+        item.ParagraphProperties!.NumberingProperties = new NumberingProperties(new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 1 });
+        var source = Create("list-source.docx", P("第1章 绪论"), item);
+        using (var doc = WordprocessingDocument.Open(source, true))
+        {
+            var part = doc.MainDocumentPart!.AddNewPart<NumberingDefinitionsPart>();
+            var instance = new NumberingInstance(new AbstractNumId { Val = 0 }) { NumberID = 1 };
+            instance.SetAttribute(new OpenXmlAttribute("w16cid", "durableId", extensionNamespace, "123"));
+            part.Numbering = new Numbering(
+                new AbstractNum(new Level(new StartNumberingValue { Val = 1 }, new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = "%1." }) { LevelIndex = 0 }) { AbstractNumberId = 0 }, instance);
+            part.Numbering.AddNamespaceDeclaration("w16cid", extensionNamespace);
+            part.Numbering.MCAttributes = new MarkupCompatibilityAttributes { Ignorable = "w16cid" };
+        }
+        var template = Create("list-template.docx", P("第1章 绪论"), P("正文样本。"));
+        var output = Path.Combine(directory, "list-output.docx");
+        var report = OpenXmlTemplateApplicator.Apply(source, template, TemplatePlanDraftBuilder.Build(source, template), output);
+        TemplateStructureAudit.Check(output, report);
+        Assert.True(report.StructurePassed, string.Join(Environment.NewLine, report.StructuralErrors));
+        using var result = WordprocessingDocument.Open(output, false);
+        var numbering = result.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!;
+        Assert.Contains("w16cid", numbering.MCAttributes!.Ignorable!.Value!);
+        Assert.Equal("123", numbering.GetFirstChild<NumberingInstance>()!.GetAttribute("durableId", extensionNamespace).Value);
+    }
+
+    [Fact]
+    public void BookmarkRepairPairsDuplicateIdsAndDropsOrphanMarkers()
+    {
+        var first = new Paragraph(new BookmarkStart { Id = "7", Name = "first" }, new Run(new Text("first")), new BookmarkEnd { Id = "7" });
+        var second = new Paragraph(new BookmarkStart { Id = "7", Name = "second" }, new Run(new Text("second")), new BookmarkEnd { Id = "7" });
+        var orphanStart = new Paragraph(new BookmarkStart { Id = "8", Name = "orphan" }, new Run(new Text("unmarked")));
+        var orphanEnd = new Paragraph(new BookmarkEnd { Id = "9" });
+        var path = Create("duplicate-bookmarks.docx", first, second, orphanStart, orphanEnd);
+
+        Assert.True(OpenXmlCompatibilityRepair.NormalizeBookmarkIds(path));
+
+        using var result = WordprocessingDocument.Open(path, false);
+        var body = result.MainDocumentPart!.Document!.Body!;
+        var starts = body.Descendants<BookmarkStart>().ToArray();
+        var ends = body.Descendants<BookmarkEnd>().ToArray();
+        Assert.Equal(2, starts.Length);
+        Assert.Equal(2, ends.Length);
+        Assert.Equal(starts.Select(start => start.Id!.Value).Order(), ends.Select(end => end.Id!.Value).Order());
+        Assert.Equal(2, starts.Select(start => start.Id!.Value).Distinct().Count());
+        Assert.Equal(new[] { "first", "second", "unmarked" }, body.Elements<Paragraph>().Select(p => p.InnerText).Where(text => text.Length > 0));
+    }
+
+    [Fact]
+    public void CoverReadsUnstyledTitleFromUniqueCenterAlignedParagraph()
+    {
+        var title = P("面向高校的校园服务系统设计与实现");
+        title.ParagraphProperties!.Justification = new Justification { Val = JustificationValues.Center };
+        var label = P("专    业：计算机科学与技术");
+        label.ParagraphProperties!.Justification = new Justification { Val = JustificationValues.Center };
+        var source = Create("unstyled-cover.docx", label, title, P("摘要"), P("摘要正文。"), P("第1章 绪论"), P("正文。"));
+        var template = Create("labeled-cover.docx", P("论文题目：样例题目"), P("摘要"), P("摘要样本。"), P("第1章 绪论"), P("正文样本。"));
+        var plan = TemplatePlanDraftBuilder.Build(source, template);
+
+        Assert.Equal(title.InnerText, plan.TemplateTextReplacements["样例题目"]);
+    }
+
+    [Theory]
+    [InlineData("TOC1", "TOC2")]
+    [InlineData("11", "12")]
+    public void ExistingTocRowsAreSkippedBeforeBodyHeadings(string chapterStyle, string sectionStyle)
+    {
+        var tocChapter = P("第1章 绪论 3");
+        tocChapter.ParagraphProperties!.ParagraphStyleId = new ParagraphStyleId { Val = chapterStyle };
+        var tocSection = P("1.1 研究背景 3");
+        tocSection.ParagraphProperties!.ParagraphStyleId = new ParagraphStyleId { Val = sectionStyle };
+        var source = Create("source-toc.docx", P("摘要"), P("摘要正文。"), P("目录"), tocChapter, tocSection,
+            P("第1章 绪论", 0), P("正文样本。"));
+        using (var document = WordprocessingDocument.Open(source, true))
+        {
+            var part = document.MainDocumentPart!.AddNewPart<StyleDefinitionsPart>();
+            part.Styles = new Styles(
+                new Style(new StyleName { Val = "toc 1" }) { Type = StyleValues.Paragraph, StyleId = chapterStyle },
+                new Style(new StyleName { Val = "toc 2" }) { Type = StyleValues.Paragraph, StyleId = sectionStyle });
+        }
+        var template = Create("toc-template.docx", P("摘要"), P("摘要正文。"), P("Abstract"), P("英文摘要。"),
+            P("目录"), P("第1章 绪论", 0), P("正文样本。"), P("1.1 研究背景", 0));
+
+        var plan = TemplatePlanDraftBuilder.Build(source, template);
+
+        Assert.Single(plan.Blocks, block => block.Type == "toc");
+        Assert.Contains(plan.SkippedSourceRanges, range => range.Start == 3);
+        Assert.Contains(plan.SkippedSourceRanges, range => range.Start == 4);
+        Assert.DoesNotContain(plan.Blocks, block => block.Type == "sourceRange" && block.Start is 3 or 4);
+        Assert.Contains(plan.Blocks, block => block.Type == "sourceRange" && block.Role == "heading1" && block.Start == 5);
+    }
+
+    [Fact]
     public void OutlineRepairRestoresSectionsAndRetainsObjectsUnderTheirThirdLevelHeading()
     {
         var template = Create("outline.docx", P("第 1 章 引言", 0), P("1.1 背景", 0), P("正文样本。"), P("1.2 方法", 0), P("1.2.1 实现", 1), P("第 2 章 技术", 0), P("2.1 概述", 0));

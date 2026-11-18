@@ -295,9 +295,17 @@ public sealed partial class MainWindow
     private void LivePreview_Changed(object sender, RoutedEventArgs e)
     {
         if (LivePreviewColumn is null) return;
-        var split = LivePreviewToggle.IsChecked == true;
-        LivePreviewColumn.Width = new GridLength(split ? 400 : 0);
-        InspectorColumn.Width = new GridLength(!split && WorkspaceGrid.ActualWidth >= 1100 && viewModel.Preferences.ShowInspector ? 280 : 0);
-        if (split) _ = RefreshQuickPreviewAsync();
+        UpdateWritingPanes();
+        if (LivePreviewToggle.IsChecked == true && LivePreviewToggle.IsEnabled) _ = RefreshQuickPreviewAsync();
+    }
+
+    private void UpdateWritingPanes()
+    {
+        var width = WorkspaceGrid.ActualWidth;
+        if (width <= 0) return;
+        LivePreviewToggle.IsEnabled = width >= 900;
+        var split = LivePreviewToggle.IsChecked == true && LivePreviewToggle.IsEnabled;
+        LivePreviewColumn.Width = new GridLength(split ? Math.Clamp(width * .28, 280, 420) : 0);
+        InspectorColumn.Width = new GridLength(!split && width >= 1160 && viewModel.Preferences.ShowInspector ? 280 : 0);
     }
 }

@@ -143,19 +143,25 @@ public sealed partial class MainWindow : Window
             await viewModel.ImportAsync(path);
     });
 
-    private void AddChapter_Click(object sender, RoutedEventArgs e) => viewModel.Add(false);
-    private void AddSection_Click(object sender, RoutedEventArgs e) => viewModel.Add(true);
-    private void MoveUp_Click(object sender, RoutedEventArgs e) => viewModel.Move(-1);
-    private void MoveDown_Click(object sender, RoutedEventArgs e) => viewModel.Move(1);
+    private void AddChapter_Click(object sender, RoutedEventArgs e) { FlushEditor(); viewModel.Add(false); LoadEditorFromViewModel(); }
+    private void AddSection_Click(object sender, RoutedEventArgs e) { FlushEditor(); viewModel.Add(true); LoadEditorFromViewModel(); }
+    private void MoveUp_Click(object sender, RoutedEventArgs e) { FlushEditor(); viewModel.Move(-1); LoadEditorFromViewModel(); }
+    private void MoveDown_Click(object sender, RoutedEventArgs e) { FlushEditor(); viewModel.Move(1); LoadEditorFromViewModel(); }
     private async void UndoStructure_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (await DialogAsync("恢复到上次大纲操作前", "将恢复新增、移动、删除或导入操作之前的正文快照，也会还原此后对正文的编辑。", "恢复") == ContentDialogResult.Primary)
+        {
             viewModel.UndoStructure();
+            LoadEditorFromViewModel();
+        }
     });
     private async void Delete_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (await DialogAsync("删除当前章节", "该章节及所属小节将从论文中移除。可以通过大纲下方的撤销按钮恢复。", "删除") == ContentDialogResult.Primary)
+        {
             viewModel.DeleteSelected();
+            LoadEditorFromViewModel();
+        }
     });
     private void Heading_LostFocus(object sender, RoutedEventArgs e) => viewModel.RefreshLabels();
     private void Cancel_Click(object sender, RoutedEventArgs e) => viewModel.Cancel();
@@ -169,7 +175,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ComposeAsync(bool render)
     {
-        var path = await SaveFileAsync(render ? "论文候选与 PDF" : "论文候选 DOCX", ".docx");
+        var path = await SaveFileAsync(render ? "导出校样 DOCX 和 PDF" : "保存未分页 DOCX", ".docx", viewModel.Title);
         if (path is null) return;
         await viewModel.ComposeAsync(path, render);
         if (render && viewModel.PdfPath is not null) await ShowPdfAsync(viewModel.PdfPath);

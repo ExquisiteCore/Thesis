@@ -54,6 +54,8 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     public bool CanUndo => CanEdit && history.Count > 0;
     public bool IsBusy { get => busy; private set { busy = value; NotifyAll(); } }
     public bool IsDirty => dirty;
+    public bool CanCancelTask => job is { IsCancellationRequested: false };
+    public string SaveState => !HasProject ? "" : IsDirty ? "等待保存" : "本地已保存";
     public string ProjectLabel => opened is null ? "尚未打开项目" : $"{Path.GetFileName(opened.Path)} · 版本 {opened.Document.Revision}{(dirty ? " · 待保存" : " · 已保存")}";
     public string Status { get => status; private set { status = value; Notify(); } }
     public string ErrorMessage { get => errorMessage; private set { errorMessage = value; Notify(); } }
@@ -185,6 +187,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
             if (!dirty) ProjectHistoryStore.ClearRecovery(opened);
             Notify(nameof(ProjectLabel));
             Notify(nameof(IsDirty));
+            Notify(nameof(SaveState));
             Status = dirty ? "仍有新修改，稍后继续保存。" : "已自动保存到本地项目。";
         }
         finally { saveGate.Release(); }
@@ -307,7 +310,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
     {
         if (opened is null) return;
         var labels = opened.Document.Content.Chapters.SelectMany((c, i) =>
-            new[] { (c.Id, Label: $"{i + 1}  {c.Title}") }.Concat(c.Sections.Select((s, j) => (s.Id, Label: $"    {i + 1}.{j + 1}  {s.Title}"))))
+            new[] { (c.Id, Label: ChapterLabel(c.Title, i + 1)) }.Concat(c.Sections.Select((s, j) => (s.Id, Label: SectionLabel(s.Title, i + 1, j + 1)))))
             .ToDictionary(pair => pair.Id, pair => pair.Label);
         foreach (var item in Outline)
             if (labels.TryGetValue(item.Id, out var label)) item.Label = label;
@@ -353,6 +356,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         Notify(nameof(BodyReadOnly));
         Notify(nameof(HeadingReadOnly));
         job = new CancellationTokenSource();
+        Notify(nameof(CanCancelTask));
         try
         {
             await SaveAsync();
@@ -376,7 +380,9 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
 
     public void Cancel()
     {
-        job?.Cancel();
+        if (!CanCancelTask) return;
+        job!.Cancel();
+        Notify(nameof(CanCancelTask));
         Status = "已请求取消；当前排版调用结束后停止，候选文件将保留在工作目录。";
     }
 
@@ -407,13 +413,13 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         {
             var chapter = content.Chapters[i];
             var protectedContent = chapter.OrderedContentIncludesSections || chapter.Blocks.Any(b => b.Type == "native");
-            Outline.Add(new(chapter.Id, $"{i + 1}  {chapter.Title}", "chapter", () => chapter.Title, t => chapter.Title = t,
+            Outline.Add(new(chapter.Id, ChapterLabel(chapter.Title, i + 1), "chapter", () => chapter.Title, t => chapter.Title = t,
                 () => chapter.Markdown ?? Read(chapter.Paragraphs, chapter.Blocks, chapter.Tables), t => chapter.Markdown = t, protectedContent,
                 () => ContentEditing.Read(chapter.Paragraphs, chapter.Blocks, chapter.Tables), blocks => { chapter.Markdown = null; chapter.Paragraphs.Clear(); chapter.Tables.Clear(); chapter.Blocks = blocks; }, () => chapter.Markdown));
             for (var j = 0; j < chapter.Sections.Count; j++)
             {
                 var section = chapter.Sections[j];
-                Outline.Add(new(section.Id, $"    {i + 1}.{j + 1}  {section.Title}", "section", () => section.Title, t => section.Title = t,
+                Outline.Add(new(section.Id, SectionLabel(section.Title, i + 1, j + 1), "section", () => section.Title, t => section.Title = t,
                     () => section.Markdown ?? Read(section.Paragraphs, section.Blocks, section.Tables), t => section.Markdown = t,
                     protectedContent || section.Blocks.Any(b => b.Type == "native"),
                     () => ContentEditing.Read(section.Paragraphs, section.Blocks, section.Tables), blocks => { section.Markdown = null; section.Paragraphs.Clear(); section.Tables.Clear(); section.Blocks = blocks; }, () => section.Markdown));
@@ -423,6 +429,12 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         Outline.Add(new("acknowledgements", "致谢", "front", () => "致谢", _ => { }, () => content.Acknowledgements ?? "", t => content.Acknowledgements = t));
         Selected = Outline.FirstOrDefault(i => i.Id == selectedId) ?? Outline.FirstOrDefault(i => i.Kind == "chapter") ?? Outline[0];
     }
+
+    private static string ChapterLabel(string title, int number) =>
+        HeadingTitleNormalizer.TryParseChapter(title, out _, out _) ? title : $"{number}  {title}";
+
+    private static string SectionLabel(string title, int chapter, int section) =>
+        HeadingTitleNormalizer.IsSection(title) ? $"    {title}" : $"    {chapter}.{section}  {title}";
 
     private static string Read(List<string> paragraphs, List<ThesisContentBlock> blocks, List<ThesisTableContent> tables) => MarkdownSupport.Body(paragraphs, blocks, tables);
     private static List<string> Lines(string text) => text.Split('\n').ToList();
@@ -436,7 +448,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
         editGeneration++;
         dirty = true;
         DocumentPath = PdfPath = null;
-        Notify(nameof(ProjectLabel)); Notify(nameof(IsDirty));
+        Notify(nameof(ProjectLabel)); Notify(nameof(IsDirty)); Notify(nameof(SaveState));
         Notify(nameof(CanUndo));
         foreach (var property in new[] { nameof(Body), nameof(Heading), nameof(Title), nameof(Author), nameof(Keywords), nameof(KeywordsEnglish), nameof(TotalCharacters) }) Notify(property);
         Edited?.Invoke(this, EventArgs.Empty);

@@ -20,8 +20,14 @@ public static class ProjectChecks
                 MarkdownSupport.Parse(m).Descendants<Markdig.Extensions.Mathematics.MathInline>().Any() || MarkdownSupport.Parse(m).Descendants<Markdig.Extensions.Mathematics.MathBlock>().Any()))
                 result.Add(new("warning", "LaTeX 公式以源码保留", "当前 Markdown 公式保留 $ / $$ 源码。需要 Word 原生公式时，请从 DOCX 导入公式片段后核对 PDF。", chapter.Id));
             if (string.IsNullOrWhiteSpace(chapter.Title)) result.Add(new("error", "章节标题为空", "请填写章节名称。", chapter.Id));
-            if (string.IsNullOrWhiteSpace(chapter.Markdown) && chapter.Paragraphs.Count == 0 && chapter.Blocks.Count == 0 && chapter.Sections.Count == 0)
-                result.Add(new("warning", "章节内容为空", chapter.Title, chapter.Id));
+            if (!HasBody(chapter.Markdown, chapter.Paragraphs, chapter.Blocks, chapter.Tables) &&
+                !chapter.Sections.Any(section => HasBody(section.Markdown, section.Paragraphs, section.Blocks, section.Tables)))
+                result.Add(new("warning", "章节只有标题，尚未填写正文", chapter.Title, chapter.Id));
+            if (HasTitlePlaceholder(chapter.Title))
+                result.Add(new("warning", "章节标题有待替换的文字", chapter.Title, chapter.Id));
+            foreach (var section in chapter.Sections.Where(section => HasTitlePlaceholder(section.Title)
+                || section.Blocks.Any(block => block.ParagraphStyle == "heading3" && HasTitlePlaceholder(ContentEditing.Text(block)))))
+                result.Add(new("warning", "小节标题有待替换的文字", section.Title, section.Id));
         }
         try
         {
@@ -51,17 +57,38 @@ public static class ProjectChecks
                         $"{details}。这些位置目前会暂用{fallback}。点击此项可跳转模板工作台，从样本段落重新指定格式。",
                         "template:" + firstRole.Role));
                 }
-                var directory = Path.Combine(Path.GetTempPath(), "ThesisCheck", Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
-                try
+                if (design.Requirements.Count == 0)
                 {
-                    var doc = Path.Combine(directory, "check.docx"); ThesisDocumentGenerator.Generate(content, new(), doc);
-                    foreach (var requirement in ContentRequirementAudit.Check(doc, design.Requirements).Where(r => !r.Passed))
-                        result.Add(new("error", "学校要求未满足：" + requirement.Id, requirement.Message + "\n依据：" + requirement.Evidence));
+                    result.Add(new("info", "学校内容要求尚未配置", "字数、关键词和文献数量尚未核验。", "template:requirements"));
                 }
-                finally { Directory.Delete(directory, true); }
+                else
+                {
+                    var directory = Path.Combine(Path.GetTempPath(), "ThesisCheck", Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
+                    try
+                    {
+                        var doc = Path.Combine(directory, "check.docx"); ThesisDocumentGenerator.Generate(content, new(), doc);
+                        foreach (var requirement in ContentRequirementAudit.Check(doc, design.Requirements).Where(r => !r.Passed))
+                            result.Add(new("error", "学校要求未满足：" + requirement.Id, requirement.Message + "\n依据：" + requirement.Evidence));
+                    }
+                    finally { Directory.Delete(directory, true); }
+                }
             }
             catch (Exception ex) when (ex is IOException or ArgumentException or System.Text.Json.JsonException) { result.Add(new("error", "模板或正文检查失败", ex.Message)); }
         }
         return result;
     }
+
+    private static bool HasBody(string? markdown, List<string> paragraphs, List<ThesisContentBlock> blocks, List<ThesisTableContent> tables) =>
+        !string.IsNullOrWhiteSpace(markdown) || paragraphs.Any(text => !string.IsNullOrWhiteSpace(text)) || tables.Count > 0
+        || blocks.Any(block => block.Type switch
+        {
+            "paragraph" => block.ParagraphStyle is not ("heading1" or "heading2" or "heading3")
+                && !string.IsNullOrWhiteSpace(ContentEditing.Text(block)),
+            "native" => block.Role is not ("heading1" or "heading2" or "heading3"),
+            _ => true
+        });
+
+    private static bool HasTitlePlaceholder(string title) => title.Contains("**", StringComparison.Ordinal)
+        || title.Contains("【举例】", StringComparison.Ordinal)
+        || title.Contains("{{", StringComparison.Ordinal);
 }
