@@ -333,7 +333,7 @@ public sealed partial class WorkspaceViewModel : INotifyPropertyChanged
             await Task.Run(() =>
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                using var lease = Thesis.Core.OutputPathLease.Acquire([path]);
+                using var lease = Thesis.Core.OutputPathLease.Acquire(new[] { path });
                 using var transaction = new Thesis.Core.FileOutputTransaction();
                 File.WriteAllText(transaction.Stage(path), ThesisJson.Serialize(settings));
                 transaction.Commit();

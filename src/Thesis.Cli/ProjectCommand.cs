@@ -9,7 +9,7 @@ internal static class ProjectCommand
     {
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
             return new() { Status = "success", Diagnostics = [new() { Severity = "info", Code = "usage", Message =
-                "project create --out paper.thesis.json [--content content.json|source.docx|draft.md] [--template template.docx]; project inspect --project paper.thesis.json; project update --project paper.thesis.json --expected-sha256 HASH --content content.json|draft.md; project export-markdown --project paper.thesis.json --out paper.md; project pack --project paper.thesis.json --out paper.zip; project compose --project paper.thesis.json --out candidate.docx [--render true|false] [--require-ready true|false]. Composition requires ready by default; use --require-ready false for review candidates." }] };
+                "project create --out paper.thesis.json [--content content.json|source.docx|draft.md] [--template template.docx]; project inspect --project paper.thesis.json; project update --project paper.thesis.json --expected-sha256 HASH --content content.json|draft.md; project repair-outline --project paper.thesis.json --out repaired.thesis.json; project export-markdown --project paper.thesis.json --out paper.md; project pack --project paper.thesis.json --out paper.zip; project compose --project paper.thesis.json --out candidate.docx [--render true|false] [--require-ready true|false]. Composition requires ready by default; use --require-ready false for review candidates." }] };
         var options = new CommandOptions(args[1..], "--project", "--out", "--content", "--template", "--expected-sha256", "--render", "--require-ready");
         if (args[0] == "create")
         {
@@ -26,6 +26,20 @@ internal static class ProjectCommand
         switch (args[0])
         {
             case "inspect": return Describe(opened);
+            case "repair-outline":
+                var repairedPath = options.Path("--out");
+                if (File.Exists(repairedPath)) throw new IOException("大纲修复副本应保存到一个新文件。");
+                var repaired = ThesisJson.Deserialize<ThesisProject>(ThesisJson.Serialize(opened.Document));
+                repaired.TemplatePath = ThesisProjectStore.Resolve(opened, repaired.TemplatePath)
+                    ?? throw new InvalidDataException("请先选择论文模板。");
+                repaired.Content = TemplateOutlineBuilder.Rebuild(repaired.Content, repaired.TemplatePath);
+                foreach (var destination in new[] { repairedPath }) Thesis.Core.ContentPaths.ProtectAssets(repaired.Content, destination);
+                repaired.TemplateDesignPath = ThesisProjectStore.Resolve(opened, repaired.TemplateDesignPath);
+                repaired.RulesPath = ThesisProjectStore.Resolve(opened, repaired.RulesPath);
+                repaired.RenderConfigPath = ThesisProjectStore.Resolve(opened, repaired.RenderConfigPath);
+                repaired.PlanPath = null;
+                repaired.Id = Guid.NewGuid().ToString("N"); repaired.Revision = 0;
+                return Describe(ThesisProjectStore.Create(repairedPath, repaired));
             case "export-markdown":
                 var markdown = options.Path("--out");
                 if (Thesis.Core.FileOutputTransaction.PathComparer.Equals(markdown, opened.Path)) throw new ArgumentException("Markdown output must differ from the project path.");

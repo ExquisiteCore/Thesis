@@ -50,6 +50,7 @@ public sealed class TemplateApplicationBlock
 public sealed class TemplateRoleFormat
 {
     public int? TemplateParagraphIndex { get; set; }
+    public bool ApplyTemplateInstructions { get; set; }
     public bool PreserveEmphasis { get; set; } = true;
     public string EastAsiaFont { get; set; } = "宋体";
     public string LatinFont { get; set; } = "Times New Roman";

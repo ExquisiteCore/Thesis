@@ -501,7 +501,9 @@ internal sealed class ContentExtractionAnalysis
     private static bool IsChapterHeading(DocumentParagraph paragraph)
     {
         var text = paragraph.Text.Trim();
-        return paragraph.OutlineLevel == 0
+        if (HeadingTitleNormalizer.IsSection(text)) return false;
+        return HeadingTitleNormalizer.TryParseChapter(text, out _, out _)
+            || paragraph.OutlineLevel == 0
             || ThesisTextHeuristics.IsDirectHeading1(paragraph)
             || ChapterHeadingPattern.IsMatch(text);
     }
@@ -509,7 +511,8 @@ internal sealed class ContentExtractionAnalysis
     private static bool IsSectionHeading(DocumentParagraph paragraph)
     {
         var text = paragraph.Text.Trim();
-        return paragraph.OutlineLevel is 1 or 2
+        return HeadingTitleNormalizer.IsSection(text)
+            || paragraph.OutlineLevel is 1 or 2
             || ThesisTextHeuristics.IsDirectHeading2(paragraph)
             || ThesisTextHeuristics.IsDirectHeading3(paragraph)
             || SectionHeadingPattern.IsMatch(text);

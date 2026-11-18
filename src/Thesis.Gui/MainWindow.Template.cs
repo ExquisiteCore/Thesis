@@ -9,6 +9,8 @@ namespace Thesis.Gui;
 
 public sealed partial class MainWindow
 {
+    private async void RebuildTemplateOutline_Click(object sender, RoutedEventArgs e)
+        => await RunAsync(() => viewModel.RebuildTemplateOutlineAsync());
     private TemplateDesign? editingDesign;
     private TemplateDesignRole? editingRole;
     private bool loadingRole;

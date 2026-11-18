@@ -76,12 +76,14 @@ public static class OpenXmlDocumentInspector
         return body
             .Descendants<Paragraph>()
             .Where(paragraph => !paragraph.Ancestors<Table>().Any())
+            .Where(paragraph => !paragraph.Ancestors<TextBoxContent>().Any())
             .Where(paragraph => !IsFieldOnlyParagraph(paragraph))
             .Select((paragraph, index) => new DocumentParagraph
             {
                 Index = index,
                 BodyElementIndex = GetBodyElementIndex(paragraph),
-                Text = CleanParagraphText(paragraph.InnerText),
+                Text = CleanParagraphText(string.Concat(paragraph.Descendants<OpenXmlLeafTextElement>()
+                    .Where(text => !text.Ancestors<TextBoxContent>().Any()).Select(text => text.Text))),
                 StyleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value,
                 OutlineLevel = ReadParagraphOutlineLevel(paragraph, styleOutlineLevels),
                 Format = ReadParagraphFormat(paragraph),
@@ -98,6 +100,7 @@ public static class OpenXmlDocumentInspector
         var indentation = properties?.Indentation;
         var runFormat = paragraph
             .Descendants<Run>()
+            .Where(run => run.Ancestors<Paragraph>().FirstOrDefault() == paragraph)
             .Select(ReadRunFormat)
             .FirstOrDefault(HasAnyRunFormat);
 
@@ -142,6 +145,7 @@ public static class OpenXmlDocumentInspector
     {
         return paragraph
             .Descendants<Run>()
+            .Where(run => run.Ancestors<Paragraph>().FirstOrDefault() == paragraph)
             .Select((run, index) =>
             {
                 var format = ReadRunFormat(run);
@@ -149,7 +153,8 @@ public static class OpenXmlDocumentInspector
                 return new DocumentRun
                 {
                     Index = index,
-                    Text = CleanParagraphText(run.InnerText),
+                    Text = CleanParagraphText(string.Concat(run.Descendants<OpenXmlLeafTextElement>()
+                        .Where(text => !text.Ancestors<TextBoxContent>().Any()).Select(text => text.Text))),
                     Bold = format.Bold == true,
                     Italic = format.Italic == true,
                     FontSizeHalfPoints = format.FontSizeHalfPoints,

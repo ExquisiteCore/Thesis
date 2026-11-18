@@ -237,6 +237,15 @@ public sealed class WorkbenchFeatureTests : IDisposable
         var path = FilePath(Guid.NewGuid() + ".pdf"); File.WriteAllBytes(path, writer.Build());
         return PdfLayoutAudit.Analyze(path, manifest);
     }
+
+    [Fact]
+    public void ManagedPdfAuditAcceptsWpsNumberInDashPageFormat()
+    {
+        var result = Audit([[(72, 90, "Chapter one"), (72, 130, "Authored body"), (285, 800, "- 1 -")]],
+            new PdfLayoutAudit.Manifest { Headings = ["Chapter one"], PageFormats = new() { ["Chapter one"] = "numberInDash" } });
+        Assert.Empty(result.Errors);
+        Assert.Equal("1", result.TocPages["Chapter one"]);
+    }
     [Fact]
     public void ManagedPdfAuditUsesRenderedFooterAndIgnoresBottomTableNumbers()
     {

@@ -37,7 +37,9 @@ public static class TemplateDesigner
             var indentation = paragraph?.GetFirstChild<Indentation>();
             design.Roles.Add(new()
             {
-                Role = role, Name = RoleName(role), SampleIndex = format.TemplateParagraphIndex, SampleText = sample?.Text ?? "",
+                Role = role, Name = RoleName(role), SampleIndex = format.TemplateParagraphIndex,
+                SampleText = format.TemplateParagraphIndex is int index && main.Document!.Body!.ChildElements[index] is Paragraph sampleParagraph
+                    ? TemplateSampleText.FlowText(sampleParagraph) : sample?.Text ?? "",
                 Confidence = plan.PendingReviews.Any(r => r.Contains("'" + role + "'", StringComparison.Ordinal)) ? 0.35 : 0.85,
                 Font = run?.GetFirstChild<RunFonts>()?.EastAsia?.Value ?? "宋体",
                 LatinFont = run?.GetFirstChild<RunFonts>()?.Ascii?.Value ?? "Times New Roman",
@@ -70,7 +72,11 @@ public static class TemplateDesigner
         foreach (var role in design.Roles)
         {
             if (!plan.Roles.TryGetValue(role.Role, out var format)) continue;
-            if (role.SampleIndex.HasValue) format.TemplateParagraphIndex = role.SampleIndex;
+            if (role.Confirmed && role.SampleIndex.HasValue)
+            {
+                format.TemplateParagraphIndex = role.SampleIndex;
+                format.ApplyTemplateInstructions = false;
+            }
             if (role.OverrideFormat)
             {
                 format.TemplateParagraphIndex = null;

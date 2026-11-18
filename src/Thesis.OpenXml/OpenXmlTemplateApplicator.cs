@@ -87,6 +87,7 @@ public static class OpenXmlTemplateApplicator
                                     throw new ArgumentException($"Source block {i} was included more than once.");
                                 var clone = candidates[i].CloneNode(true);
                                 RemoveReviewMarkup(clone);
+                                if (!isSource) TemplateSampleText.RemoveInstructionShapes(clone);
                                 foreach (var paragraph in Paragraphs(clone))
                                     paragraph.ParagraphProperties?.RemoveAllChildren<SectionProperties>();
                                 if (block.ParagraphTexts.TryGetValue(i, out var replacement))

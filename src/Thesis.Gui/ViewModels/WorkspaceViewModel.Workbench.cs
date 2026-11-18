@@ -61,17 +61,23 @@ public sealed partial class WorkspaceViewModel
         if (content.Chapters.Count != 1 || content.Chapters[0] is not { Title: "绪论", Markdown: null, Sections.Count: 0, Paragraphs.Count: 0, Blocks.Count: 0, Tables.Count: 0 })
             return false;
 
-        var headings = TemplatePlanDraftBuilder.ExtractOutline(design.SourcePath);
-        var chapters = new List<ThesisChapterContent>();
-        foreach (var (title, level) in headings)
-        {
-            if (level == 1) chapters.Add(new() { Title = title });
-            else if (level == 2 && chapters.Count > 0) chapters[^1].Sections.Add(new() { Title = title });
-        }
-        if (chapters.Count == 0) return false;
-        content.Chapters = chapters;
-        Status = $"已从模板识别出 {chapters.Count} 个正文一级标题；大纲可继续编辑。";
+        var empty = ThesisJson.Deserialize<ThesisContent>(ThesisJson.Serialize(content));
+        empty.Chapters.Clear();
+        opened.Document.Content = TemplateOutlineBuilder.Rebuild(empty, design.SourcePath);
+        Status = $"已从模板识别出 {opened.Document.Content.Chapters.Count} 个正文一级标题；大纲可继续编辑。";
         return true;
+    }
+
+    public async Task RebuildTemplateOutlineAsync()
+    {
+        if (opened is null || IsBusy || Design is null) return;
+        var rebuilt = await Task.Run(() => TemplateOutlineBuilder.Rebuild(opened.Document.Content, Design.SourcePath));
+        ProjectHistoryStore.Checkpoint(opened);
+        Remember();
+        opened.Document.Content = rebuilt;
+        opened.Document.PlanPath = null;
+        RebuildOutline(); Changed(); NotifyAll();
+        Status = $"已按模板整理为 {rebuilt.Chapters.Count} 章；正文与插入对象已保留，可撤销本次整理。";
     }
     public void SetCoverFields(Dictionary<string, string> fields)
     {

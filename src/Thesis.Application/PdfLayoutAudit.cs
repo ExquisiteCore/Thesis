@@ -112,7 +112,7 @@ public static class PdfLayoutAudit
     }
     private static List<string> Labels(List<string> values, string format)
     {
-        var pattern = format == "decimal" ? "^[0-9]+$" : format == "upperRoman" ? "^[IVXLCDM]+$" : "^[ivxlcdm]+$";
+        var pattern = format is "decimal" or "numberInDash" ? "^[0-9]+$" : format == "upperRoman" ? "^[IVXLCDM]+$" : "^[ivxlcdm]+$";
         return values.Where(v => Regex.IsMatch(v, pattern)).ToList();
     }
     private static List<Line> Lines(Page page)

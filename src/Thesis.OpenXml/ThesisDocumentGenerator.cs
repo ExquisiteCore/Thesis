@@ -1216,6 +1216,8 @@ public static class ThesisDocumentGenerator
     private static string FormatChapterTitle(string title, int chapterNumber)
     {
         var trimmed = title.Trim();
+        if (Thesis.Core.HeadingTitleNormalizer.TryParseChapter(trimmed, out var parsedNumber, out var parsedTitle))
+            return $"第{parsedNumber}章 {parsedTitle}";
         var spacedMatch = Regex.Match(
             trimmed,
             @"^第[一二三四五六七八九十百千万零〇两0-9Xx]+章\s+\S.*$",

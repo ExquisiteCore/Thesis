@@ -189,7 +189,7 @@
       <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
       <Grid RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <TextBlock Text="模板工作台" Style="{ThemeResource SubtitleTextBlockStyle}"/>
-        <StackPanel Grid.Row="1" Spacing="8"><Button Content="导入学校模板 / 合格论文" Click="ImportTemplate_Click"/><Button Content="使用通用模板" Click="DefaultTemplate_Click"/><Button Content="从模板库选择" Click="Library_Click"/><Button Content="查看原模板" Click="TemplatePreview_Click"/></StackPanel>
+        <StackPanel Grid.Row="1" Spacing="8"><Button Content="导入学校模板 / 合格论文" Click="ImportTemplate_Click"/><Button Content="使用通用模板" Click="DefaultTemplate_Click"/><Button Content="从模板库选择" Click="Library_Click"/><Button Content="查看原模板" Click="TemplatePreview_Click"/><Button Content="按模板整理大纲" Click="RebuildTemplateOutline_Click" IsEnabled="{Binding CanEdit}" ToolTipService.ToolTip="修正模板导入的章节层级，按标题匹配保留正文；支持撤销。"/></StackPanel>
         <ListView x:Name="RoleList" Grid.Row="2" DisplayMemberPath="Name" SelectionChanged="Role_SelectionChanged"/>
       </Grid>
       <Grid Grid.Column="1" RowSpacing="12"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

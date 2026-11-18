@@ -13,8 +13,9 @@ public static class TemplatePlanDraftBuilder
     {
         using var template = WordprocessingDocument.Open(templatePath, false);
         return Describe(template.MainDocumentPart!)
-            .Where(item => item.Zone == "body" && !item.IsToc && (item.Role is "heading1" or "heading2"))
+            .Where(item => item.Zone == "body" && !item.IsToc && (item.Role is "heading1" or "heading2" or "heading3"))
             .Where(item => !string.IsNullOrWhiteSpace(item.Text))
+            .Where(item => !TemplateSampleText.IsInstruction(item.Text))
             .Select(item => (item.Text.Trim(), item.Role[^1] - '0'))
             .ToArray();
     }
@@ -26,8 +27,11 @@ public static class TemplatePlanDraftBuilder
         var from = Describe(source.MainDocumentPart!);
         var to = Describe(template.MainDocumentPart!);
         var plan = new TemplateApplicationPlan { RequireSourceCoverage = true };
+        var chapterPageBreaks = template.MainDocumentPart!.Document!.Descendants<TextBoxContent>()
+            .Any(box => Regex.IsMatch(box.InnerText, @"每章标题.{0,12}另起一页"));
         var samples = to.Where(d => d.Role != "cover" && (d.Text.Length > 0 || d.Role == "image") && d.IsParagraph && !d.IsToc)
-            .GroupBy(d => d.Role).ToDictionary(g => g.Key, g => g.GroupBy(p => p.FormatKey).OrderByDescending(s => s.Count()).First().OrderByDescending(p => p.Text.Length).First());
+            .Where(d => !TemplateSampleText.IsInstruction(d.Text))
+            .GroupBy(d => d.Role).ToDictionary(g => g.Key, SelectSample);
         if (!samples.TryGetValue("body", out var body)) throw new InvalidDataException("Template needs a recognizable body paragraph; inspect its structure before drafting a plan.");
         foreach (var role in from.Select(d => d.Role).Concat(["body", "table", "image", "toc1", "toc2", "toc3"]).Distinct())
         {
@@ -35,15 +39,23 @@ public static class TemplatePlanDraftBuilder
             int? level = role is "heading1" or "heading2" or "heading3" ? role[^1] - '1'
                 : role is "referencesHeading" or "backMatterHeading" or "conclusionHeading" ? 0
                 : role is "abstractHeading" or "abstractEnglishHeading" && to.Where(d => d.IsToc).Any(d => Regex.Replace(d.Text, @"\s+", "").Contains(Regex.Replace(sample.Text, @"\s+", ""), StringComparison.OrdinalIgnoreCase)) ? 0 : null;
-            plan.Roles[role] = new() { TemplateParagraphIndex = sample.Index, OutlineLevel = level, PreserveEmphasis = level is null };
+            plan.Roles[role] = new() { TemplateParagraphIndex = sample.Index, ApplyTemplateInstructions = true,
+                OutlineLevel = level, PreserveEmphasis = level is null, PageBreakBefore = role == "heading1" && chapterPageBreaks };
             if (!samples.ContainsKey(role) && role is not ("cover" or "table" or "image"))
                 plan.PendingReviews.Add($"Confirm template format for role '{role}': body sample {body.Index} is a fallback.");
         }
         var sourceStart = from.FirstOrDefault(d => d.Role is "abstractHeading" or "abstractEnglishHeading" or "tocHeading" or "heading1")?.Index ?? 0;
         var templateStart = to.FirstOrDefault(d => d.Role is "abstractHeading" or "abstractEnglishHeading" or "tocHeading" or "heading1")?.Index ?? 0;
+        string? coverTitle = null;
         if (sourceStart > 0 && templateStart > 0)
         {
             AddFrontMatter(plan, to, templateStart);
+            var sourceTitle = source.MainDocumentPart!.Document!.Body!.Elements<Paragraph>()
+                .FirstOrDefault(p => p.ParagraphProperties?.ParagraphStyleId?.Val?.Value == "Title");
+            coverTitle = to.Take(templateStart).Select(item => Regex.Match(item.Text, @"^论文题目[：:]\s*(?<title>\S.*)$"))
+                .FirstOrDefault(match => match.Success)?.Groups["title"].Value;
+            if (sourceTitle is not null && !string.IsNullOrWhiteSpace(coverTitle))
+                plan.TemplateTextReplacements[coverTitle] = TemplateSampleText.FlowText(sourceTitle);
             plan.SkippedSourceRanges.Add(new() { Start = 0, End = sourceStart, Reason = "Source cover replaced by template front matter; review identity fields." });
             plan.PendingReviews.Add("Replace the template cover's title, author, student ID, department, supervisor and dates; confirm declaration text.");
         }
@@ -83,9 +95,12 @@ public static class TemplatePlanDraftBuilder
             }
             currentSection = section;
             var sample = descriptor.Role == "heading1" ? chapterSample : samples.GetValueOrDefault(descriptor.Role);
-            var startNewPage = descriptor.Role is "abstractHeading" or "abstractEnglishHeading" or "englishTitle" && descriptor.Zone != previousZone
+            var sharesFrontMatterPage = descriptor.Role == "abstractHeading" && descriptor.Index == sourceStart && coverTitle is not null
+                && to.Take(templateStart).Any(item => item.Section == section
+                    && Regex.Replace(item.Text, @"\s+", "") == Regex.Replace(coverTitle, @"\s+", ""));
+            var startNewPage = descriptor.Role is "abstractHeading" or "abstractEnglishHeading" or "englishTitle" && descriptor.Zone != previousZone && !sharesFrontMatterPage
                 || descriptor.Role == "tocHeading"
-                || descriptor.Role == "heading1" && chapterSample?.PageBoundary == true
+                || descriptor.Role == "heading1" && (chapterSample?.PageBoundary == true || chapterPageBreaks)
                 || descriptor.Zone != previousZone && sample?.PageBoundary == true;
             plan.Blocks.Add(new() { Type = "sourceRange", Start = descriptor.Index, End = descriptor.Index + 1, Role = descriptor.Role, PageBreakBefore = startNewPage });
             if (descriptor.Text.Length > 0) previousZone = descriptor.Zone;
@@ -97,16 +112,34 @@ public static class TemplatePlanDraftBuilder
 
     private static void AddFrontMatter(TemplateApplicationPlan plan, List<Descriptor> template, int end)
     {
-        var start = 0;
-        while (start < end)
+        int? previousSection = null;
+        foreach (var group in template.Take(end).GroupBy(item => item.Section))
         {
-            var section = template[start].Section;
-            var next = start + 1;
-            while (next < end && template[next].Section == section) next++;
-            plan.Blocks.Add(new() { Type = "templateRange", Start = start, End = next });
-            if (next < end) plan.Blocks.Add(new() { Type = "section", SectionTemplateIndex = section });
-            start = next;
+            var retained = group.Where(item => !TemplateSampleText.IsInstruction(item.Text)).Select(item => item.Index).ToArray();
+            if (retained.Length == 0) continue;
+            if (previousSection is int section) plan.Blocks.Add(new() { Type = "section", SectionTemplateIndex = section });
+            for (var i = 0; i < retained.Length;)
+            {
+                var start = retained[i++];
+                var next = start + 1;
+                while (i < retained.Length && retained[i] == next) { i++; next++; }
+                plan.Blocks.Add(new() { Type = "templateRange", Start = start, End = next });
+            }
+            previousSection = group.Key;
         }
+    }
+
+    private static Descriptor SelectSample(IGrouping<string, Descriptor> candidates)
+    {
+        // Repeated code snippets and short example labels are not representative thesis prose.
+        if (candidates.Key == "body")
+        {
+            var prose = candidates.FirstOrDefault(item => item.Text.Length >= 40 && Regex.IsMatch(item.Text, "[。！？]")
+                && !Regex.IsMatch(item.Text, @"[{};]|^(SELECT|INSERT|CREATE|function|public)\b", RegexOptions.IgnoreCase));
+            if (prose is not null) return prose;
+        }
+        return candidates.GroupBy(item => item.FormatKey).OrderByDescending(group => group.Count()).First()
+            .OrderByDescending(item => item.Text.Length).First();
     }
 
     public static object Analyze(string templatePath)
@@ -137,34 +170,37 @@ public static class TemplatePlanDraftBuilder
         for (var i = 0; i < blocks.Count; i++)
         {
             var block = blocks[i];
-            var text = string.Concat(block.Descendants<Text>().Select(t => t.Text)).Trim();
+            var text = TemplateSampleText.FlowText(block);
             var compact = Regex.Replace(text, @"\s+", "");
-            var toc = block.Descendants<FieldCode>().Any(f => Regex.IsMatch(f.Text, @"\bTOC\b", RegexOptions.IgnoreCase))
+            var toc = block.Descendants<FieldCode>().Any(f => Regex.IsMatch(f.Text, @"^\s*TOC\b", RegexOptions.IgnoreCase))
+                || block.Descendants<SimpleField>().Any(f => Regex.IsMatch(f.Instruction?.Value ?? "", @"^\s*TOC\b", RegexOptions.IgnoreCase))
                 || block is SdtBlock sdt && sdt.SdtProperties?.Descendants<DocPartGallery>().Any(g => g.Val?.Value == "Table of Contents") == true;
             var role = zone;
             var p = block as Paragraph;
             var level = p is null ? null : NumberedOutline(main, p) ?? Outline(main, p);
             pageBoundary |= sections[i] != previousSection || p?.ParagraphProperties?.PageBreakBefore?.Val?.Value == true
                 || p?.ParagraphProperties?.PageBreakBefore is { Val: null };
-            if (Regex.IsMatch(compact, @"^(摘要|Abstract)$", RegexOptions.IgnoreCase)) { role = compact == "摘要" ? "abstractHeading" : "abstractEnglishHeading"; zone = compact == "摘要" ? "abstract" : "abstractEnglish"; }
+            if (toc) { role = "toc"; zone = "toc"; }
+            else if (Regex.IsMatch(compact, @"^(摘要|Abstract)$", RegexOptions.IgnoreCase)) { role = compact == "摘要" ? "abstractHeading" : "abstractEnglishHeading"; zone = compact == "摘要" ? "abstract" : "abstractEnglish"; }
             else if (Regex.IsMatch(compact, @"^(目录|Contents|TableofContents)$", RegexOptions.IgnoreCase)) { role = "tocHeading"; zone = "toc"; }
             else if (Regex.IsMatch(text, @"^Title(?:\s|[:：]|(?=[A-Z]))")) { role = "englishTitle"; zone = "abstractEnglish"; }
             else if (Regex.IsMatch(text, @"^(关键词|关键字|key\s*words?)\s*[:：]", RegexOptions.IgnoreCase)) role = "keywords";
             else if (Regex.IsMatch(compact, @"^(参考文献|References)$", RegexOptions.IgnoreCase)) { role = "referencesHeading"; zone = "references"; }
             else if (Regex.IsMatch(compact, @"^(致谢|Acknowledg(e)?ments?|附录.*|Appendix.*)$", RegexOptions.IgnoreCase)) { role = "backMatterHeading"; zone = "backMatter"; }
+            else if (zone != "cover" && Regex.IsMatch(compact, @"(原创承诺书|原创性声明|诚信声明|授权书)$")) { role = "backMatterHeading"; zone = "backMatter"; }
             else if (Regex.IsMatch(compact, @"^(结论|结论与展望|总结|结语|结束语)$") && level is not (1 or 2)) { role = "conclusionHeading"; zone = "conclusion"; }
-            else if (zone != "cover" && level is >= 0 and <= 2 && !toc && text.Length is > 0 and < 100 && !Regex.IsMatch(text, "[，。；]")) { role = "heading" + (level + 1); zone = "body"; }
             else if (text.Length < 80 && !Regex.IsMatch(text, "[，。；]") && Regex.IsMatch(compact, @"^(第[一二三四五六七八九十百\d]+[章节]|Chapter\d+)", RegexOptions.IgnoreCase)) { role = "heading1"; zone = "body"; }
             else if (text.Length < 80 && !Regex.IsMatch(text, "[，。；]") && Regex.IsMatch(text, @"^\d{1,2}\s+\S")) { role = "heading1"; zone = "body"; }
             else if (Regex.IsMatch(text, @"^\d+\.\d+\.\d+\s*\S")) { role = "heading3"; zone = "body"; }
             else if (Regex.IsMatch(text, @"^\d+\.\d+\s*\S")) { role = "heading2"; zone = "body"; }
+            else if (zone != "cover" && level is >= 0 and <= 2 && !toc && text.Length is > 0 and < 100 && !Regex.IsMatch(text, "[，。；]")) { role = "heading" + (level + 1); zone = "body"; }
             else if (Regex.IsMatch(text, @"^(图|表|Figure|Table)\s*\d+[.\-－—．]\d+", RegexOptions.IgnoreCase)) role = "caption";
             else if (block is Table) role = "table";
             else if (block.Descendants<Drawing>().Any() && string.IsNullOrWhiteSpace(text)) role = "image";
             var properties = p?.ParagraphProperties?.CloneNode(true);
             if (properties is not null)
                 foreach (var value in properties.ChildElements.Where(e => e is NumberingProperties or SectionProperties).ToArray()) value.Remove();
-            var run = p?.Descendants<Run>().OrderByDescending(r => r.InnerText.Length).FirstOrDefault();
+            var run = p is null ? null : TemplateSampleText.DominantRun(p);
             result.Add(new(i, role, zone, text, sections[i], p is not null, block is SectionProperties, toc, level, pageBoundary, (properties?.OuterXml ?? "") + (run?.RunProperties?.OuterXml ?? "")));
             if (text.Length > 0) pageBoundary = false;
             pageBoundary |= block.Descendants<Break>().Any(b => b.Type?.Value == BreakValues.Page);

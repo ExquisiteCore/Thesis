@@ -37,7 +37,7 @@ internal static class TemplateRoleStyleBuilder
         }
         Merge(pPr, sample.ParagraphProperties);
         Merge(rPr, sample.ParagraphProperties?.ParagraphMarkRunProperties);
-        var dominantRun = sample.Descendants<Run>().Where(r => r.Descendants<Text>().Any()).OrderByDescending(r => r.InnerText.Length).FirstOrDefault();
+        var dominantRun = TemplateSampleText.DominantRun(sample);
         Merge(rPr, dominantRun?.RunProperties);
         foreach (var property in pPr.ChildElements.Where(e => e.LocalName is "pStyle" or "sectPr" or "numPr" or "rPr").ToArray()) property.Remove();
         rPr.RemoveAllChildren<RunStyle>();
@@ -54,6 +54,7 @@ internal static class TemplateRoleStyleBuilder
             pPr.RemoveAllChildren<PageBreakBefore>();
             pPr.AddChild(new PageBreakBefore(), true);
         }
+        if (role.ApplyTemplateInstructions) TemplateInstructionFormat.Apply(main, id, pPr, rPr);
         return new Style(new StyleName { Val = id }, new NextParagraphStyle { Val = "Thesis_body" }, new PrimaryStyle(), pPr, rPr)
         { Type = StyleValues.Paragraph, StyleId = id };
     }
